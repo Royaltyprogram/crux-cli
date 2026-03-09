@@ -345,19 +345,20 @@ type analyticsDBRecord struct {
 }
 
 func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
-	records := make([]analyticsDBRecord, 0)
+	recordMap := make(map[string]analyticsDBRecord)
 
 	appendRecord := func(recordType, scopeID, recordID string, payload any) error {
 		data, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
-		records = append(records, analyticsDBRecord{
+		key := strings.Join([]string{recordType, scopeID, recordID}, "\x00")
+		recordMap[key] = analyticsDBRecord{
 			recordType: recordType,
 			scopeID:    scopeID,
 			recordID:   recordID,
 			payload:    string(data),
-		})
+		}
 		return nil
 	}
 
@@ -441,6 +442,16 @@ func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 		}
 	}
 
+	keys := make([]string, 0, len(recordMap))
+	for key := range recordMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	records := make([]analyticsDBRecord, 0, len(keys))
+	for _, key := range keys {
+		records = append(records, recordMap[key])
+	}
 	return records, nil
 }
 
@@ -702,6 +713,13 @@ func sortedKeys[T any](items map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func (s *AnalyticsStore) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.PingContext(ctx)
 }
 
 func ensureMap[T any](in map[string]T) map[string]T {

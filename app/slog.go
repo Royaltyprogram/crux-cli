@@ -13,9 +13,15 @@ func NewDefaultSlog(conf *configs.Config) *slog.Logger {
 
 	if conf.IsDebugMode() {
 		conf.Log.Level = slog.LevelDebug
+	}
+	if conf.IsDebugMode() || conf.HTTP.LogToStdout {
+		level := slog.LevelInfo
+		if conf.IsDebugMode() {
+			level = slog.LevelDebug
+		}
 		extraWriters = append(extraWriters, xslog.ExtraWriter{
 			Writer: os.Stdout,
-			Level:  slog.LevelDebug,
+			Level:  level,
 		})
 	}
 

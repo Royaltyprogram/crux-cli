@@ -17,6 +17,8 @@ func NewHealthRoute(opt Options) *HealthRoute {
 
 func (u *HealthRoute) RegisterRoute(router *echo.Group) {
 	router.GET("/health", u.health)
+	router.GET("/healthz", u.healthz)
+	router.GET("/readyz", u.readyz)
 }
 
 func (u *HealthRoute) health(c *echo.Context) error {
@@ -26,4 +28,12 @@ func (u *HealthRoute) health(c *echo.Context) error {
 	}
 
 	return common.WrapResp(c)(u.HealthService.Health(c.Request().Context(), &req))
+}
+
+func (u *HealthRoute) healthz(c *echo.Context) error {
+	return common.WrapResp(c)(u.HealthService.Liveness(c.Request().Context()))
+}
+
+func (u *HealthRoute) readyz(c *echo.Context) error {
+	return common.WrapResp(c)(u.HealthService.Readiness(c.Request().Context()))
 }

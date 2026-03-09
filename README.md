@@ -108,6 +108,19 @@ make mock-e2e
 
 That test starts the real analytics routes in-process, issues a dashboard CLI token, approves a change plan through the web auth flow, runs `agentopt sync` with a stub Codex runner against a temp workspace, verifies the file change, and rolls it back.
 
+For closed beta deployment checks, the server also exposes:
+
+- `GET /healthz` for liveness
+- `GET /readyz` for readiness including analytics-store database access
+
+And you can run the end-to-end smoke from this repo root after exporting a seeded beta account:
+
+```bash
+export BETA_SMOKE_EMAIL=beta1@example.com
+export BETA_SMOKE_PASSWORD=replace-me
+make closed-beta-smoke
+```
+
 ## Research Agent MVP
 
 The cloud research agent is intentionally narrow in this MVP:

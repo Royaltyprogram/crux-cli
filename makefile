@@ -17,6 +17,9 @@ e2e:
 mock-e2e:
 	go test -v -count=1 ./cmd/agentopt -run TestMockDashboardApprovalTriggersLocalSyncAndRollback
 
+closed-beta-smoke:
+	./scripts/closed_beta_smoke.sh
+
 generate:
 	go generate ./data
 	go tool wire gen wire.go

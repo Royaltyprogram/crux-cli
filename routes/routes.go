@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
+	"time"
 
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/labstack/echo/v5"
@@ -30,12 +32,42 @@ func NewEcho(conf *configs.Config, logger *slog.Logger, store *service.Analytics
 	}
 	e.Binder = cb
 
-	e.Use(
+	middlewareChain := []echo.MiddlewareFunc{
 		echoMiddleware.Recover(),
 		echoMiddleware.RequestLogger(),
-		echoMiddleware.CORS("*"),
-		middleware.RequireAPIToken(conf.App.APIToken, conf.AllowsStaticToken(), store),
-	)
+	}
+	if len(conf.HTTP.AllowedOrigins) > 0 {
+		middlewareChain = append(middlewareChain, echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
+			AllowOrigins:     conf.HTTP.AllowedOrigins,
+			AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodOptions},
+			AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, middleware.APIAuthHeader},
+			AllowCredentials: true,
+			MaxAge:           int((12 * time.Hour).Seconds()),
+		}))
+	}
+	if conf.HTTP.RateLimitPerMinute > 0 {
+		ratePerSecond := float64(conf.HTTP.RateLimitPerMinute) / 60.0
+		burst := conf.HTTP.RateLimitPerMinute
+		if burst < 1 {
+			burst = 1
+		}
+		middlewareChain = append(middlewareChain, echoMiddleware.RateLimiterWithConfig(echoMiddleware.RateLimiterConfig{
+			Store: echoMiddleware.NewRateLimiterMemoryStoreWithConfig(echoMiddleware.RateLimiterMemoryStoreConfig{
+				Rate:      ratePerSecond,
+				Burst:     burst,
+				ExpiresIn: 5 * time.Minute,
+			}),
+			Skipper: func(c *echo.Context) bool {
+				path := c.Request().URL.Path
+				if path == "/health" || path == "/healthz" || path == "/readyz" {
+					return true
+				}
+				return !strings.HasPrefix(path, "/api/")
+			},
+		}))
+	}
+	middlewareChain = append(middlewareChain, middleware.RequireAPIToken(conf.App.APIToken, conf.AllowsStaticToken(), store))
+	e.Use(middlewareChain...)
 
 	return e, nil
 }
