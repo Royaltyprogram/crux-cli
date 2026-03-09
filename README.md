@@ -23,6 +23,7 @@ The product shape is:
 Detailed codebase documentation:
 
 - [`docs/CODEBASE.md`](/Users/doyechan/Desktop/codes/aiops/docs/CODEBASE.md)
+- [`docs/CLOSED_BETA_RUNBOOK.md`](/Users/doyechan/Desktop/codes/aiops/docs/CLOSED_BETA_RUNBOOK.md)
 
 ## What changed
 
