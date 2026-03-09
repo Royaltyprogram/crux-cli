@@ -579,9 +579,9 @@
         <div class="summary-caption">Approved plans that the CLI can apply on its next sync.</div>
       </article>
       <article class="summary-card">
-        <div class="summary-label">Changes Kept In Place</div>
+        <div class="summary-label">Rollouts That Stuck</div>
         <div class="summary-value" id="inferredAcceptRate">0%</div>
-        <div class="summary-caption">A proxy for how often rollouts stay in place after execution.</div>
+        <div class="summary-caption">A simple read on whether recent changes are still helping after rollout.</div>
       </article>
     </section>
 
@@ -859,12 +859,52 @@
 
     function impactLabel(item) {
       if (impactTone(item) === "good") {
-        return "Improving";
+        return "Helping";
       }
       if (impactTone(item) === "warn") {
-        return "Watch closely";
+        return "Needs follow-up";
       }
-      return "Early read";
+      return "Still measuring";
+    }
+
+    function sessionTone(item) {
+      if (Number(item.permission_reject_count) > 0 || Number(item.retry_count) > 1) {
+        return "warn";
+      }
+      if (Number(item.retry_count) === 0 && Number(item.permission_reject_count) === 0) {
+        return "good";
+      }
+      return "sky";
+    }
+
+    function sessionLabel(item) {
+      const tone = sessionTone(item);
+      if (tone === "good") {
+        return "Smooth";
+      }
+      if (tone === "warn") {
+        return "Some friction";
+      }
+      return "In progress";
+    }
+
+    function historyNarrative(item) {
+      switch (String(item.status || "").toLowerCase()) {
+        case "rollback_confirmed":
+          return "This rollout was undone after it landed locally.";
+        case "applied":
+          return "This rollout has already landed on a connected device.";
+        case "approved_for_local_apply":
+          return "This rollout is approved and waiting for the next safe local sync.";
+        case "awaiting_review":
+          return "This rollout is waiting for a decision before anything changes.";
+        case "rejected":
+          return "This rollout was declined and nothing changed locally.";
+        case "failed":
+          return "This rollout hit a local issue and needs another attempt.";
+        default:
+          return "This rollout is moving through the review and apply flow.";
+      }
     }
 
     function renderOverview(overview) {
@@ -877,7 +917,9 @@
       const failedExecutions = formatCount(overview.failed_execution_count);
       $("totalProjects").nextElementSibling.textContent = `Most recent work leans toward ${primaryTask}.`;
       $("approvedQueueCount").nextElementSibling.textContent = `${successfulRollouts} rollout(s) have completed successfully so far.`;
-      $("inferredAcceptRate").nextElementSibling.textContent = `Successful rollouts: ${successfulRollouts} | Failed executions: ${failedExecutions}`;
+      $("inferredAcceptRate").nextElementSibling.textContent = failedExecutions === "0"
+        ? `${successfulRollouts} rollout(s) are still holding after recent use.`
+        : `${failedExecutions} rollout(s) still need follow-up after local execution.`;
       $("overviewNarrative").textContent = workloadNarrative(overview);
     }
 
@@ -956,7 +998,7 @@
       }
 
       $("pendingApplyList").innerHTML = items.map((item) => {
-        const approvalLabel = item.policy_mode === "auto_approved" ? "Fast-tracked" : "Approved";
+        const approvalLabel = "Ready";
         return `
           <div class="item">
             <div class="item-top">
@@ -964,7 +1006,7 @@
                 ${escapeHTML(recommendationTitle(item.recommendation_id))}
                 <small>${escapeHTML(recommendationSummary(item.recommendation_id))}</small>
               </div>
-              ${pill(approvalLabel, item.policy_mode === "auto_approved" ? "sky" : "good")}
+              ${pill(approvalLabel, "good")}
             </div>
             <div class="meta">Ready for the next local sync. Requested ${escapeHTML(formatDateTime(item.requested_at))}.</div>
             <div class="step-list">${renderStepList(item.patch_preview, 2)}</div>
@@ -976,17 +1018,17 @@
     function impactHighlights(item) {
       const lines = [];
       if (Number(item.sessions_after) > 0) {
-        lines.push(`${formatCount(item.sessions_after)} session${Number(item.sessions_after) === 1 ? "" : "s"} measured after rollout.`);
+        lines.push(`${formatCount(item.sessions_after)} follow-up session${Number(item.sessions_after) === 1 ? "" : "s"} have been observed since rollout.`);
       }
-      if (Number(item.retry_delta) < -0.01) {
-        lines.push(`Retry pressure is down ${formatPercent(Math.abs(item.retry_delta))}.`);
-      } else if (Number(item.retry_delta) > 0.01) {
-        lines.push(`Retry pressure is up ${formatPercent(item.retry_delta)}.`);
+      if (Number(item.retry_delta) < -0.01 && Number(item.reject_delta) < -0.01) {
+        lines.push("Follow-up work moved with fewer interruptions and fewer approval slowdowns.");
+      } else if (Number(item.retry_delta) > 0.01 || Number(item.reject_delta) > 0.01) {
+        lines.push("Follow-up work has run into more interruptions than before.");
       }
-      if (Number(item.reject_delta) < -0.01) {
-        lines.push(`Permission friction is down ${formatPercent(Math.abs(item.reject_delta))}.`);
-      } else if (Number(item.reject_delta) > 0.01) {
-        lines.push(`Permission friction is up ${formatPercent(item.reject_delta)}.`);
+      if (Number(item.cost_delta) < -0.05) {
+        lines.push("The workspace is reaching outcomes with less agent effort than before.");
+      } else if (Number(item.cost_delta) > 0.05) {
+        lines.push("The workspace is taking more agent effort than before.");
       }
       if (lines.length === 0) {
         lines.push("More post-change usage will make this read clearer.");
@@ -1075,12 +1117,12 @@
       lines.push(`${titleize(item.task_type || "mixed")} work session.`);
       lines.push(item.shell_heavy ? "Work relied heavily on shell commands." : "Work stayed mostly inside the editor and tools.");
       if (Number(item.permission_reject_count) > 0) {
-        lines.push(`${formatCount(item.permission_reject_count)} approval block${Number(item.permission_reject_count) === 1 ? "" : "s"} occurred.`);
+        lines.push("Approvals slowed the session at least once.");
       } else {
         lines.push("Approval friction stayed low.");
       }
       if (Number(item.retry_count) > 0) {
-        lines.push(Number(item.retry_count) === 1 ? "1 retry was needed." : `${formatCount(item.retry_count)} retries were needed.`);
+        lines.push(Number(item.retry_count) === 1 ? "The agent needed one retry to finish the work." : "The agent needed several retries to finish the work.");
       } else {
         lines.push("Progress looked stable without retries.");
       }
@@ -1103,7 +1145,7 @@
               ${escapeHTML(titleize(item.task_type || "Recent work"))}
               <small>Recorded ${escapeHTML(formatDateTime(item.timestamp))}</small>
             </div>
-            ${pill(formatPercent(item.acceptance_proxy || 0), "good")}
+            ${pill(sessionLabel(item), sessionTone(item))}
           </div>
           <div class="step-list">${sessionSummaryLines(item).map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("")}</div>
         </div>
@@ -1128,7 +1170,6 @@
 
       $("applyHistoryList").innerHTML = items.slice(0, 5).map((item) => {
         const when = item.applied_at || item.reviewed_at || item.requested_at;
-        const byline = item.reviewed_by ? `Approved by ${item.reviewed_by}.` : "Awaiting a decision.";
         return `
           <div class="item">
             <div class="item-top">
@@ -1138,8 +1179,8 @@
               </div>
               ${pill(conciseStatus(item.status), historyTone(item))}
             </div>
-            <div class="meta">${escapeHTML(byline)}</div>
-            <div class="step-list">${renderStepList(item.patch_preview, 2)}</div>
+            <div class="meta">${escapeHTML(historyNarrative(item))}</div>
+            <div class="step-list">${renderStepList(item.patch_preview, 1)}</div>
           </div>
         `;
       }).join("");

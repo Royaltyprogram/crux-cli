@@ -29,4 +29,6 @@ func TestDashboardRouteServesUserFacingDashboard(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "Approve with confidence. Measure what changed.")
 	require.Contains(t, rec.Body.String(), "Suggestions for this workspace")
+	require.Contains(t, rec.Body.String(), "Rollouts That Stuck")
+	require.Contains(t, rec.Body.String(), "What improved after rollout")
 }
