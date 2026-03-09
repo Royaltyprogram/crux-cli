@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/liushuangls/go-server-template/dto/request"
@@ -517,6 +520,8 @@ func runAudit(args []string) error {
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	targetConfig := fs.String("target-config", "", "override local config path for pending apply jobs")
+	watch := fs.Bool("watch", false, "poll for pending apply jobs until interrupted")
+	interval := fs.Duration("interval", 15*time.Second, "poll interval in watch mode")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -527,6 +532,37 @@ func runSync(args []string) error {
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
+	if !*watch {
+		return runSyncOnce(st, client, *targetConfig)
+	}
+	if *interval <= 0 {
+		return errors.New("sync --interval must be greater than zero")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	ticker := time.NewTicker(*interval)
+	defer ticker.Stop()
+
+	if err := runSyncOnce(st, client, *targetConfig); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println(`{"watch":"stopped"}`)
+			return nil
+		case <-ticker.C:
+			if err := runSyncOnce(st, client, *targetConfig); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func runSyncOnce(st state, client *apiClient, targetConfig string) error {
 	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&requested_by=%s", url.QueryEscape(st.ProjectID), url.QueryEscape(st.UserID))
 	var pending response.PendingApplyResp
 	if err := client.doJSON(http.MethodGet, path, nil, &pending); err != nil {
@@ -535,7 +571,7 @@ func runSync(args []string) error {
 
 	results := make([]response.ApplyResultResp, 0, len(pending.Items))
 	for _, item := range pending.Items {
-		localResult, err := executeLocalApply(st, item.ApplyID, item.PatchPreview, *targetConfig)
+		localResult, err := executeLocalApply(st, item.ApplyID, item.PatchPreview, targetConfig)
 		if err != nil {
 			return err
 		}

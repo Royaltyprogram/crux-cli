@@ -84,3 +84,21 @@ func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 	require.True(t, backup.OriginalExists)
 	require.Equal(t, true, backup.OriginalJSON["baseline"])
 }
+
+func TestRunSyncRejectsInvalidIntervalInWatchMode(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	err := saveState(state{
+		ServerURL: "http://127.0.0.1:8082",
+		APIToken:  "token",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	})
+	require.NoError(t, err)
+
+	err = runSync([]string{"--watch", "--interval", "0s"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "greater than zero")
+}
