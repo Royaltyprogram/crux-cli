@@ -40,6 +40,9 @@ beta-cli-bundle:
 verify-beta-bundle:
 	./scripts/verify_beta_bundle.sh "$(BUNDLE)"
 
+build-release-index:
+	./scripts/build_release_index.sh "$(RELEASE_DIR)" "$(VERSION_LABEL)"
+
 print-version:
 	@echo $(VERSION)
 

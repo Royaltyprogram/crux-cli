@@ -165,6 +165,12 @@ And you can validate the latest bundle locally with:
 make verify-beta-bundle
 ```
 
+To build a consolidated release index for the latest version across the manifests currently in `output/release`:
+
+```bash
+make build-release-index
+```
+
 The bundle itself contains:
 
 - `agentopt`
@@ -209,7 +215,7 @@ docker run --rm -p 8082:8082 \
   agentopt-beta
 ```
 
-The repository also includes `.github/workflows/beta-ci.yml`, which runs `make ci-beta`, executes both the local-mode and real `APP_MODE=prod` smoke flows, uploads the verified server binaries and logs, and then builds beta CLI bundles for `linux/amd64`, `darwin/amd64`, and `darwin/arm64` with matching checksum and manifest artifacts.
+The repository also includes `.github/workflows/beta-ci.yml`, which runs `make ci-beta`, executes both the local-mode and real `APP_MODE=prod` smoke flows, uploads the verified server binaries and logs, builds beta CLI bundles for `linux/amd64`, `darwin/amd64`, and `darwin/arm64` with matching checksum and manifest artifacts, and then publishes a consolidated release-index artifact.
 
 For a stricter closed beta rollout, you can also restrict network access in-app:
 
