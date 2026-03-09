@@ -48,6 +48,7 @@ go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session --file examples/session-summary.json
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID>
+go run ./cmd/agentopt preflight --apply-id <CHANGE_PLAN_ID>
 go run ./cmd/agentopt review --apply-id <CHANGE_PLAN_ID> --decision approve
 go run ./cmd/agentopt sync
 go run ./cmd/agentopt rollback --apply-id <CHANGE_PLAN_ID>
@@ -73,3 +74,4 @@ The cloud research agent is intentionally implemented as a placeholder:
 - provider metadata is surfaced as `openai`
 - no live OpenAI API call is made yet
 - recommendation generation remains deterministic and metrics-driven until the API integration is enabled
+- the local executor now enforces a strict file allowlist before any approved plan is applied

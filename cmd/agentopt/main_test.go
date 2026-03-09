@@ -85,6 +85,59 @@ func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 	require.Equal(t, true, backup.OriginalJSON["baseline"])
 }
 
+func TestExecuteLocalApplyAppendsTextFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	target := filepath.Join(root, "AGENTS.md")
+	err := os.WriteFile(target, []byte("# Existing\n"), 0o644)
+	require.NoError(t, err)
+
+	result, err := executeLocalApply(state{ProjectID: "project-1"}, "apply-text", []response.PatchPreviewItem{
+		{
+			FilePath:       "AGENTS.md",
+			Operation:      "append_block",
+			ContentPreview: "\n## AgentOpt\n- safe rollout\n",
+		},
+	}, target)
+	require.NoError(t, err)
+	require.Equal(t, target, result.FilePath)
+	require.Contains(t, result.AppliedText, "AgentOpt")
+
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "# Existing")
+	require.Contains(t, string(data), "safe rollout")
+}
+
+func TestPreflightLocalApplyRejectsUnsafeTarget(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	result, err := preflightLocalApply(state{ProjectID: "project-1"}, "apply-unsafe", []response.PatchPreviewItem{
+		{
+			FilePath:        ".ssh/config",
+			Operation:       "merge_patch",
+			SettingsUpdates: map[string]any{"unsafe": true},
+		},
+	}, "")
+	require.NoError(t, err)
+	require.False(t, result.Allowed)
+	require.Equal(t, "file_scope", result.Guard)
+}
+
+func TestPreflightLocalApplyRejectsMultipleSteps(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	_, err := preflightLocalApply(state{ProjectID: "project-1"}, "apply-multi", []response.PatchPreviewItem{
+		{FilePath: ".codex/config.json", Operation: "merge_patch"},
+		{FilePath: "AGENTS.md", Operation: "append_block"},
+	}, "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exactly 1 step")
+}
+
 func TestRunSyncRejectsInvalidIntervalInWatchMode(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)

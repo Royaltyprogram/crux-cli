@@ -124,7 +124,9 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
    - approves or rejects the plan
 7. `sync`
    - applies approved plans locally
-8. `impact`
+8. `preflight`
+   - validates a queued change plan against local guard rules before execution
+9. `impact`
    - compares pre/post execution signals
 
 ## Persistence Model
@@ -148,3 +150,4 @@ Persisted entities:
 - API auth is still a shared token
 - no raw code or transcript upload exists
 - the OpenAI API integration is intentionally left as a placeholder in this branch
+- the local CLI executor only applies allowlisted config files such as `AGENTS.md`, `.mcp.json`, `.codex/config.json`, and `.claude/settings.local.json`

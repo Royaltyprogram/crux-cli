@@ -56,6 +56,17 @@ type localApplyResult struct {
 	AppliedText     string
 }
 
+type preflightResult struct {
+	ApplyID      string `json:"apply_id"`
+	Allowed      bool   `json:"allowed"`
+	TargetFile   string `json:"target_file"`
+	Operation    string `json:"operation"`
+	PreviewFile  string `json:"preview_file"`
+	Guard        string `json:"guard"`
+	Reason       string `json:"reason"`
+	TargetSource string `json:"target_source"`
+}
+
 type apiClient struct {
 	baseURL string
 	token   string
@@ -110,6 +121,8 @@ func run(args []string) error {
 		return runApply(args[1:])
 	case "review":
 		return runReview(args[1:])
+	case "preflight":
+		return runPreflight(args[1:])
 	case "--help", "-h", "help":
 		printUsage()
 		return nil
@@ -136,7 +149,8 @@ func printUsage() {
   sync              pull approved change plans and execute them locally
   rollback          restore the local config backup for a previous apply
   apply             request a change plan and optionally approve/apply it locally
-  review            approve or reject a requested change plan`)
+  review            approve or reject a requested change plan
+  preflight         validate a change plan against local guard rules`)
 }
 
 func runLogin(args []string) error {
@@ -731,6 +745,34 @@ func runReview(args []string) error {
 	return prettyPrint(resp)
 }
 
+func runPreflight(args []string) error {
+	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
+	applyID := fs.String("apply-id", "", "change plan id")
+	targetConfig := fs.String("target-config", "", "local config path override")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*applyID) == "" {
+		return errors.New("preflight requires --apply-id")
+	}
+
+	st, err := loadProjectState()
+	if err != nil {
+		return err
+	}
+	client := newAPIClient(st.ServerURL, st.APIToken)
+	item, err := fetchApplyHistoryItem(client, st.ProjectID, *applyID)
+	if err != nil {
+		return err
+	}
+
+	result, err := preflightLocalApply(st, item.ApplyID, item.PatchPreview, *targetConfig)
+	if err != nil {
+		return err
+	}
+	return prettyPrint(result)
+}
+
 func runRollback(args []string) error {
 	fs := flag.NewFlagSet("rollback", flag.ContinueOnError)
 	applyID := fs.String("apply-id", "", "apply id to roll back")
@@ -990,22 +1032,16 @@ func mergeMap(dst, src map[string]any) {
 }
 
 func executeLocalApply(st state, applyID string, previews []response.PatchPreviewItem, targetOverride string) (localApplyResult, error) {
-	if len(previews) == 0 {
-		return localApplyResult{}, errors.New("no patch preview available for apply")
+	preflight, err := preflightLocalApply(st, applyID, previews, targetOverride)
+	if err != nil {
+		return localApplyResult{}, err
 	}
-	preview := previews[0]
+	if !preflight.Allowed {
+		return localApplyResult{}, fmt.Errorf("local guard rejected apply %s: %s", applyID, preflight.Reason)
+	}
 
-	filePath := targetOverride
-	if filePath == "" {
-		filePath = preview.FilePath
-	}
-	if !filepath.IsAbs(filePath) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return localApplyResult{}, err
-		}
-		filePath = filepath.Join(cwd, filePath)
-	}
+	preview := previews[0]
+	filePath := preflight.TargetFile
 
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 		return localApplyResult{}, err
@@ -1149,6 +1185,69 @@ func reviewChangePlan(client *apiClient, applyID, decision, reviewedBy, note str
 	return resp, err
 }
 
+func fetchApplyHistoryItem(client *apiClient, projectID, applyID string) (response.ApplyHistoryItem, error) {
+	var resp response.ApplyHistoryResp
+	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(projectID), nil, &resp); err != nil {
+		return response.ApplyHistoryItem{}, err
+	}
+	for _, item := range resp.Items {
+		if item.ApplyID == applyID {
+			return item, nil
+		}
+	}
+	return response.ApplyHistoryItem{}, fmt.Errorf("apply %s not found in project history", applyID)
+}
+
+func preflightLocalApply(st state, applyID string, previews []response.PatchPreviewItem, targetOverride string) (preflightResult, error) {
+	if len(previews) == 0 {
+		return preflightResult{}, errors.New("no patch preview available for apply")
+	}
+	if len(previews) > 1 {
+		return preflightResult{}, fmt.Errorf("apply %s has %d patch steps; local executor currently supports exactly 1 step", applyID, len(previews))
+	}
+
+	preview := previews[0]
+	if !isAllowedOperation(preview.Operation) {
+		return preflightResult{
+			ApplyID:     applyID,
+			Allowed:     false,
+			Operation:   preview.Operation,
+			PreviewFile: preview.FilePath,
+			Guard:       "operation",
+			Reason:      "unsupported patch operation",
+		}, nil
+	}
+
+	resolvedPath, source, err := resolveApplyTarget(preview.FilePath, targetOverride)
+	if err != nil {
+		return preflightResult{}, err
+	}
+
+	if !isAllowedTarget(preview.FilePath, resolvedPath) {
+		return preflightResult{
+			ApplyID:      applyID,
+			Allowed:      false,
+			TargetFile:   resolvedPath,
+			Operation:    preview.Operation,
+			PreviewFile:  preview.FilePath,
+			Guard:        "file_scope",
+			Reason:       "target file is outside the local guard allowlist",
+			TargetSource: source,
+		}, nil
+	}
+
+	return preflightResult{
+		ApplyID:      applyID,
+		Allowed:      true,
+		TargetFile:   resolvedPath,
+		Operation:    preview.Operation,
+		PreviewFile:  preview.FilePath,
+		Guard:        "strict",
+		Reason:       "preflight passed",
+		TargetSource: source,
+	}, nil
+}
+
 func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -1167,6 +1266,86 @@ func firstNonEmpty(values ...string) string {
 
 func runtimePlatform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
+}
+
+func resolveApplyTarget(previewPath, targetOverride string) (string, string, error) {
+	target := previewPath
+	source := "preview"
+	if strings.TrimSpace(targetOverride) != "" {
+		target = targetOverride
+		source = "override"
+	}
+	if filepath.IsAbs(target) {
+		return filepath.Clean(target), source, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", "", err
+	}
+	return filepath.Clean(filepath.Join(cwd, target)), source, nil
+}
+
+func isAllowedOperation(operation string) bool {
+	switch operation {
+	case "", "merge_patch", "append_block", "text_append":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedTarget(previewPath, resolvedPath string) bool {
+	allowedRelative := map[string]struct{}{
+		filepath.Clean(".codex/config.json"):          {},
+		filepath.Clean(".claude/settings.local.json"): {},
+		filepath.Clean(".mcp.json"):                   {},
+		filepath.Clean("AGENTS.md"):                   {},
+		filepath.Clean("CLAUDE.md"):                   {},
+	}
+
+	if !filepath.IsAbs(previewPath) {
+		if _, ok := allowedRelative[filepath.Clean(previewPath)]; !ok {
+			return false
+		}
+	}
+
+	base := filepath.Base(resolvedPath)
+	allowedBase := map[string]struct{}{
+		"config.json":         {},
+		"settings.local.json": {},
+		".mcp.json":           {},
+		"AGENTS.md":           {},
+		"CLAUDE.md":           {},
+	}
+	if _, ok := allowedBase[base]; !ok {
+		return false
+	}
+
+	cwd, err := os.Getwd()
+	if err == nil && isWithinRoot(cwd, resolvedPath) {
+		return true
+	}
+	if root := os.Getenv("AGENTOPT_HOME"); strings.TrimSpace(root) != "" && isWithinRoot(root, resolvedPath) {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && isWithinRoot(home, resolvedPath) {
+		return true
+	}
+	return false
+}
+
+func isWithinRoot(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if root == target {
+		return true
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func inferEnabledMCPCount(settings map[string]any) int {
