@@ -1,6 +1,7 @@
 App:
   Addr: ":8082"
   Mode: prod
+  # Legacy JSON import path. DB.DSN is the primary runtime store.
   StorePath: "data/agentopt-store.json"
   APIToken: ""
 

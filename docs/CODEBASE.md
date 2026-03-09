@@ -20,7 +20,8 @@ It has four runtime surfaces:
 
 3. `AIops Server`
    - exposes auth, ingestion, review, execution, dashboard, and audit APIs
-   - persists state to an on-disk JSON store
+   - persists runtime state to a database-backed analytics store
+   - can import once from an older JSON store path during migration
    - tracks rollout state and token-based impact metrics
 
 4. `Web Dashboard`
@@ -46,7 +47,8 @@ Server
   -> service/analytics.go
   -> service/research_agent.go
   -> service/analytics_store.go
-  -> data/agentopt-store.json
+  -> DB.DSN
+  -> optionally migrate from App.StorePath legacy JSON
 
 Dashboard
   -> GET /

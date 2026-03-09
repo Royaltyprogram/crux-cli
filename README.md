@@ -46,6 +46,8 @@ make run
 
 `make run` now uses `configs/local.yaml`, which keeps the local demo account enabled for development. Closed beta or production deployments should run with `APP_MODE=prod` plus seeded beta users and secrets supplied through env vars.
 
+`App.StorePath` remains only as the legacy JSON import location and SQLite fallback path seed. The live runtime store is `DB.DSN`.
+
 In another shell:
 
 ```bash
@@ -159,6 +161,7 @@ The container now defaults to:
 
 - `APP_MODE=prod`
 - SQLite state at `/app/data/agentopt.db`
+- legacy JSON import path at `data/agentopt-store.json` only if you are migrating old state
 - stdout request/application logs
 
 Build and run it with a seeded beta account:
