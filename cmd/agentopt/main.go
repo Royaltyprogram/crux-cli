@@ -19,9 +19,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/liushuangls/go-server-template/configs"
 	"github.com/liushuangls/go-server-template/dto/request"
 	"github.com/liushuangls/go-server-template/dto/response"
 	"github.com/liushuangls/go-server-template/pkg/buildinfo"
+	"github.com/liushuangls/go-server-template/service"
 )
 
 type state struct {
@@ -107,6 +109,10 @@ func run(args []string) error {
 		return runReview(args[1:])
 	case "preflight":
 		return runPreflight(args[1:])
+	case "store-export":
+		return runStoreExport(args[1:])
+	case "store-import":
+		return runStoreImport(args[1:])
 	case "--help", "-h", "help":
 		printUsage()
 		return nil
@@ -135,7 +141,9 @@ func printUsage() {
   rollback          restore the local config backup for a previous apply
   apply             request a change plan and optionally approve/apply it locally
   review            approve or reject a requested change plan
-  preflight         validate a change plan against local guard rules`)
+  preflight         validate a change plan against local guard rules
+  store-export      export the runtime analytics store from the configured database
+  store-import      import a runtime analytics store backup into the configured database`)
 }
 
 func printVersion() {
@@ -783,6 +791,81 @@ func runPreflight(args []string) error {
 	return prettyPrint(result)
 }
 
+func runStoreExport(args []string) error {
+	fs := flag.NewFlagSet("store-export", flag.ContinueOnError)
+	output := fs.String("output", "-", "backup output path or - for stdout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	store, err := openRuntimeStore()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = store.Close()
+	}()
+
+	data, err := store.ExportStateJSON()
+	if err != nil {
+		return err
+	}
+
+	path := strings.TrimSpace(*output)
+	if path == "" || path == "-" {
+		_, err = os.Stdout.Write(data)
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return prettyPrint(map[string]any{
+		"status": "exported",
+		"output": path,
+		"bytes":  len(data),
+	})
+}
+
+func runStoreImport(args []string) error {
+	fs := flag.NewFlagSet("store-import", flag.ContinueOnError)
+	input := fs.String("input", "", "backup input path or - for stdin")
+	force := fs.Bool("yes", false, "overwrite the runtime store without prompting")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*input) == "" {
+		return errors.New("store-import requires --input")
+	}
+	if !*force {
+		return errors.New("store-import requires --yes because it overwrites the runtime store")
+	}
+
+	data, err := readInputData(*input)
+	if err != nil {
+		return err
+	}
+
+	store, err := openRuntimeStore()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = store.Close()
+	}()
+
+	if err := store.ImportStateJSON(data); err != nil {
+		return err
+	}
+	return prettyPrint(map[string]any{
+		"status": "imported",
+		"input":  strings.TrimSpace(*input),
+		"bytes":  len(data),
+	})
+}
+
 func parseCodexReasoningEffort(raw string) (string, error) {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if value == "" {
@@ -1030,6 +1113,21 @@ func loadJSONFile(path string, out any) error {
 		return err
 	}
 	return json.Unmarshal(data, out)
+}
+
+func openRuntimeStore() (*service.AnalyticsStore, error) {
+	conf, err := configs.InitConfig()
+	if err != nil {
+		return nil, err
+	}
+	return service.NewAnalyticsStore(conf)
+}
+
+func readInputData(path string) ([]byte, error) {
+	if strings.TrimSpace(path) == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(path)
 }
 
 func readOptionalJSONMap(path string, out *map[string]any) (bool, error) {

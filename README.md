@@ -173,6 +173,15 @@ To build a consolidated release index for the latest version across the manifest
 make build-release-index
 ```
 
+To export or restore the live runtime store against the same `APP_MODE` / `DB_*` / secret-file env that the server uses:
+
+```bash
+make store-export OUTPUT=output/runtime-store-backup.json
+make store-import INPUT=output/runtime-store-backup.json
+```
+
+`store-import` is intentionally gated behind `--yes` because it overwrites the configured runtime store.
+
 The bundle itself contains:
 
 - `agentopt`

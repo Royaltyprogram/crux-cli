@@ -43,6 +43,12 @@ verify-beta-bundle:
 build-release-index:
 	./scripts/build_release_index.sh "$(RELEASE_DIR)" "$(VERSION_LABEL)"
 
+store-export: build
+	./output/agentopt store-export --output "$(OUTPUT)"
+
+store-import: build
+	./output/agentopt store-import --input "$(INPUT)" --yes
+
 print-version:
 	@echo $(VERSION)
 

@@ -253,6 +253,44 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 	return store, nil
 }
 
+func (s *AnalyticsStore) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
+}
+
+func (s *AnalyticsStore) ExportStateJSON() ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	data, err := json.MarshalIndent(s.snapshotStateLocked(), "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func (s *AnalyticsStore) ImportStateJSON(data []byte) error {
+	var state analyticsStoreState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if err := s.replaceStateLocked(state); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	if err := s.persistLocked(); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Unlock()
+
+	return s.ensureBootstrapData()
+}
+
 func (s *AnalyticsStore) nextID(prefix string) string {
 	s.seq++
 	return fmt.Sprintf("%s_%06d", prefix, s.seq)
@@ -606,6 +644,42 @@ func (s *AnalyticsStore) loadFromLegacyJSON() (bool, error) {
 		return false, err
 	}
 
+	return true, s.replaceStateLocked(state)
+}
+
+func (s *AnalyticsStore) resetInMemoryState() {
+	s.seq = 0
+	s.organizations = make(map[string]*Organization)
+	s.users = make(map[string]*User)
+	s.accessTokens = make(map[string]*AccessToken)
+	s.agents = make(map[string]*Agent)
+	s.projects = make(map[string]*Project)
+	s.configSnapshots = make(map[string][]*ConfigSnapshot)
+	s.sessionSummaries = make(map[string][]*SessionSummary)
+	s.recommendations = make(map[string]*Recommendation)
+	s.projectRecommendations = make(map[string][]string)
+	s.applyOperations = make(map[string]*ApplyOperation)
+	s.audits = make([]*AuditEvent, 0, 32)
+}
+
+func (s *AnalyticsStore) snapshotStateLocked() analyticsStoreState {
+	return analyticsStoreState{
+		Seq:                    s.seq,
+		Organizations:          s.organizations,
+		Users:                  s.users,
+		AccessTokens:           s.accessTokens,
+		Agents:                 s.agents,
+		Projects:               s.projects,
+		ConfigSnapshots:        s.configSnapshots,
+		SessionSummaries:       s.sessionSummaries,
+		Recommendations:        s.recommendations,
+		ProjectRecommendations: s.projectRecommendations,
+		ApplyOperations:        s.applyOperations,
+		Audits:                 s.audits,
+	}
+}
+
+func (s *AnalyticsStore) replaceStateLocked(state analyticsStoreState) error {
 	s.seq = state.Seq
 	s.organizations = ensureMap(state.Organizations)
 	s.users = ensureMap(state.Users)
@@ -622,22 +696,7 @@ func (s *AnalyticsStore) loadFromLegacyJSON() (bool, error) {
 	} else {
 		s.audits = state.Audits
 	}
-	return true, nil
-}
-
-func (s *AnalyticsStore) resetInMemoryState() {
-	s.seq = 0
-	s.organizations = make(map[string]*Organization)
-	s.users = make(map[string]*User)
-	s.accessTokens = make(map[string]*AccessToken)
-	s.agents = make(map[string]*Agent)
-	s.projects = make(map[string]*Project)
-	s.configSnapshots = make(map[string][]*ConfigSnapshot)
-	s.sessionSummaries = make(map[string][]*SessionSummary)
-	s.recommendations = make(map[string]*Recommendation)
-	s.projectRecommendations = make(map[string][]string)
-	s.applyOperations = make(map[string]*ApplyOperation)
-	s.audits = make([]*AuditEvent, 0, 32)
+	return nil
 }
 
 func openAnalyticsStoreDB(conf *configs.Config) (*sql.DB, error) {
