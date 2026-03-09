@@ -594,9 +594,9 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">Recommended next</div>
-            <h2>Suggestions for this workspace</h2>
+            <h2>Recommended changes for this workspace</h2>
           </div>
-          <div class="section-copy">These suggestions are ranked by expected value and presented in plain language before anything changes locally.</div>
+          <div class="section-copy">Each suggestion explains why it matters now and what will change before you approve anything.</div>
         </div>
         <div class="list" id="recommendationList"></div>
       </article>
@@ -837,6 +837,17 @@
       return visible.map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("");
     }
 
+    function recommendationPlanSummary(item) {
+      const steps = toArray(item.change_plan);
+      if (!steps.length) {
+        return "One settings update is ready to review.";
+      }
+      if (steps.length === 1) {
+        return stepSummary(steps[0]);
+      }
+      return `${steps.length} coordinated updates will be applied together.`;
+    }
+
     function recommendationTitle(recommendationID) {
       const rec = state.recommendationIndex.get(recommendationID);
       return rec ? rec.title : "Configuration update";
@@ -941,20 +952,13 @@
             </div>
             ${pill(item.risk || "Low risk", riskTone(item.risk))}
           </div>
-          <div class="fact-grid">
-            <div class="fact">
-              <strong>Why now</strong>
-              ${escapeHTML(item.reason)}
-            </div>
-            <div class="fact">
-              <strong>Expected outcome</strong>
-              ${escapeHTML(item.expected_benefit)}
-            </div>
+          <div class="step-list">
+            <div class="step-line">${escapeHTML(item.reason)}</div>
+            <div class="step-line">${escapeHTML(recommendationPlanSummary(item))}</div>
+            <div class="step-line">${escapeHTML(item.expected_benefit || item.expected_impact || "This change is expected to improve the workspace experience after rollout.")}</div>
           </div>
-          <div class="meta">${escapeHTML(item.expected_impact || "")}</div>
-          <div class="step-list">${renderStepList(item.change_plan, 2)}</div>
           <div class="action-row">
-            <button class="primary-button" type="button" onclick="requestApply('${item.id}')">Create review plan</button>
+            <button class="primary-button" type="button" onclick="requestApply('${item.id}')">Review this change</button>
           </div>
         </div>
       `).join("");

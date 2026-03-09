@@ -19,5 +19,6 @@ func (s *APISuite) TestDashboardPage_OK() {
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), http.StatusOK, resp.StatusCode)
 	require.Contains(s.T(), string(body), "Approve with confidence. Measure what changed.")
+	require.Contains(s.T(), string(body), "Recommended changes for this workspace")
 	require.Contains(s.T(), string(body), "Rollouts That Stuck")
 }
