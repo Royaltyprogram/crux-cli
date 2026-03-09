@@ -23,6 +23,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.3.0
 	github.com/labstack/echo/v5 v5.0.0
+	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/reugn/go-quartz v0.15.2
 	github.com/sourcegraph/conc v0.3.0

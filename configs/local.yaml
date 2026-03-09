@@ -6,7 +6,7 @@ App:
 
 DB:
   Dialect: sqlite3
-  DSN: file:agentopt-local?mode=memory&cache=shared&_fk=1
+  DSN: data/agentopt-local.db?_fk=1
   MaxIdle: 2
   MaxActive: 4
   MaxLifetime: 300
