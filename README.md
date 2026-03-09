@@ -147,7 +147,13 @@ make beta-cli-bundle
 VERSION_LABEL=0.1.0-beta.1 make beta-cli-bundle
 ```
 
-That command produces `output/release/agentopt-<version>-<os>-<arch>.tar.gz` with:
+That command produces:
+
+- `output/release/agentopt-<version>-<os>-<arch>.tar.gz`
+- `output/release/agentopt-<version>-<os>-<arch>.tar.gz.sha256`
+- `output/release/agentopt-<version>-<os>-<arch>.json`
+
+The bundle itself contains:
 
 - `agentopt`
 - `tools/codex-runner/run.mjs`
@@ -191,7 +197,7 @@ docker run --rm -p 8082:8082 \
   agentopt-beta
 ```
 
-The repository also includes `.github/workflows/beta-ci.yml`, which runs `make ci-beta`, boots the local server to execute `scripts/closed_beta_smoke.sh`, uploads the verified server binaries, and then builds beta CLI bundles for `linux/amd64`, `darwin/amd64`, and `darwin/arm64` as GitHub Actions artifacts.
+The repository also includes `.github/workflows/beta-ci.yml`, which runs `make ci-beta`, boots the local server to execute `scripts/closed_beta_smoke.sh`, uploads the verified server binaries, and then builds beta CLI bundles for `linux/amd64`, `darwin/amd64`, and `darwin/arm64` with matching checksum and manifest artifacts.
 
 For a stricter closed beta rollout, you can also restrict network access in-app:
 

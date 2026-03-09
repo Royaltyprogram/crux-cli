@@ -131,5 +131,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: agentopt-beta-bundle-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
-          path: output/release/*.tar.gz
+          path: |
+            output/release/*.tar.gz
+            output/release/*.tar.gz.sha256
+            output/release/*.json
           if-no-files-found: error
