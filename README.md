@@ -20,7 +20,7 @@ make run
 In another shell:
 
 ```bash
-go run ./cmd/agentopt login --server http://127.0.0.1:8082 --org demo-org --user demo-user
+go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token agentopt-dev-token --org demo-org --user demo-user
 go run ./cmd/agentopt connect --project demo-repo --repo-path .
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session --file examples/session-summary.json
@@ -34,6 +34,6 @@ go run ./cmd/agentopt impact
 go run ./cmd/agentopt audit
 ```
 
-Then open `http://127.0.0.1:8082/dashboard`, enter `demo-org` and the returned `project_id`, and inspect the temporary dashboard.
+Then open `http://127.0.0.1:8082/dashboard`, enter `agentopt-dev-token`, `demo-org`, and the returned `project_id`, and inspect the temporary dashboard.
 
 The server currently keeps state in memory so it is suitable for prototyping the server/CLI contract before moving to persistent storage and a real dashboard.

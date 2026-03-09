@@ -20,6 +20,7 @@ import (
 
 type state struct {
 	ServerURL   string `json:"server_url"`
+	APIToken    string `json:"api_token"`
 	OrgID       string `json:"org_id"`
 	UserID      string `json:"user_id"`
 	AgentID     string `json:"agent_id"`
@@ -45,6 +46,7 @@ type envelope struct {
 
 type apiClient struct {
 	baseURL string
+	token   string
 	http    *http.Client
 }
 
@@ -113,6 +115,7 @@ func printUsage() {
 func runLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	server := fs.String("server", "http://127.0.0.1:8082", "server base URL")
+	token := fs.String("token", os.Getenv("AGENTOPT_TOKEN"), "api token")
 	orgID := fs.String("org", "demo-org", "organization id")
 	orgName := fs.String("org-name", "", "organization display name")
 	userID := fs.String("user", "demo-user", "user id")
@@ -141,7 +144,7 @@ func runLogin(args []string) error {
 		*orgName = *orgID
 	}
 
-	client := newAPIClient(*server)
+	client := newAPIClient(*server, *token)
 	req := request.RegisterAgentReq{
 		OrgID:      *orgID,
 		OrgName:    *orgName,
@@ -159,6 +162,7 @@ func runLogin(args []string) error {
 
 	st := state{
 		ServerURL:  strings.TrimRight(*server, "/"),
+		APIToken:   *token,
 		OrgID:      resp.OrgID,
 		UserID:     resp.UserID,
 		AgentID:    resp.AgentID,
@@ -190,7 +194,7 @@ func runConnect(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	hash := strings.TrimSpace(*repoHash)
 	if hash == "" {
@@ -250,7 +254,7 @@ func runSnapshot(args []string) error {
 		Settings:   settings,
 		CapturedAt: time.Now().UTC(),
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 	var resp response.ConfigSnapshotResp
 	if err := client.doJSON(http.MethodPost, "/api/v1/config-snapshots", req, &resp); err != nil {
 		return err
@@ -310,7 +314,7 @@ func runSession(args []string) error {
 		req.Timestamp = time.Now().UTC()
 	}
 
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 	var resp response.SessionIngestResp
 	if err := client.doJSON(http.MethodPost, "/api/v1/session-summaries", req, &resp); err != nil {
 		return err
@@ -328,7 +332,7 @@ func runRecommendations(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 	path := "/api/v1/recommendations?project_id=" + url.QueryEscape(st.ProjectID)
 	var resp response.RecommendationListResp
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
@@ -347,7 +351,7 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var overview response.DashboardOverviewResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/dashboard/overview?org_id="+url.QueryEscape(st.OrgID), nil, &overview); err != nil {
@@ -375,7 +379,7 @@ func runProjects(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ProjectListResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/projects?org_id="+url.QueryEscape(st.OrgID), nil, &resp); err != nil {
@@ -399,7 +403,7 @@ func runHistory(args []string) error {
 	if strings.TrimSpace(*projectID) != "" {
 		targetProjectID = *projectID
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ApplyHistoryResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(targetProjectID), nil, &resp); err != nil {
@@ -423,7 +427,7 @@ func runImpact(args []string) error {
 	if strings.TrimSpace(*projectID) != "" {
 		targetProjectID = *projectID
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ImpactSummaryResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/impact?project_id="+url.QueryEscape(targetProjectID), nil, &resp); err != nil {
@@ -448,7 +452,7 @@ func runAudit(args []string) error {
 		path += "&project_id=" + url.QueryEscape(*projectID)
 	}
 
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 	var resp response.AuditListResp
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
@@ -474,7 +478,7 @@ func runApply(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var plan response.ApplyPlanResp
 	if err := client.doJSON(http.MethodPost, "/api/v1/recommendations/apply", request.ApplyRecommendationReq{
@@ -583,7 +587,7 @@ func runRollback(args []string) error {
 		}
 	}
 
-	client := newAPIClient(st.ServerURL)
+	client := newAPIClient(st.ServerURL, st.APIToken)
 	var result response.ApplyResultResp
 	if err := client.doJSON(http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
 		ApplyID:         backup.ApplyID,
@@ -601,9 +605,10 @@ func runRollback(args []string) error {
 	return prettyPrint(result)
 }
 
-func newAPIClient(baseURL string) *apiClient {
+func newAPIClient(baseURL, token string) *apiClient {
 	return &apiClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
 		http: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -623,6 +628,9 @@ func (c *apiClient) doJSON(method, path string, body any, out any) error {
 	req, err := http.NewRequest(method, c.baseURL+path, reader)
 	if err != nil {
 		return err
+	}
+	if c.token != "" {
+		req.Header.Set("X-AgentOpt-Token", c.token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

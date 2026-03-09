@@ -2,6 +2,7 @@ App:
   Addr: ":8082"
   Mode: prod
   StorePath: "data/agentopt-store.json"
+  APIToken: "agentopt-dev-token"
 
 DB:
   Dialect: sqlite3

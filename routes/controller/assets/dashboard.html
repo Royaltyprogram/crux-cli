@@ -223,11 +223,12 @@
       </div>
       <div class="controls">
         <div class="controls-row">
+          <input id="apiToken" placeholder="api token">
           <input id="orgId" placeholder="org_id" value="demo-org">
           <input id="projectId" placeholder="project_id or leave blank">
           <button id="loadBtn" type="button">Load</button>
         </div>
-        <div class="status" id="status">Enter an organization and project ID, then load metrics.</div>
+        <div class="status" id="status">Enter your API token and organization, then load metrics.</div>
       </div>
     </section>
 
@@ -279,6 +280,16 @@
       const el = $("status");
       el.textContent = text;
       el.style.color = isError ? "#c53030" : "#52606d";
+    }
+
+    function authHeaders() {
+      const token = $("apiToken").value.trim();
+      const headers = {};
+      if (token) {
+        headers["X-AgentOpt-Token"] = token;
+        localStorage.setItem("agentopt_api_token", token);
+      }
+      return headers;
     }
 
     function renderSignals(overview) {
@@ -407,8 +418,8 @@
 
       try {
         const [overviewResp, projectResp] = await Promise.all([
-          fetch(`/api/v1/dashboard/overview?org_id=${encodeURIComponent(orgId)}`),
-          fetch(`/api/v1/projects?org_id=${encodeURIComponent(orgId)}`)
+          fetch(`/api/v1/dashboard/overview?org_id=${encodeURIComponent(orgId)}`, { headers: authHeaders() }),
+          fetch(`/api/v1/projects?org_id=${encodeURIComponent(orgId)}`, { headers: authHeaders() })
         ]);
 
         const overviewEnv = await overviewResp.json();
@@ -437,10 +448,10 @@
         let audits = [];
         if (projectId) {
           const [recResp, applyResp, impactResp, auditResp] = await Promise.all([
-            fetch(`/api/v1/recommendations?project_id=${encodeURIComponent(projectId)}`),
-            fetch(`/api/v1/applies?project_id=${encodeURIComponent(projectId)}`),
-            fetch(`/api/v1/impact?project_id=${encodeURIComponent(projectId)}`),
-            fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}&project_id=${encodeURIComponent(projectId)}`)
+            fetch(`/api/v1/recommendations?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
+            fetch(`/api/v1/applies?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
+            fetch(`/api/v1/impact?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
+            fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}&project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() })
           ]);
           const recEnv = await recResp.json();
           const applyEnv = await applyResp.json();
@@ -463,7 +474,7 @@
           impacts = impactEnv.data.items || [];
           audits = auditEnv.data.items || [];
         } else {
-          const auditResp = await fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}`);
+          const auditResp = await fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}`, { headers: authHeaders() });
           const auditEnv = await auditResp.json();
           if (auditEnv.code !== 0) {
             throw new Error(auditEnv.msg || "audit request failed");
@@ -487,6 +498,7 @@
       }
     }
 
+    $("apiToken").value = localStorage.getItem("agentopt_api_token") || "";
     $("loadBtn").addEventListener("click", load);
   </script>
 </body>

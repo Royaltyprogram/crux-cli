@@ -47,3 +47,8 @@ func TestApplyBackupRoundTrip(t *testing.T) {
 	require.Error(t, statErr)
 	require.True(t, os.IsNotExist(statErr))
 }
+
+func TestAPIClientAddsTokenHeader(t *testing.T) {
+	client := newAPIClient("http://example.com", "test-token")
+	require.Equal(t, "test-token", client.token)
+}

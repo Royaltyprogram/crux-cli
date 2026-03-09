@@ -24,6 +24,7 @@ type App struct {
 	Addr      string `koanf:"Addr"`
 	Mode      string `koanf:"Mode"`
 	StorePath string `koanf:"StorePath"`
+	APIToken  string `koanf:"APIToken"`
 }
 
 type DB struct {

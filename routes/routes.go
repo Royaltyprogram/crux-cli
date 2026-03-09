@@ -33,6 +33,7 @@ func NewEcho(conf *configs.Config, logger *slog.Logger) (*echo.Echo, error) {
 		echoMiddleware.Recover(),
 		echoMiddleware.RequestLogger(),
 		echoMiddleware.CORS("*"),
+		middleware.RequireAPIToken(conf.App.APIToken),
 	)
 
 	return e, nil
