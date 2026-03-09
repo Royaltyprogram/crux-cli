@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,12 +40,108 @@ func captureStdout(t *testing.T, fn func()) string {
 	return strings.TrimSpace(string(output))
 }
 
+func useStubCodexRunner(t *testing.T, mode string) string {
+	t.Helper()
+
+	scriptPath := filepath.Join(t.TempDir(), "codex-runner-stub.mjs")
+	script := `#!/usr/bin/env node
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import path from "node:path";
+
+const requestPath = process.argv[2];
+const request = JSON.parse(await readFile(requestPath, "utf8"));
+const mode = process.env.AGENTOPT_STUB_MODE || "apply";
+const changed = [];
+
+for (const step of request.steps || []) {
+  await mkdir(path.dirname(step.target_file), { recursive: true });
+  if (step.operation === "append_block" || step.operation === "text_append") {
+    let original = "";
+    try {
+      original = await readFile(step.target_file, "utf8");
+    } catch {}
+    let next = original;
+    if (!next.includes(step.content_preview || "")) {
+      next += step.content_preview || "";
+    }
+    await writeFile(step.target_file, next, "utf8");
+  } else {
+    let current = {};
+    try {
+      current = JSON.parse(await readFile(step.target_file, "utf8"));
+    } catch {}
+    Object.assign(current, step.settings_updates || {});
+    await writeFile(step.target_file, JSON.stringify(current, null, 2) + "\n", "utf8");
+  }
+  changed.push(step.target_file);
+}
+
+if (mode === "extra_change") {
+  const extra = path.join(request.working_directory, "UNAPPROVED.txt");
+  await writeFile(extra, "unexpected\n", "utf8");
+  changed.push(extra);
+}
+
+process.stdout.write(JSON.stringify({
+  status: mode === "blocked" ? "blocked" : "applied",
+  summary: mode === "blocked" ? "stub blocked request" : "stub applied request",
+  changed_files: changed,
+  executed_commands: []
+}));
+`
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+	t.Setenv("AGENTOPT_CODEX_RUNNER", scriptPath)
+	t.Setenv("AGENTOPT_STUB_MODE", mode)
+	return scriptPath
+}
+
+func useSleepingCodexRunner(t *testing.T, sleep time.Duration) string {
+	t.Helper()
+
+	scriptPath := filepath.Join(t.TempDir(), "codex-runner-sleep.mjs")
+	script := `#!/usr/bin/env node
+const sleepMs = Number(process.env.AGENTOPT_STUB_SLEEP_MS || "0");
+await new Promise((resolve) => setTimeout(resolve, sleepMs));
+process.stdout.write(JSON.stringify({
+  status: "applied",
+  summary: "slept",
+  changed_files: [],
+  executed_commands: []
+}));
+`
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+	t.Setenv("AGENTOPT_CODEX_RUNNER", scriptPath)
+	t.Setenv("AGENTOPT_STUB_SLEEP_MS", fmt.Sprintf("%d", sleep.Milliseconds()))
+	return scriptPath
+}
+
 func TestReadOptionalJSONMapMissingFile(t *testing.T) {
 	var out map[string]any
 	exists, err := readOptionalJSONMap(filepath.Join(t.TempDir(), "missing.json"), &out)
 	require.NoError(t, err)
 	require.False(t, exists)
 	require.Empty(t, out)
+}
+
+func TestCodexApplyTimeoutUsesDefault(t *testing.T) {
+	t.Setenv("AGENTOPT_CODEX_TIMEOUT", "")
+	timeout, err := codexApplyTimeout()
+	require.NoError(t, err)
+	require.Equal(t, 10*time.Minute, timeout)
+}
+
+func TestCodexApplyTimeoutRejectsInvalidValue(t *testing.T) {
+	t.Setenv("AGENTOPT_CODEX_TIMEOUT", "nope")
+	_, err := codexApplyTimeout()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid AGENTOPT_CODEX_TIMEOUT")
+}
+
+func TestCodexApplyTimeoutRejectsNonPositiveValue(t *testing.T) {
+	t.Setenv("AGENTOPT_CODEX_TIMEOUT", "0s")
+	_, err := codexApplyTimeout()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "greater than zero")
 }
 
 func TestApplyBackupRoundTrip(t *testing.T) {
@@ -140,22 +237,19 @@ func TestRunLoginAuthenticatesWithIssuedCLIToken(t *testing.T) {
 	require.Equal(t, "device-123", st.AgentID)
 }
 
-func TestRunUseProjectSwitchesLocalProjectState(t *testing.T) {
+func TestRunProjectsShowsSharedWorkspace(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Equal(t, "/api/v1/projects", r.URL.Path)
-		require.Equal(t, "token-projects", r.Header.Get("X-AgentOpt-Token"))
-		require.Equal(t, "org-1", r.URL.Query().Get("org_id"))
 		w.Header().Set("Content-Type", "application/json")
 		require.NoError(t, json.NewEncoder(w).Encode(envelope{
 			Code: 0,
 			Data: mustJSONRawMessage(t, response.ProjectListResp{
 				Items: []response.ProjectResp{
-					{ID: "project-1", Name: "alpha"},
-					{ID: "project-2", Name: "beta"},
+					{ID: "project-1", Name: "Shared workspace"},
 				},
 			}),
 		}))
@@ -170,60 +264,15 @@ func TestRunUseProjectSwitchesLocalProjectState(t *testing.T) {
 		ProjectID: "project-1",
 	}))
 
-	err := runUseProject([]string{"--project-id", "project-2"})
-	require.NoError(t, err)
-
-	st, err := loadState()
-	require.NoError(t, err)
-	require.Equal(t, "project-2", st.ProjectID)
-	require.Equal(t, "beta", st.ProjectName)
-}
-
-func TestRunProjectsMarksActiveProject(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTOPT_HOME", root)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method)
-		require.Equal(t, "/api/v1/projects", r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(envelope{
-			Code: 0,
-			Data: mustJSONRawMessage(t, response.ProjectListResp{
-				Items: []response.ProjectResp{
-					{ID: "project-1", Name: "alpha"},
-					{ID: "project-2", Name: "beta"},
-				},
-			}),
-		}))
-	}))
-	defer server.Close()
-
-	require.NoError(t, saveState(state{
-		ServerURL:   server.URL,
-		APIToken:    "token-projects",
-		OrgID:       "org-1",
-		UserID:      "user-1",
-		ProjectID:   "project-2",
-		ProjectName: "beta",
-	}))
-
 	output := captureStdout(t, func() {
 		require.NoError(t, runProjects(nil))
 	})
 
-	var payload struct {
-		ActiveProjectID string `json:"active_project_id"`
-		Items           []struct {
-			ID     string `json:"id"`
-			Active bool   `json:"active"`
-		} `json:"items"`
-	}
+	var payload response.ProjectListResp
 	require.NoError(t, json.Unmarshal([]byte(output), &payload))
-	require.Equal(t, "project-2", payload.ActiveProjectID)
-	require.Len(t, payload.Items, 2)
-	require.False(t, payload.Items[0].Active)
-	require.True(t, payload.Items[1].Active)
+	require.Len(t, payload.Items, 1)
+	require.Equal(t, "project-1", payload.Items[0].ID)
+	require.Equal(t, "Shared workspace", payload.Items[0].Name)
 }
 
 func TestRunPendingIncludesProjectContext(t *testing.T) {
@@ -233,7 +282,7 @@ func TestRunPendingIncludesProjectContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Equal(t, "/api/v1/applies/pending", r.URL.Path)
-		require.Equal(t, "project-2", r.URL.Query().Get("project_id"))
+		require.Equal(t, "project-1", r.URL.Query().Get("project_id"))
 		require.Equal(t, "user-1", r.URL.Query().Get("user_id"))
 		w.Header().Set("Content-Type", "application/json")
 		require.NoError(t, json.NewEncoder(w).Encode(envelope{
@@ -249,12 +298,11 @@ func TestRunPendingIncludesProjectContext(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL:   server.URL,
-		APIToken:    "token-projects",
-		OrgID:       "org-1",
-		UserID:      "user-1",
-		ProjectID:   "project-2",
-		ProjectName: "beta",
+		ServerURL: server.URL,
+		APIToken:  "token-projects",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
 	}))
 
 	output := captureStdout(t, func() {
@@ -269,8 +317,8 @@ func TestRunPendingIncludesProjectContext(t *testing.T) {
 		} `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(output), &payload))
-	require.Equal(t, "project-2", payload.ProjectID)
-	require.Equal(t, "beta", payload.ProjectName)
+	require.Equal(t, "project-1", payload.ProjectID)
+	require.Equal(t, "Shared workspace", payload.ProjectName)
 	require.Len(t, payload.Items, 1)
 	require.Equal(t, "apply-1", payload.Items[0].ApplyID)
 }
@@ -480,6 +528,7 @@ func TestRunSessionUploadsRecentLocalCodexSessions(t *testing.T) {
 func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	target := filepath.Join(root, "config.json")
 	err := os.WriteFile(target, []byte("{\"baseline\":true}\n"), 0o644)
@@ -511,6 +560,7 @@ func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 func TestExecuteLocalApplyAppendsTextFile(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	target := filepath.Join(root, "AGENTS.md")
 	err := os.WriteFile(target, []byte("# Existing\n"), 0o644)
@@ -581,6 +631,7 @@ func TestPreflightLocalApplyRejectsDuplicateTargets(t *testing.T) {
 func TestExecuteLocalApplySupportsMultipleSteps(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	configTarget := filepath.Join(root, "config.json")
 	textTarget := filepath.Join(root, "AGENTS.md")
@@ -619,6 +670,63 @@ func TestExecuteLocalApplySupportsMultipleSteps(t *testing.T) {
 	require.Len(t, backup.Files, 2)
 }
 
+func TestValidateChangedFilesRejectsUnexpectedCodexFileChange(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "AGENTS.md")
+	err := validateChangedFiles(codexApplyRequest{
+		WorkingDirectory: root,
+		AllowedFiles:     []string{target},
+	}, []string{target, filepath.Join(root, "UNAPPROVED.txt")})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unexpected file")
+}
+
+func TestChooseApplyWorkspaceUsesCWDWhenAllTargetsAreInsideIt(t *testing.T) {
+	root := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(root))
+	t.Cleanup(func() {
+		_ = os.Chdir(originalWD)
+	})
+
+	workingDirectory, additionalDirectories, err := chooseApplyWorkspace([]preflightStep{
+		{TargetFile: filepath.Join(root, ".codex", "config.json")},
+		{TargetFile: filepath.Join(root, "AGENTS.md")},
+	})
+	require.NoError(t, err)
+	require.Equal(t, root, workingDirectory)
+	require.Empty(t, additionalDirectories)
+}
+
+func TestChooseApplyWorkspaceAvoidsBroadSharedParent(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	homeDir := filepath.Join(root, "home")
+
+	workingDirectory, additionalDirectories, err := chooseApplyWorkspace([]preflightStep{
+		{TargetFile: filepath.Join(repoDir, "AGENTS.md")},
+		{TargetFile: filepath.Join(homeDir, ".codex", "config.json")},
+	})
+	require.NoError(t, err)
+	require.Equal(t, repoDir, workingDirectory)
+	require.Equal(t, []string{filepath.Join(homeDir, ".codex")}, additionalDirectories)
+}
+
+func TestRunCodexApplyTimesOut(t *testing.T) {
+	useSleepingCodexRunner(t, 200*time.Millisecond)
+	t.Setenv("AGENTOPT_CODEX_TIMEOUT", "10ms")
+
+	_, err := runCodexApply(codexApplyRequest{
+		ApplyID:          "apply-timeout",
+		WorkingDirectory: t.TempDir(),
+		AllowedFiles:     []string{},
+		Steps:            []codexApplyStep{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "timed out")
+}
+
 func TestRunSyncRejectsInvalidIntervalInWatchMode(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
@@ -640,6 +748,7 @@ func TestRunSyncRejectsInvalidIntervalInWatchMode(t *testing.T) {
 func TestRunSyncOnceAppliesPendingPlansAndReportsSuccess(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	configTarget := filepath.Join(root, "config.json")
 	textTarget := filepath.Join(root, "AGENTS.md")
@@ -723,6 +832,7 @@ func TestRunSyncOnceAppliesPendingPlansAndReportsSuccess(t *testing.T) {
 func TestRunSyncOnceReportsFailuresAndContinues(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	validTarget := filepath.Join(root, "config.json")
 	require.NoError(t, os.WriteFile(validTarget, []byte("{\"baseline\":true}\n"), 0o644))
@@ -907,6 +1017,7 @@ func TestRunRollbackRestoresFilesDeletesCreatedOnesAndReportsResult(t *testing.T
 func TestRunApplyYesReviewsPlanBeforeLocalApply(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	configTarget := filepath.Join(root, "config.json")
 	require.NoError(t, os.WriteFile(configTarget, []byte("{\"baseline\":true}\n"), 0o644))
@@ -998,6 +1109,7 @@ func TestRunApplyYesReviewsPlanBeforeLocalApply(t *testing.T) {
 func TestRunApplyYesSkipsReviewForAutoApprovedPlan(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "apply")
 
 	configTarget := filepath.Join(root, "config.json")
 	require.NoError(t, os.WriteFile(configTarget, []byte("{\"baseline\":true}\n"), 0o644))

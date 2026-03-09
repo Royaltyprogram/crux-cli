@@ -34,11 +34,13 @@ Detailed codebase documentation:
 - `agentopt session` auto-collects the latest local Codex session from `~/.codex/sessions` when `--file` is omitted
 - `agentopt session --recent N` uploads the most recent `N` local Codex sessions in chronological order
 - Local apply supports both `JSON merge patches` and safe `text append` patches such as `AGENTS.md`
+- Local apply is executed through a `Codex SDK` runner while preflight, allowlist checks, backup, and rollback stay in the Go CLI
 
 ## Quickstart
 
 ```bash
 make generate
+make install-codex-runner
 make run
 ```
 
@@ -48,7 +50,6 @@ In another shell:
 go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_DASHBOARD>
 go run ./cmd/agentopt connect --project demo-repo --repo-path .
 go run ./cmd/agentopt projects
-go run ./cmd/agentopt use-project --project-id <PROJECT_ID>
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
 go run ./cmd/agentopt session --recent 5
@@ -57,10 +58,8 @@ go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID>
 go run ./cmd/agentopt preflight --apply-id <CHANGE_PLAN_ID>
 go run ./cmd/agentopt review --apply-id <CHANGE_PLAN_ID> --decision approve
 go run ./cmd/agentopt sync
-go run ./cmd/agentopt sync --project-id <PROJECT_ID>
 go run ./cmd/agentopt rollback --apply-id <CHANGE_PLAN_ID>
 go run ./cmd/agentopt history
-go run ./cmd/agentopt history --project-id <PROJECT_ID>
 go run ./cmd/agentopt impact
 go run ./cmd/agentopt audit
 ```
@@ -75,7 +74,13 @@ That path is useful for development because it creates, approves, and applies th
 
 Then open `http://127.0.0.1:8082/`, sign in with `demo@example.com / demo1234`, issue a CLI token from the dashboard, and run `agentopt login --server http://127.0.0.1:8082` on the machine you want to connect. The CLI prompts for the issued token if `--token` is omitted.
 
-If you reconnect the same repo or have multiple projects under one org, use `agentopt projects` to inspect the available `project_id` values and `agentopt use-project --project-id <PROJECT_ID>` to switch the local CLI state before running `pending`, `sync`, `history`, or `impact`. Those commands also accept `--project-id` as a one-off override.
+In this MVP every connected repository shares one workspace per organization. `agentopt connect` keeps that shared workspace current, and `pending`, `sync`, `history`, and `impact` always read from the same rollout stream.
+
+If `sync` or `apply --yes` fails before the plan starts, check the local runner first:
+
+```bash
+make check-codex-runner
+```
 
 ## Research Agent MVP
 
@@ -87,3 +92,4 @@ The cloud research agent is intentionally narrow in this MVP:
 - recommendation output is limited to instruction/custom-rule suggestions for now
 - the local executor now enforces a strict file allowlist before any approved plan is applied
 - the local executor can now apply and roll back multi-step plans across allowlisted files
+- the actual local file edit step is delegated to `Codex SDK`, but the CLI still owns preflight, backup, result reporting, and rollback

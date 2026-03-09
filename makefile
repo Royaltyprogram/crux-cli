@@ -4,6 +4,12 @@ run:
 run-cli:
 	go run ./cmd/agentopt --help
 
+install-codex-runner:
+	cd tools/codex-runner && npm install
+
+check-codex-runner:
+	node tools/codex-runner/run.mjs 2>&1 | grep "usage: run.mjs <request.json>"
+
 E2E_BASE_URL ?= http://127.0.0.1:8082
 e2e:
 	E2E_BASE_URL=$(E2E_BASE_URL) go test -v -count=1 ./e2etest -run TestE2E

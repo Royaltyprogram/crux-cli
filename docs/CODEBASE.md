@@ -32,14 +32,14 @@ It has four runtime surfaces:
 
 ```text
 CLI agentopt
-  -> /api/v1/devices/register
-  -> /api/v1/projects/connect
+  -> /api/v1/agents/register
+  -> /api/v1/projects/register
   -> /api/v1/config-snapshots
   -> /api/v1/session-summaries
   -> /api/v1/recommendations/apply
   -> /api/v1/change-plans/review
-  -> /api/v1/execution-queue
-  -> /api/v1/executions/result
+  -> /api/v1/applies/pending
+  -> /api/v1/applies/result
 
 Server
   -> routes/controller/*
@@ -119,11 +119,10 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
    - opens `/dashboard`
    - issues a scoped CLI token from the dashboard
 3. `connect`
-   - connects a project
-   - reuses the existing project record when the same repo is connected again
-4. `projects` / `use-project`
-   - `projects` lists project IDs visible to the current org
-   - `use-project` switches the active project stored in local CLI state
+   - connects the local repo to the org's shared workspace
+   - every connected repo now feeds the same workspace in the MVP
+4. `projects`
+   - shows the single shared workspace record for the current org
 5. `snapshot` / `session`
    - uploads config snapshots plus token usage and raw query history
    - `session` can auto-collect the latest local Codex session JSONL under `~/.codex/sessions`
@@ -133,11 +132,11 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
 7. `apply`
    - creates a change plan in `awaiting_review`
    - low-risk single-file config merges may be auto-approved by policy
+   - when execution starts, the Go CLI now hands the approved local patch plan to a Codex SDK runner
 8. `review`
    - approves or rejects the plan
 9. `sync`
-   - applies approved plans locally
-   - accepts `--project-id` to target a different connected project without changing stored state
+   - applies approved plans locally from the shared workspace queue
 10. `preflight`
    - validates a queued change plan against local guard rules before execution
 11. `impact`
@@ -166,4 +165,6 @@ Persisted entities:
 - raw query history is uploaded for recommendation analysis, but no raw code is collected
 - live web search and external research integration are intentionally deferred in this branch
 - the local CLI executor only applies allowlisted config files such as `AGENTS.md`, `.mcp.json`, `.codex/config.json`, and `.claude/settings.local.json`
+- the actual file-edit execution step is delegated to `tools/codex-runner/run.mjs`, which wraps the official Codex SDK
+- Go still owns preflight, file allowlist enforcement, backup, rollback, and apply-result reporting
 - approved change plans may contain multiple local patch steps, and rollback restores them in reverse order

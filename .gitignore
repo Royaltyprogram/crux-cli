@@ -25,3 +25,4 @@ data/ent
 wire_gen.go
 resources/bin
 data/agentopt-store.json
+node_modules/
