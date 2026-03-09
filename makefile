@@ -1,3 +1,8 @@
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+AGENTOPT_LDFLAGS = -X 'main.buildVersion=$(VERSION)' -X 'main.buildCommit=$(GIT_COMMIT)' -X 'main.buildDate=$(BUILD_DATE)'
+
 run:
 	APP_MODE=local go run main.go wire_gen.go
 
@@ -28,6 +33,9 @@ ci-beta:
 beta-cli-bundle:
 	./scripts/build_beta_bundle.sh
 
+print-version:
+	@echo $(VERSION)
+
 docker-build:
 	docker build -t agentopt-beta .
 
@@ -38,4 +46,4 @@ generate:
 build: generate
 	go mod tidy -v
 	go build -o=output/server main.go wire_gen.go
-	go build -o=output/agentopt ./cmd/agentopt
+	go build -ldflags "$(AGENTOPT_LDFLAGS)" -o=output/agentopt ./cmd/agentopt

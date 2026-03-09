@@ -1,5 +1,11 @@
 # AgentOpt Closed Beta CLI Bundle
 
+Build metadata:
+
+- Version: `__VERSION__`
+- Commit: `__COMMIT__`
+- Build date: `__BUILD_DATE__`
+
 This bundle includes:
 
 - `agentopt`
@@ -9,6 +15,7 @@ This bundle includes:
 Run the bundled CLI from this directory so the local apply runner stays adjacent to the binary:
 
 ```bash
+./agentopt version
 ./agentopt login --server http://127.0.0.1:8082
 ./agentopt connect --project demo-repo --repo-path .
 ./agentopt snapshot

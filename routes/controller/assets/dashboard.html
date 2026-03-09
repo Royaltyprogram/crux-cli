@@ -918,7 +918,7 @@
       <div class="command-grid">
         <article class="command-card">
           <span class="field-label">1. Unpack beta bundle</span>
-          <div class="command-shell" id="installCommand">tar -xzf agentopt-beta-&lt;os&gt;-&lt;arch&gt;.tar.gz && cd agentopt-beta-&lt;os&gt;-&lt;arch&gt;</div>
+          <div class="command-shell" id="installCommand">tar -xzf agentopt-&lt;version&gt;-&lt;os&gt;-&lt;arch&gt;.tar.gz && cd agentopt-&lt;version&gt;-&lt;os&gt;-&lt;arch&gt;</div>
           <div class="command-actions">
             <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="installCommand" data-copy-label="install command">Copy</button>
           </div>
@@ -1337,7 +1337,7 @@
 
     function renderCLICommands() {
       const origin = window.location.origin || "http://127.0.0.1:8082";
-      $("installCommand").textContent = "tar -xzf agentopt-beta-<os>-<arch>.tar.gz && cd agentopt-beta-<os>-<arch>";
+      $("installCommand").textContent = "tar -xzf agentopt-<version>-<os>-<arch>.tar.gz && cd agentopt-<version>-<os>-<arch>";
       $("loginCommand").textContent = `./agentopt login --server ${origin}`;
       $("connectCommand").textContent = "./agentopt connect --project demo-repo --repo-path .";
       $("uploadCommand").textContent = "./agentopt snapshot && ./agentopt session --recent 1";

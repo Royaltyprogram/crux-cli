@@ -131,13 +131,16 @@ To build the CLI artifact you hand to beta users:
 
 ```bash
 make beta-cli-bundle
+VERSION_LABEL=0.1.0-beta.1 make beta-cli-bundle
 ```
 
-That command produces `output/release/agentopt-beta-<os>-<arch>.tar.gz` with:
+That command produces `output/release/agentopt-<version>-<os>-<arch>.tar.gz` with:
 
 - `agentopt`
 - `tools/codex-runner/run.mjs`
 - the pinned Node dependencies required for local apply
+
+The bundled CLI also answers `./agentopt version`, and `make build` now embeds git version metadata into `output/agentopt`.
 
 ## Container Deploy
 

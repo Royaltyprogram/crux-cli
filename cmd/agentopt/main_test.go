@@ -226,6 +226,26 @@ func TestAPIClientAddsTokenHeader(t *testing.T) {
 	require.Equal(t, "test-token", client.token)
 }
 
+func TestRunVersionPrintsBuildMetadata(t *testing.T) {
+	originalVersion := buildVersion
+	originalCommit := buildCommit
+	originalDate := buildDate
+	buildVersion = "1.2.3-beta.1"
+	buildCommit = "abc1234"
+	buildDate = "2026-03-09T14:00:00Z"
+	t.Cleanup(func() {
+		buildVersion = originalVersion
+		buildCommit = originalCommit
+		buildDate = originalDate
+	})
+
+	output := captureStdout(t, func() {
+		require.NoError(t, run([]string{"version"}))
+	})
+
+	require.Equal(t, "agentopt 1.2.3-beta.1 abc1234 2026-03-09T14:00:00Z", output)
+}
+
 func TestRunLoginAuthenticatesWithIssuedCLIToken(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
@@ -276,6 +296,48 @@ func TestRunLoginAuthenticatesWithIssuedCLIToken(t *testing.T) {
 	require.Equal(t, "demo-org", st.OrgID)
 	require.Equal(t, "demo-user", st.UserID)
 	require.Equal(t, "device-123", st.AgentID)
+}
+
+func TestRunLoginUsesBuildVersionByDefault(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	originalVersion := buildVersion
+	buildVersion = "1.2.3-beta.2"
+	t.Cleanup(func() {
+		buildVersion = originalVersion
+	})
+
+	var uploaded request.CLILoginReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/auth/cli/login", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&uploaded))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.CLILoginResp{
+				AgentID:      "device-123",
+				DeviceID:     "device-123",
+				OrgID:        "demo-org",
+				OrgName:      "Demo Org",
+				UserID:       "demo-user",
+				UserName:     "Demo Operator",
+				UserEmail:    "demo@example.com",
+				Status:       "registered",
+				RegisteredAt: time.Now().UTC(),
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	err := runLogin([]string{
+		"--server", server.URL,
+		"--token", "issued-cli-token",
+		"--device", "work-mac",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "1.2.3-beta.2", uploaded.CLIVersion)
 }
 
 func TestRunProjectsShowsSharedWorkspace(t *testing.T) {

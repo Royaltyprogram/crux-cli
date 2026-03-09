@@ -53,6 +53,12 @@ type apiClient struct {
 	http    *http.Client
 }
 
+var (
+	buildVersion = "dev"
+	buildCommit  = "unknown"
+	buildDate    = ""
+)
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -67,6 +73,9 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "version", "--version", "-v":
+		printVersion()
+		return nil
 	case "login":
 		return runLogin(args[1:])
 	case "connect":
@@ -113,6 +122,7 @@ func run(args []string) error {
 
 func printUsage() {
 	fmt.Println(`agentopt commands:
+  version           print the CLI build version
   login             authenticate with an issued CLI token and register this device
   connect           connect a local repo to the shared workspace for the current org
   snapshot          upload a config snapshot from a JSON file
@@ -133,6 +143,21 @@ func printUsage() {
   preflight         validate a change plan against local guard rules`)
 }
 
+func printVersion() {
+	fmt.Println(versionString())
+}
+
+func versionString() string {
+	parts := []string{"agentopt", buildVersion}
+	if buildCommit != "" && buildCommit != "unknown" {
+		parts = append(parts, buildCommit)
+	}
+	if buildDate != "" {
+		parts = append(parts, buildDate)
+	}
+	return strings.Join(parts, " ")
+}
+
 func runLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	server := fs.String("server", "http://127.0.0.1:8082", "server base URL")
@@ -142,7 +167,7 @@ func runLogin(args []string) error {
 	tools := fs.String("tools", "codex,claude-code", "comma separated tool names")
 	platform := fs.String("platform", "", "device platform")
 	consent := fs.String("consent", "config_snapshot,session_summary,execution_result", "comma separated collection scopes")
-	cliVersion := fs.String("cli-version", "0.1.0-dev", "cli version")
+	cliVersion := fs.String("cli-version", buildVersion, "cli version")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

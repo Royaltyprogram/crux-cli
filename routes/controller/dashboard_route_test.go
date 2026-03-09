@@ -64,7 +64,7 @@ func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "Recommended changes for this workspace")
 	require.Contains(t, rec.Body.String(), "Shared Workspace")
 	require.Contains(t, rec.Body.String(), "Install and connect the CLI")
-	require.Contains(t, rec.Body.String(), "agentopt-beta-&lt;os&gt;-&lt;arch&gt;.tar.gz")
+	require.Contains(t, rec.Body.String(), "agentopt-&lt;version&gt;-&lt;os&gt;-&lt;arch&gt;.tar.gz")
 	require.Contains(t, rec.Body.String(), "./agentopt connect --project demo-repo --repo-path .")
 	require.Contains(t, rec.Body.String(), "./agentopt pending")
 	require.Contains(t, rec.Body.String(), "./agentopt sync")
