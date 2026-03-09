@@ -159,6 +159,15 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	require.Equal(s.T(), applyResp.ApplyID, impactResp.Items[0].ApplyID)
 	require.Greater(s.T(), impactResp.Items[0].SessionsAfter, 0)
 
+	overviewAfterApply := getAPIJSON[response.DashboardOverviewResp](s.T(), s, "/api/v1/dashboard/overview", url.Values{
+		"org_id": []string{orgID},
+	})
+	require.Equal(s.T(), "bugfix", overviewAfterApply.PrimaryTaskType)
+	require.Equal(s.T(), 1, overviewAfterApply.SuccessfulRolloutCount)
+	require.Equal(s.T(), 0, overviewAfterApply.FailedExecutionCount)
+	require.NotEmpty(s.T(), overviewAfterApply.ActionSummary)
+	require.NotEmpty(s.T(), overviewAfterApply.OutcomeSummary)
+
 	rollbackResp := postAPIJSON[response.ApplyResultResp](s.T(), s, http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
 		ApplyID:     applyResp.ApplyID,
 		Success:     true,
@@ -175,6 +184,15 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	require.NotEmpty(s.T(), historyAfterRollback.Items)
 	require.Equal(s.T(), "rollback_confirmed", historyAfterRollback.Items[0].Status)
 	require.True(s.T(), historyAfterRollback.Items[0].RolledBack)
+
+	overviewAfterRollback := getAPIJSON[response.DashboardOverviewResp](s.T(), s, "/api/v1/dashboard/overview", url.Values{
+		"org_id": []string{orgID},
+	})
+	require.Equal(s.T(), "bugfix", overviewAfterRollback.PrimaryTaskType)
+	require.Equal(s.T(), 0, overviewAfterRollback.SuccessfulRolloutCount)
+	require.Equal(s.T(), 0, overviewAfterRollback.FailedExecutionCount)
+	require.NotEmpty(s.T(), overviewAfterRollback.ActionSummary)
+	require.NotEmpty(s.T(), overviewAfterRollback.OutcomeSummary)
 
 	auditResp := getAPIJSON[response.AuditListResp](s.T(), s, "/api/v1/audits", url.Values{
 		"org_id":     []string{orgID},
