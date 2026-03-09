@@ -57,12 +57,38 @@ jobs:
           BETA_SMOKE_PASSWORD: demo1234
         run: ./scripts/closed_beta_smoke.sh
 
+      - name: Upload beta bundle artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentopt-beta-bundle-${{ github.sha }}
+          path: output/release/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload beta binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentopt-beta-binaries-${{ github.sha }}
+          path: |
+            output/server
+            output/agentopt
+          if-no-files-found: error
+
       - name: Stop local server
         if: always()
         run: |
           if [ -f /tmp/agentopt-server.pid ]; then
             kill "$(cat /tmp/agentopt-server.pid)" || true
           fi
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentopt-beta-server-log-${{ github.sha }}
+          path: /tmp/agentopt-server.log
+          if-no-files-found: ignore
 
       - name: Dump server log on failure
         if: failure()
