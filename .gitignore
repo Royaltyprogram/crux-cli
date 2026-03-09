@@ -19,6 +19,8 @@
 log
 .idea
 output/
+.agentopt-dev/
+data/*.db
 
 configs/local.yaml
 data/ent

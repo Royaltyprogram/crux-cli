@@ -133,6 +133,36 @@ That command produces `output/release/agentopt-beta-<os>-<arch>.tar.gz` with:
 - `tools/codex-runner/run.mjs`
 - the pinned Node dependencies required for local apply
 
+## Container Deploy
+
+The container now defaults to:
+
+- `APP_MODE=prod`
+- SQLite state at `/app/data/agentopt.db`
+- stdout request/application logs
+
+Build and run it with a seeded beta account:
+
+```bash
+docker build -t agentopt-beta .
+docker run --rm -p 8082:8082 \
+  -v "$PWD/.runtime-data:/app/data" \
+  -e JWT_SECRET=replace-me \
+  -e AUTH_BOOTSTRAP_USERS_JSON='[{"id":"beta-user-1","org_id":"beta-org","org_name":"Beta Org","email":"beta1@example.com","name":"Beta Operator","password":"replace-me"}]' \
+  agentopt-beta
+```
+
+For MySQL-backed deployment, override the DB env at runtime:
+
+```bash
+docker run --rm -p 8082:8082 \
+  -e DB_DIALECT=mysql \
+  -e DB_DSN='user:pass@tcp(mysql:3306)/agentopt?charset=utf8mb4&parseTime=True&loc=UTC' \
+  -e JWT_SECRET=replace-me \
+  -e AUTH_BOOTSTRAP_USERS_JSON='[...]' \
+  agentopt-beta
+```
+
 ## Research Agent MVP
 
 The cloud research agent is intentionally narrow in this MVP:

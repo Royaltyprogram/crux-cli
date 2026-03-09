@@ -23,6 +23,9 @@ closed-beta-smoke:
 beta-cli-bundle:
 	./scripts/build_beta_bundle.sh
 
+docker-build:
+	docker build -t agentopt-beta .
+
 generate:
 	go generate ./data
 	go tool wire gen wire.go

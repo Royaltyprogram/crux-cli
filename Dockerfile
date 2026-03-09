@@ -7,16 +7,26 @@ COPY . ./
 
 RUN go mod download
 RUN make build
+RUN mkdir -p /app/runtime/data /app/runtime/log
 
 ## Deploy
-FROM gcr.io/distroless/base-debian12
+FROM gcr.io/distroless/base-debian12:nonroot
 
-WORKDIR /
+WORKDIR /app
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /app/configs /configs
-COPY --from=build /app/output/server /server
+COPY --from=build --chown=nonroot:nonroot /app/configs /app/configs
+COPY --from=build --chown=nonroot:nonroot /app/output/server /app/server
+COPY --from=build --chown=nonroot:nonroot /app/runtime/data /app/data
+COPY --from=build --chown=nonroot:nonroot /app/runtime/log /app/log
+
+ENV APP_MODE=prod
+ENV APP_STORE_PATH=/app/data/agentopt.db
+ENV DB_DSN=/app/data/agentopt.db?_fk=1
+ENV HTTP_LOG_TO_STDOUT=true
+
+VOLUME ["/app/data", "/app/log"]
 
 EXPOSE 8082
 
-ENTRYPOINT ["/server"]
+ENTRYPOINT ["/app/server"]
