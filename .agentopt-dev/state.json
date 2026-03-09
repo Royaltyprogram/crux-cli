@@ -1,0 +1,11 @@
+{
+  "server_url": "http://127.0.0.1:8082",
+  "api_token": "agt_cli_54f5ea65d4f9d0e76fc73572006f635f788970173066983c",
+  "org_id": "demo-org",
+  "user_id": "demo-user",
+  "agent_id": "device_000155",
+  "device_name": "doyechan-ui-MacBookAir.local",
+  "hostname": "doyechan-ui-MacBookAir.local",
+  "project_id": "project_000157",
+  "project_name": "demo-repo"
+}

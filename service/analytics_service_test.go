@@ -207,6 +207,161 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Equal(t, "session.ingested", audits.Items[0].Type)
 }
 
+func TestRegisterProjectReusesExistingProjectAndPreservesSignals(t *testing.T) {
+	ctx := context.Background()
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:         conf,
+		AnalyticsStore: store,
+	})
+
+	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+		OrgID:      "org-1",
+		UserID:     "user-1",
+		DeviceName: "macbook",
+	})
+	require.NoError(t, err)
+
+	firstConnect, err := svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-1",
+		AgentID:     agentResp.AgentID,
+		ProjectID:   "project-1",
+		Name:        "demo-repo",
+		RepoHash:    "demo-repo-hash",
+		RepoPath:    ".",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "project-1", firstConnect.ProjectID)
+
+	_, err = svc.UploadConfigSnapshot(ctx, &request.ConfigSnapshotReq{
+		ProjectID:  "project-1",
+		Tool:       "codex",
+		ProfileID:  "baseline",
+		Settings:   map[string]any{"instructions_pack": "baseline"},
+		CapturedAt: time.Now().UTC().Add(-time.Minute),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID: "project-1",
+		SessionID: "session-1",
+		Tool:      "codex",
+		TokenIn:   1200,
+		TokenOut:  320,
+		RawQueries: []string{
+			"Inspect the approval flow and summarize the current behavior.",
+		},
+		Timestamp: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	secondConnect, err := svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-1",
+		AgentID:     agentResp.AgentID,
+		Name:        "demo-repo",
+		RepoHash:    "demo-repo-hash",
+		RepoPath:    "/tmp/demo-repo",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "project-1", secondConnect.ProjectID)
+
+	projects, err := svc.ListProjects(ctx, &request.ProjectListReq{OrgID: "org-1"})
+	require.NoError(t, err)
+	require.Len(t, projects.Items, 1)
+	require.Equal(t, "project-1", projects.Items[0].ID)
+	require.Equal(t, "/tmp/demo-repo", projects.Items[0].RepoPath)
+	require.Equal(t, "baseline", projects.Items[0].LastProfileID)
+	require.NotNil(t, projects.Items[0].LastIngestedAt)
+}
+
+func TestAnalyticsServiceAuthWorkflow(t *testing.T) {
+	ctx := context.Background()
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:         conf,
+		AnalyticsStore: store,
+	})
+
+	loginResp, err := svc.Login(ctx, &request.LoginReq{
+		Email:    "demo@example.com",
+		Password: "demo1234",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, loginResp.SessionToken)
+	require.Equal(t, "demo-user", loginResp.User.ID)
+
+	sessionIdentity, ok := store.ValidateAccessToken(loginResp.SessionToken)
+	require.True(t, ok)
+
+	sessionCtx := WithAuthIdentity(ctx, AuthIdentity{
+		TokenID:   sessionIdentity.TokenID,
+		TokenKind: TokenKindWebSession,
+		OrgID:     loginResp.Organization.ID,
+		UserID:    loginResp.User.ID,
+	})
+
+	sessionResp, err := svc.CurrentSession(sessionCtx)
+	require.NoError(t, err)
+	require.Equal(t, "demo@example.com", sessionResp.User.Email)
+
+	cliTokenResp, err := svc.IssueCLIToken(sessionCtx, &request.IssueCLITokenReq{
+		Label: "Test laptop",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, cliTokenResp.Token)
+
+	tokenListResp, err := svc.ListCLITokens(sessionCtx)
+	require.NoError(t, err)
+	require.Len(t, tokenListResp.Items, 1)
+	require.Equal(t, "active", tokenListResp.Items[0].Status)
+
+	identity, ok := store.ValidateAccessToken(cliTokenResp.Token)
+	require.True(t, ok)
+	require.Equal(t, TokenKindCLI, identity.TokenKind)
+
+	cliCtx := WithAuthIdentity(ctx, *identity)
+	cliLoginResp, err := svc.AuthenticateCLI(cliCtx, &request.CLILoginReq{
+		DeviceName: "test-laptop",
+		Hostname:   "test-laptop.local",
+		Platform:   "darwin/arm64",
+		Tools:      []string{"codex"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "registered", cliLoginResp.Status)
+	require.Equal(t, "demo-org", cliLoginResp.OrgID)
+	require.Equal(t, "demo-user", cliLoginResp.UserID)
+
+	tokenListResp, err = svc.ListCLITokens(sessionCtx)
+	require.NoError(t, err)
+	require.Len(t, tokenListResp.Items, 1)
+	require.NotNil(t, tokenListResp.Items[0].LastUsedAt)
+
+	revokeResp, err := svc.RevokeCLIToken(sessionCtx, &request.RevokeCLITokenReq{
+		TokenID: cliTokenResp.TokenID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "revoked", revokeResp.Status)
+
+	_, ok = store.ValidateAccessToken(cliTokenResp.Token)
+	require.False(t, ok)
+
+	logoutResp, err := svc.Logout(sessionCtx)
+	require.NoError(t, err)
+	require.Equal(t, "signed_out", logoutResp.Status)
+}
+
 func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
 	ctx := context.Background()
 	conf := &configs.Config{}

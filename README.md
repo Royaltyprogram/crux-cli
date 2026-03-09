@@ -45,8 +45,10 @@ make run
 In another shell:
 
 ```bash
-go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token agentopt-dev-token --org demo-org --user demo-user
+go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_DASHBOARD>
 go run ./cmd/agentopt connect --project demo-repo --repo-path .
+go run ./cmd/agentopt projects
+go run ./cmd/agentopt use-project --project-id <PROJECT_ID>
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
 go run ./cmd/agentopt session --recent 5
@@ -55,8 +57,10 @@ go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID>
 go run ./cmd/agentopt preflight --apply-id <CHANGE_PLAN_ID>
 go run ./cmd/agentopt review --apply-id <CHANGE_PLAN_ID> --decision approve
 go run ./cmd/agentopt sync
+go run ./cmd/agentopt sync --project-id <PROJECT_ID>
 go run ./cmd/agentopt rollback --apply-id <CHANGE_PLAN_ID>
 go run ./cmd/agentopt history
+go run ./cmd/agentopt history --project-id <PROJECT_ID>
 go run ./cmd/agentopt impact
 go run ./cmd/agentopt audit
 ```
@@ -69,7 +73,9 @@ go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID> --yes
 
 That path is useful for development because it creates, approves, and applies the plan locally in one step.
 
-Then open `http://127.0.0.1:8082/dashboard`, enter `agentopt-dev-token`, `demo-org`, and the target `project_id`.
+Then open `http://127.0.0.1:8082/`, sign in with `demo@example.com / demo1234`, issue a CLI token from the dashboard, and run `agentopt login --server http://127.0.0.1:8082` on the machine you want to connect. The CLI prompts for the issued token if `--token` is omitted.
+
+If you reconnect the same repo or have multiple projects under one org, use `agentopt projects` to inspect the available `project_id` values and `agentopt use-project --project-id <PROJECT_ID>` to switch the local CLI state before running `pending`, `sync`, `history`, or `impact`. Those commands also accept `--project-id` as a one-off override.
 
 ## Research Agent MVP
 

@@ -18,7 +18,8 @@ func (s *APISuite) TestDashboardPage_OK() {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), http.StatusOK, resp.StatusCode)
-	require.Contains(s.T(), string(body), "Approve with confidence. Measure what changed.")
+	require.Contains(s.T(), string(body), "Review changes, approve safely, and connect each CLI with its own token.")
 	require.Contains(s.T(), string(body), "Recommended changes for this workspace")
-	require.Contains(s.T(), string(body), "Rollouts That Stuck")
+	require.Contains(s.T(), string(body), "Install and connect the CLI")
+	require.Contains(s.T(), string(body), "What improved after rollout")
 }

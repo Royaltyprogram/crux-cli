@@ -31,11 +31,12 @@ func TestRequireAPITokenProtectsAnalyticsAPI(t *testing.T) {
 	conf.App.APIToken = "secret-token"
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
-	echo, err := NewEcho(conf, slog.Default())
-	require.NoError(t, err)
-
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
+
+	echo, err := NewEcho(conf, slog.Default(), store)
+	require.NoError(t, err)
+
 	analyticsSvc := service.NewAnalyticsService(service.Options{
 		Config:         conf,
 		AnalyticsStore: store,
@@ -92,4 +93,33 @@ func TestRequireAPITokenProtectsAnalyticsAPI(t *testing.T) {
 	var data response.AgentRegistrationResp
 	require.NoError(t, json.Unmarshal(env.Data, &data))
 	require.Equal(t, "registered", data.Status)
+
+	loginPayload, err := json.Marshal(request.LoginReq{
+		Email:    "demo@example.com",
+		Password: "demo1234",
+	})
+	require.NoError(t, err)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginPayload))
+	loginReq = loginReq.WithContext(context.Background())
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	echo.ServeHTTP(loginRec, loginReq)
+	require.Equal(t, http.StatusOK, loginRec.Code)
+
+	var sessionCookie *http.Cookie
+	for _, cookie := range loginRec.Result().Cookies() {
+		if cookie.Name == service.WebSessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie)
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	meReq = meReq.WithContext(context.Background())
+	meReq.AddCookie(sessionCookie)
+	meRec := httptest.NewRecorder()
+	echo.ServeHTTP(meRec, meReq)
+	require.Equal(t, http.StatusOK, meRec.Code)
 }

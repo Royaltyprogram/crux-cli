@@ -1,0 +1,269 @@
+package service
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"strings"
+	"time"
+)
+
+const (
+	WebSessionCookieName = "agentopt_web_session"
+
+	TokenKindCLI        = "cli"
+	TokenKindStatic     = "static"
+	TokenKindWebSession = "web_session"
+
+	defaultCLITokenTTL     = 30 * 24 * time.Hour
+	defaultSessionTokenTTL = 24 * time.Hour
+
+	defaultDemoOrgID    = "demo-org"
+	defaultDemoOrgName  = "Demo Org"
+	defaultDemoUserID   = "demo-user"
+	defaultDemoUserName = "Demo Operator"
+	defaultDemoEmail    = "demo@example.com"
+	defaultDemoPassword = "demo1234"
+)
+
+type AccessToken struct {
+	ID          string
+	OrgID       string
+	UserID      string
+	Label       string
+	Kind        string
+	TokenPrefix string
+	TokenHash   string
+	CreatedAt   time.Time
+	ExpiresAt   *time.Time
+	LastUsedAt  *time.Time
+	RevokedAt   *time.Time
+}
+
+type AuthIdentity struct {
+	TokenID   string
+	TokenKind string
+	OrgID     string
+	UserID    string
+}
+
+type authContextKey struct{}
+
+func WithAuthIdentity(ctx context.Context, identity AuthIdentity) context.Context {
+	return context.WithValue(ctx, authContextKey{}, identity)
+}
+
+func AuthIdentityFromContext(ctx context.Context) (AuthIdentity, bool) {
+	identity, ok := ctx.Value(authContextKey{}).(AuthIdentity)
+	return identity, ok
+}
+
+func (s *AnalyticsStore) ensureBootstrapData() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.ensureDemoUserLocked(time.Now().UTC()) {
+		return nil
+	}
+
+	return s.persistLocked()
+}
+
+func (s *AnalyticsStore) ensureDemoUserLocked(now time.Time) bool {
+	modified := false
+
+	org := s.organizations[defaultDemoOrgID]
+	if org == nil {
+		s.organizations[defaultDemoOrgID] = &Organization{
+			ID:   defaultDemoOrgID,
+			Name: defaultDemoOrgName,
+		}
+		modified = true
+	} else if strings.TrimSpace(org.Name) == "" {
+		org.Name = defaultDemoOrgName
+		modified = true
+	}
+
+	user := s.users[defaultDemoUserID]
+	if user == nil {
+		salt, hash := hashPassword(defaultDemoPassword, "")
+		s.users[defaultDemoUserID] = &User{
+			ID:           defaultDemoUserID,
+			OrgID:        defaultDemoOrgID,
+			Email:        defaultDemoEmail,
+			Name:         defaultDemoUserName,
+			PasswordSalt: salt,
+			PasswordHash: hash,
+			CreatedAt:    now,
+		}
+		return true
+	}
+
+	if strings.TrimSpace(user.OrgID) == "" {
+		user.OrgID = defaultDemoOrgID
+		modified = true
+	}
+	if strings.TrimSpace(user.Email) == "" {
+		user.Email = defaultDemoEmail
+		modified = true
+	}
+	if strings.TrimSpace(user.Name) == "" {
+		user.Name = defaultDemoUserName
+		modified = true
+	}
+	if user.CreatedAt.IsZero() {
+		user.CreatedAt = now
+		modified = true
+	}
+	if user.PasswordSalt == "" || user.PasswordHash == "" {
+		salt, hash := hashPassword(defaultDemoPassword, "")
+		user.PasswordSalt = salt
+		user.PasswordHash = hash
+		modified = true
+	}
+
+	return modified
+}
+
+func (s *AnalyticsStore) findUserByEmailLocked(email string) *User {
+	normalized := normalizeEmail(email)
+	if normalized == "" {
+		return nil
+	}
+
+	for _, user := range s.users {
+		if normalizeEmail(user.Email) == normalized {
+			return user
+		}
+	}
+
+	return nil
+}
+
+func (s *AnalyticsStore) issueAccessTokenLocked(kind, orgID, userID, label string, ttl time.Duration, now time.Time) (string, *AccessToken, error) {
+	token, err := newAccessTokenValue(kind)
+	if err != nil {
+		return "", nil, err
+	}
+
+	record := &AccessToken{
+		ID:          s.nextID("token"),
+		OrgID:       orgID,
+		UserID:      userID,
+		Label:       strings.TrimSpace(label),
+		Kind:        kind,
+		TokenPrefix: tokenPrefix(token),
+		TokenHash:   hashSecret(token),
+		CreatedAt:   now,
+	}
+	if ttl > 0 {
+		expiresAt := now.Add(ttl)
+		record.ExpiresAt = &expiresAt
+	}
+
+	s.accessTokens[record.ID] = record
+	return token, record, nil
+}
+
+func (s *AnalyticsStore) ValidateAccessToken(token string) (*AuthIdentity, bool) {
+	secretHash := hashSecret(strings.TrimSpace(token))
+	if secretHash == "" {
+		return nil, false
+	}
+
+	now := time.Now().UTC()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, record := range s.accessTokens {
+		if subtle.ConstantTimeCompare([]byte(record.TokenHash), []byte(secretHash)) != 1 {
+			continue
+		}
+		if record.RevokedAt != nil {
+			return nil, false
+		}
+		if record.ExpiresAt != nil && now.After(record.ExpiresAt.UTC()) {
+			return nil, false
+		}
+
+		return &AuthIdentity{
+			TokenID:   record.ID,
+			TokenKind: record.Kind,
+			OrgID:     record.OrgID,
+			UserID:    record.UserID,
+		}, true
+	}
+
+	return nil, false
+}
+
+func accessTokenStatus(record *AccessToken, now time.Time) string {
+	if record == nil {
+		return "unknown"
+	}
+	if record.RevokedAt != nil {
+		return "revoked"
+	}
+	if record.ExpiresAt != nil && now.After(record.ExpiresAt.UTC()) {
+		return "expired"
+	}
+	return "active"
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func hashPassword(password, salt string) (string, string) {
+	if salt == "" {
+		salt = randomHex(16)
+	}
+	return salt, hashSecret(salt + "\n" + password)
+}
+
+func verifyPassword(user *User, password string) bool {
+	if user == nil || user.PasswordSalt == "" || user.PasswordHash == "" {
+		return false
+	}
+
+	_, hash := hashPassword(password, user.PasswordSalt)
+	return subtle.ConstantTimeCompare([]byte(hash), []byte(user.PasswordHash)) == 1
+}
+
+func newAccessTokenValue(kind string) (string, error) {
+	prefix := "agt_web"
+	if kind == TokenKindCLI {
+		prefix = "agt_cli"
+	}
+
+	return prefix + "_" + randomHex(24), nil
+}
+
+func tokenPrefix(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 14 {
+		return token
+	}
+	return token[:14]
+}
+
+func hashSecret(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func randomHex(size int) string {
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		sum := sha256.Sum256([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+		return hex.EncodeToString(sum[:])
+	}
+	return hex.EncodeToString(buf)
+}

@@ -15,9 +15,10 @@ import (
 	"github.com/liushuangls/go-server-template/configs"
 	"github.com/liushuangls/go-server-template/routes/common"
 	"github.com/liushuangls/go-server-template/routes/middleware"
+	"github.com/liushuangls/go-server-template/service"
 )
 
-func NewEcho(conf *configs.Config, logger *slog.Logger) (*echo.Echo, error) {
+func NewEcho(conf *configs.Config, logger *slog.Logger, store *service.AnalyticsStore) (*echo.Echo, error) {
 	e := echo.New()
 
 	e.Logger = logger
@@ -33,7 +34,7 @@ func NewEcho(conf *configs.Config, logger *slog.Logger) (*echo.Echo, error) {
 		echoMiddleware.Recover(),
 		echoMiddleware.RequestLogger(),
 		echoMiddleware.CORS("*"),
-		middleware.RequireAPIToken(conf.App.APIToken),
+		middleware.RequireAPIToken(conf.App.APIToken, store),
 	)
 
 	return e, nil

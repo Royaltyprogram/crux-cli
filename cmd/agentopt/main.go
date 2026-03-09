@@ -134,6 +134,16 @@ type apiClient struct {
 	http    *http.Client
 }
 
+type projectListOutput struct {
+	ActiveProjectID string            `json:"active_project_id"`
+	Items           []projectListItem `json:"items"`
+}
+
+type projectListItem struct {
+	response.ProjectResp
+	Active bool `json:"active"`
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -166,6 +176,8 @@ func run(args []string) error {
 		return runStatus(args[1:])
 	case "projects":
 		return runProjects(args[1:])
+	case "use-project":
+		return runUseProject(args[1:])
 	case "history":
 		return runHistory(args[1:])
 	case "pending":
@@ -194,7 +206,7 @@ func run(args []string) error {
 
 func printUsage() {
 	fmt.Println(`agentopt commands:
-  login             register a CLI agent and persist local state
+  login             authenticate with an issued CLI token and register this device
   connect           connect a project to the current org/agent
   snapshot          upload a config snapshot from a JSON file
   session           upload one or more session summaries from a JSON file or local Codex session files
@@ -203,6 +215,7 @@ func printUsage() {
   recommendations   list active recommendations for the current project
   status            print org overview and project recommendations
   projects          list projects under the current org
+  use-project       set the active project in local CLI state
   history           list apply history for the current project
   pending           list pending apply jobs visible to the current user/project
   impact            list recommendation impact summaries for the current project
@@ -217,11 +230,7 @@ func printUsage() {
 func runLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	server := fs.String("server", "http://127.0.0.1:8082", "server base URL")
-	token := fs.String("token", os.Getenv("AGENTOPT_TOKEN"), "api token")
-	orgID := fs.String("org", "demo-org", "organization id")
-	orgName := fs.String("org-name", "", "organization display name")
-	userID := fs.String("user", "demo-user", "user id")
-	email := fs.String("email", "demo@example.com", "user email")
+	token := fs.String("token", os.Getenv("AGENTOPT_TOKEN"), "CLI token issued from the dashboard")
 	device := fs.String("device", "", "device name")
 	hostname := fs.String("hostname", "", "hostname")
 	tools := fs.String("tools", "codex,claude-code", "comma separated tool names")
@@ -244,16 +253,21 @@ func runLogin(args []string) error {
 	if deviceName == "" {
 		deviceName = host
 	}
-	if *orgName == "" {
-		*orgName = *orgID
+
+	cliToken := strings.TrimSpace(*token)
+	if cliToken == "" {
+		prompted, err := promptInput("CLI token")
+		if err != nil {
+			return err
+		}
+		cliToken = prompted
+	}
+	if cliToken == "" {
+		return errors.New("login requires a CLI token issued from the dashboard")
 	}
 
-	client := newAPIClient(*server, *token)
-	req := request.RegisterAgentReq{
-		OrgID:         *orgID,
-		OrgName:       *orgName,
-		UserID:        *userID,
-		UserEmail:     *email,
+	client := newAPIClient(*server, cliToken)
+	req := request.CLILoginReq{
 		DeviceName:    deviceName,
 		Hostname:      host,
 		Platform:      defaultString(*platform, runtimePlatform()),
@@ -261,14 +275,14 @@ func runLogin(args []string) error {
 		Tools:         splitComma(*tools),
 		ConsentScopes: splitComma(*consent),
 	}
-	var resp response.AgentRegistrationResp
-	if err := client.doJSON(http.MethodPost, "/api/v1/agents/register", req, &resp); err != nil {
+	var resp response.CLILoginResp
+	if err := client.doJSON(http.MethodPost, "/api/v1/auth/cli/login", req, &resp); err != nil {
 		return err
 	}
 
 	st := state{
 		ServerURL:  strings.TrimRight(*server, "/"),
-		APIToken:   *token,
+		APIToken:   cliToken,
 		OrgID:      resp.OrgID,
 		UserID:     resp.UserID,
 		AgentID:    firstNonEmpty(resp.DeviceID, resp.AgentID),
@@ -302,9 +316,14 @@ func runConnect(args []string) error {
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
+	repoRoot, err := normalizeRepoPath(*repoPath)
+	if err != nil {
+		return err
+	}
+
 	hash := strings.TrimSpace(*repoHash)
 	if hash == "" {
-		hash = sanitizeID(*projectName + "-" + *repoPath)
+		hash = sanitizeID(*projectName + "-" + repoRoot)
 	}
 
 	req := request.RegisterProjectReq{
@@ -313,7 +332,7 @@ func runConnect(args []string) error {
 		ProjectID:   *projectID,
 		Name:        *projectName,
 		RepoHash:    hash,
-		RepoPath:    *repoPath,
+		RepoPath:    repoRoot,
 		LanguageMix: parseLanguageMix(*languageMix),
 		DefaultTool: *tool,
 	}
@@ -429,11 +448,12 @@ func runSession(args []string) error {
 
 func runSnapshots(args []string) error {
 	fs := flag.NewFlagSet("snapshots", flag.ContinueOnError)
+	projectID := fs.String("project-id", "", "project id override")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
 	}
@@ -443,17 +463,18 @@ func runSnapshots(args []string) error {
 	if err := client.doJSON(http.MethodGet, "/api/v1/config-snapshots?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectScopedItems(st, resp.Items))
 }
 
 func runSessions(args []string) error {
 	fs := flag.NewFlagSet("sessions", flag.ContinueOnError)
 	limit := fs.Int("limit", 5, "max number of recent sessions")
+	projectID := fs.String("project-id", "", "project id override")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
 	}
@@ -464,16 +485,17 @@ func runSessions(args []string) error {
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectScopedItems(st, resp.Items))
 }
 
 func runRecommendations(args []string) error {
 	fs := flag.NewFlagSet("recommendations", flag.ContinueOnError)
+	projectID := fs.String("project-id", "", "project id override")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
 	}
@@ -483,16 +505,17 @@ func runRecommendations(args []string) error {
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectScopedItems(st, resp.Items))
 }
 
 func runStatus(args []string) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	projectID := fs.String("project-id", "", "project id override")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
 	}
@@ -508,6 +531,8 @@ func runStatus(args []string) error {
 	}
 
 	payload := map[string]any{
+		"project_id":      st.ProjectID,
+		"project_name":    st.ProjectName,
 		"overview":        overview,
 		"recommendations": recs.Items,
 	}
@@ -530,7 +555,53 @@ func runProjects(args []string) error {
 	if err := client.doJSON(http.MethodGet, "/api/v1/projects?org_id="+url.QueryEscape(st.OrgID), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectListOutput{
+		ActiveProjectID: st.ProjectID,
+		Items:           decorateProjects(resp.Items, st.ProjectID),
+	})
+}
+
+func runUseProject(args []string) error {
+	fs := flag.NewFlagSet("use-project", flag.ContinueOnError)
+	projectID := fs.String("project-id", "", "project id to store in local CLI state")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*projectID) == "" {
+		return errors.New("use-project requires --project-id")
+	}
+
+	st, err := loadState()
+	if err != nil {
+		return err
+	}
+	client := newAPIClient(st.ServerURL, st.APIToken)
+
+	var resp response.ProjectListResp
+	if err := client.doJSON(http.MethodGet, "/api/v1/projects?org_id="+url.QueryEscape(st.OrgID), nil, &resp); err != nil {
+		return err
+	}
+
+	targetID := strings.TrimSpace(*projectID)
+	for _, item := range resp.Items {
+		if item.ID != targetID {
+			continue
+		}
+
+		st.ProjectID = item.ID
+		st.ProjectName = item.Name
+		if err := saveState(st); err != nil {
+			return err
+		}
+
+		return prettyPrint(map[string]any{
+			"project_id":   item.ID,
+			"project_name": item.Name,
+			"status":       "selected",
+		})
+	}
+
+	return fmt.Errorf("project %q not found under org %q", targetID, st.OrgID)
 }
 
 func runHistory(args []string) error {
@@ -540,30 +611,27 @@ func runHistory(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
-	}
-	targetProjectID := st.ProjectID
-	if strings.TrimSpace(*projectID) != "" {
-		targetProjectID = *projectID
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ApplyHistoryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(targetProjectID), nil, &resp); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectScopedItems(st, resp.Items))
 }
 
 func runPending(args []string) error {
 	fs := flag.NewFlagSet("pending", flag.ContinueOnError)
+	projectID := fs.String("project-id", "", "project id override")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
 	}
@@ -574,7 +642,7 @@ func runPending(args []string) error {
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectScopedItems(st, resp.Items))
 }
 
 func runImpact(args []string) error {
@@ -584,21 +652,17 @@ func runImpact(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
-	}
-	targetProjectID := st.ProjectID
-	if strings.TrimSpace(*projectID) != "" {
-		targetProjectID = *projectID
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ImpactSummaryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/impact?project_id="+url.QueryEscape(targetProjectID), nil, &resp); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/impact?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(resp)
+	return prettyPrint(projectScopedItems(st, resp.Items))
 }
 
 func runAudit(args []string) error {
@@ -628,13 +692,14 @@ func runAudit(args []string) error {
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	targetConfig := fs.String("target-config", "", "override local config path for pending apply jobs")
+	projectID := fs.String("project-id", "", "project id override")
 	watch := fs.Bool("watch", false, "poll for pending apply jobs until interrupted")
 	interval := fs.Duration("interval", 15*time.Second, "poll interval in watch mode")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadProjectStateFor(*projectID)
 	if err != nil {
 		return err
 	}
@@ -710,6 +775,8 @@ func runSyncOnce(st state, client *apiClient, targetConfig string) error {
 	}
 
 	if err := prettyPrint(map[string]any{
+		"project_id":    st.ProjectID,
+		"project_name":  st.ProjectName,
 		"pending_count": len(pending.Items),
 		"failed_count":  len(failedApplyIDs),
 		"results":       results,
@@ -1010,6 +1077,21 @@ func loadProjectState() (state, error) {
 	return st, nil
 }
 
+func loadProjectStateFor(projectID string) (state, error) {
+	st, err := loadState()
+	if err != nil {
+		return state{}, err
+	}
+	if target := strings.TrimSpace(projectID); target != "" {
+		st.ProjectID = target
+		st.ProjectName = ""
+	}
+	if st.ProjectID == "" {
+		return state{}, errors.New("project is not connected; run `agentopt connect` first")
+	}
+	return st, nil
+}
+
 func saveState(st state) error {
 	path, err := stateFilePath()
 	if err != nil {
@@ -1037,6 +1119,37 @@ func stateFilePath() (string, error) {
 	return filepath.Join(home, ".agentopt", "state.json"), nil
 }
 
+func normalizeRepoPath(path string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if cleaned == "" {
+		cleaned = "."
+	}
+	absolute, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return absolute, nil
+}
+
+func decorateProjects(items []response.ProjectResp, activeProjectID string) []projectListItem {
+	out := make([]projectListItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, projectListItem{
+			ProjectResp: item,
+			Active:      item.ID == strings.TrimSpace(activeProjectID),
+		})
+	}
+	return out
+}
+
+func projectScopedItems(st state, items any) map[string]any {
+	return map[string]any{
+		"project_id":   st.ProjectID,
+		"project_name": st.ProjectName,
+		"items":        items,
+	}
+}
+
 func prettyPrint(v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
@@ -1044,6 +1157,16 @@ func prettyPrint(v any) error {
 	}
 	fmt.Println(string(data))
 	return nil
+}
+
+func promptInput(label string) (string, error) {
+	fmt.Fprintf(os.Stderr, "%s: ", label)
+	reader := bufio.NewReader(os.Stdin)
+	value, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func loadJSONFile(path string, out any) error {

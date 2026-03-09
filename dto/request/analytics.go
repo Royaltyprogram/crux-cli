@@ -2,6 +2,30 @@ package request
 
 import "time"
 
+type LoginReq struct {
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required"`
+}
+
+type IssueCLITokenReq struct {
+	Label string `json:"label"`
+}
+
+type RevokeCLITokenReq struct {
+	TokenID string `json:"token_id" validate:"required"`
+}
+
+type CLILoginReq struct {
+	DeviceName    string   `json:"device_name" validate:"required"`
+	Hostname      string   `json:"hostname"`
+	Platform      string   `json:"platform"`
+	CLIVersion    string   `json:"cli_version"`
+	Tools         []string `json:"tools"`
+	ConsentScopes []string `json:"consent_scopes"`
+	AgentID       string   `json:"agent_id"`
+	DeviceID      string   `json:"device_id"`
+}
+
 type RegisterAgentReq struct {
 	OrgID         string   `json:"org_id" validate:"required"`
 	OrgName       string   `json:"org_name"`

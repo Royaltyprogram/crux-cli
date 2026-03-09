@@ -1,0 +1,7 @@
+{
+  "context_window_hint": "large-repo",
+  "hook_timeout_sec": 90,
+  "instructions_pack": "repo-research",
+  "post_edit_hook": "placeholder: run local verification",
+  "retrieval_mode": "hierarchical"
+}

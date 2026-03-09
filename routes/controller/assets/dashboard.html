@@ -1,32 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentOpt Workspace Dashboard</title>
   <style>
     :root {
-      --bg-top: #f6efe1;
-      --bg-bottom: #e8efe8;
-      --panel: rgba(255, 250, 244, 0.84);
-      --panel-strong: rgba(255, 255, 255, 0.92);
-      --ink: #17232d;
-      --muted: #5d6a73;
-      --line: rgba(23, 35, 45, 0.08);
-      --accent: #bd5d38;
-      --accent-deep: #8c3b20;
-      --support: #1c6b73;
-      --good: #1e7a4e;
-      --warn: #9a6a18;
-      --danger: #a43b30;
-      --shadow: 0 20px 70px rgba(23, 35, 45, 0.12);
-      --radius-xl: 30px;
-      --radius-lg: 22px;
+      --canvas-top: #f3ece1;
+      --canvas-bottom: #e8f0ec;
+      --surface: rgba(255, 255, 255, 0.94);
+      --surface-soft: rgba(248, 250, 248, 0.92);
+      --surface-muted: rgba(244, 247, 245, 0.98);
+      --ink: #14212a;
+      --muted: #5a6973;
+      --line: rgba(20, 33, 42, 0.10);
+      --line-strong: rgba(20, 33, 42, 0.16);
+      --accent: #a75231;
+      --accent-deep: #7d3a1f;
+      --accent-soft: rgba(167, 82, 49, 0.12);
+      --support: #1e6870;
+      --support-soft: rgba(30, 104, 112, 0.11);
+      --good: #1d7648;
+      --good-soft: rgba(29, 118, 72, 0.14);
+      --warn: #8e621b;
+      --warn-soft: rgba(142, 98, 27, 0.16);
+      --danger: #a23d33;
+      --danger-soft: rgba(162, 61, 51, 0.14);
+      --shadow: 0 18px 42px rgba(20, 33, 42, 0.08);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
       --radius-md: 16px;
+      --radius-sm: 12px;
     }
 
     * {
       box-sizing: border-box;
+    }
+
+    html {
+      color-scheme: light;
     }
 
     body {
@@ -34,34 +47,61 @@
       min-height: 100vh;
       color: var(--ink);
       font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
       background:
-        radial-gradient(circle at top left, rgba(189, 93, 56, 0.20), transparent 28%),
-        radial-gradient(circle at bottom right, rgba(28, 107, 115, 0.16), transparent 32%),
-        linear-gradient(160deg, var(--bg-top) 0%, #f8f4ed 42%, var(--bg-bottom) 100%);
+        radial-gradient(circle at top left, rgba(167, 82, 49, 0.18), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(30, 104, 112, 0.14), transparent 28%),
+        linear-gradient(160deg, var(--canvas-top) 0%, #f7f4ee 38%, var(--canvas-bottom) 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+      background-size: 36px 36px;
+      opacity: 0.22;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
     }
 
     .page-shell {
-      width: min(1180px, calc(100% - 32px));
-      margin: 28px auto 40px;
-      padding: 24px;
-      border-radius: 36px;
-      border: 1px solid var(--line);
-      background: rgba(255, 251, 246, 0.72);
-      backdrop-filter: blur(18px);
-      box-shadow: var(--shadow);
+      position: relative;
+      width: min(1240px, calc(100% - 32px));
+      margin: 24px auto 40px;
+      display: grid;
+      gap: 16px;
     }
 
-    h1, h2, h3, p {
-      margin: 0;
+    .hero,
+    .summary-grid,
+    .content-grid,
+    .subgrid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero {
+      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.95fr);
+      align-items: stretch;
     }
 
     .eyebrow,
     .section-kicker,
     .field-label,
     .summary-label {
+      font-size: 11px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      font-size: 11px;
     }
 
     .eyebrow,
@@ -69,41 +109,39 @@
       color: var(--accent-deep);
     }
 
-    .hero {
-      display: grid;
-      grid-template-columns: 1.2fr 0.95fr;
-      gap: 18px;
-      margin-bottom: 18px;
-    }
-
     .hero-copy,
     .access-panel,
     .panel,
-    .summary-card {
+    .summary-card,
+    .context-bar {
       position: relative;
       overflow: hidden;
       border: 1px solid var(--line);
-      background: var(--panel);
       border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
     }
 
     .hero-copy {
-      padding: 30px;
-      min-height: 280px;
+      padding: 34px;
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      min-height: 292px;
       background:
-        radial-gradient(circle at top right, rgba(255, 255, 255, 0.78), transparent 44%),
-        linear-gradient(135deg, rgba(255, 251, 246, 0.94), rgba(252, 247, 240, 0.72));
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.82), transparent 42%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(247, 242, 234, 0.94));
     }
 
     .hero-copy::after {
       content: "";
       position: absolute;
-      right: -36px;
-      bottom: -42px;
-      width: 160px;
-      height: 160px;
+      right: -42px;
+      bottom: -58px;
+      width: 190px;
+      height: 190px;
       border-radius: 50%;
-      background: linear-gradient(135deg, rgba(189, 93, 56, 0.18), rgba(28, 107, 115, 0.08));
+      background: linear-gradient(135deg, rgba(167, 82, 49, 0.18), rgba(30, 104, 112, 0.06));
     }
 
     .hero h1,
@@ -114,24 +152,23 @@
     }
 
     .hero h1 {
-      font-size: clamp(38px, 5.4vw, 64px);
-      line-height: 0.95;
-      max-width: 10ch;
-      margin: 12px 0 14px;
+      max-width: 11ch;
+      font-size: clamp(36px, 5vw, 60px);
+      line-height: 1.02;
     }
 
     .hero p {
-      max-width: 58ch;
+      max-width: 60ch;
       color: var(--muted);
+      font-size: 16px;
       line-height: 1.7;
-      font-size: 15px;
     }
 
     .hero-note-row {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-top: 20px;
+      margin-top: 4px;
     }
 
     .hero-note {
@@ -139,23 +176,25 @@
       align-items: center;
       padding: 10px 14px;
       border-radius: 999px;
-      border: 1px solid rgba(23, 35, 45, 0.08);
-      background: rgba(255, 255, 255, 0.78);
-      font-size: 13px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.86);
       color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 8px 18px rgba(20, 33, 42, 0.04);
     }
 
     .access-panel {
       padding: 24px;
       display: grid;
-      gap: 14px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 244, 236, 0.82));
+      gap: 16px;
+      align-content: start;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(242, 247, 244, 0.96));
     }
 
     .field-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
     }
 
@@ -172,128 +211,350 @@
     select,
     button {
       width: 100%;
-      border: 1px solid var(--line);
       border-radius: 16px;
       font: inherit;
     }
 
     input,
     select {
-      background: rgba(255, 255, 255, 0.94);
       padding: 13px 14px;
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.96);
       color: var(--ink);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    input::placeholder {
+      color: rgba(90, 105, 115, 0.7);
+    }
+
+    input:focus,
+    select:focus,
+    button:focus-visible {
+      outline: none;
+      border-color: rgba(30, 104, 112, 0.36);
+      box-shadow: 0 0 0 3px rgba(30, 104, 112, 0.12);
     }
 
     button {
+      border: 1px solid transparent;
       cursor: pointer;
       padding: 13px 16px;
       font-weight: 700;
-      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+      color: var(--ink);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, border-color 0.18s ease;
     }
 
-    button:hover {
+    button:hover:not(:disabled) {
       transform: translateY(-1px);
-      box-shadow: 0 10px 22px rgba(23, 35, 45, 0.12);
+      box-shadow: 0 12px 24px rgba(20, 33, 42, 0.10);
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+      transform: none;
+      box-shadow: none;
     }
 
     .primary-button {
-      background: linear-gradient(135deg, var(--accent), #d87a4b);
-      color: white;
+      background: linear-gradient(135deg, var(--accent), #c56b45);
+      color: #fff;
     }
 
     .secondary-button {
-      background: rgba(255, 255, 255, 0.88);
-      color: var(--ink);
+      border-color: var(--line-strong);
+      background: rgba(255, 255, 255, 0.92);
     }
 
     .ghost-button {
-      background: rgba(28, 107, 115, 0.08);
+      border-color: rgba(30, 104, 112, 0.18);
+      background: var(--support-soft);
       color: var(--support);
     }
 
+    .form-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .form-actions button {
+      width: auto;
+      min-width: 180px;
+    }
+
+    .form-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
     .status {
-      min-height: 20px;
+      min-height: 22px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--surface-muted);
       color: var(--muted);
       font-size: 14px;
       line-height: 1.5;
     }
 
-    .summary-grid {
+    .status[data-tone="error"] {
+      border-color: rgba(162, 61, 51, 0.22);
+      background: rgba(255, 246, 245, 0.96);
+      color: var(--danger);
+    }
+
+    .dashboard-header {
+      gap: 18px;
+    }
+
+    .dashboard-header-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .dashboard-copy {
+      display: grid;
+      gap: 10px;
+    }
+
+    .dashboard-copy h1 {
+      max-width: 16ch;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      font-size: clamp(34px, 4vw, 52px);
+      line-height: 1.02;
+    }
+
+    .dashboard-copy p {
+      max-width: 64ch;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .dashboard-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .dashboard-actions button {
+      width: auto;
+      min-width: 180px;
+    }
+
+    .secondary-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: auto;
+      min-width: 150px;
+      padding: 13px 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--ink);
+      font: inherit;
+      font-weight: 700;
+      text-decoration: none;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease, border-color 0.18s ease;
+    }
+
+    .secondary-link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 24px rgba(20, 33, 42, 0.10);
+    }
+
+    .context-list {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
-      margin-bottom: 12px;
+    }
+
+    .context-card {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .context-card strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .command-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .command-card {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      padding: 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .command-shell {
+      min-height: 58px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      background: #18232d;
+      color: #f4f6f4;
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
+    .token-output {
+      background: linear-gradient(135deg, rgba(30, 104, 112, 0.96), rgba(20, 33, 42, 0.96));
+    }
+
+    .command-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .command-actions button {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .summary-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .dashboard-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .tab-button {
+      width: auto;
+      min-width: 140px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+      box-shadow: none;
+    }
+
+    .tab-button.is-active {
+      border-color: rgba(167, 82, 49, 0.20);
+      background: linear-gradient(135deg, rgba(167, 82, 49, 0.14), rgba(30, 104, 112, 0.08));
+      color: var(--ink);
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.is-active {
+      display: block;
+      animation: panel-fade 0.22s ease;
+    }
+
+    .focus-grid,
+    .detail-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .focus-grid {
+      grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+    }
+
+    .detail-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .full-span {
+      grid-column: 1 / -1;
     }
 
     .summary-card {
-      padding: 18px;
-      background: var(--panel-strong);
+      padding: 20px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 246, 0.94));
     }
 
     .summary-label {
-      color: var(--muted);
       margin-bottom: 10px;
+      color: var(--muted);
     }
 
     .summary-value {
-      font-size: 32px;
+      margin-bottom: 10px;
+      font-size: clamp(30px, 4vw, 42px);
       line-height: 1;
-      font-weight: 700;
-      margin-bottom: 8px;
+      font-weight: 750;
+      letter-spacing: -0.03em;
     }
 
     .summary-caption {
       color: var(--muted);
       font-size: 14px;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     .context-bar {
-      margin-bottom: 18px;
-      padding: 16px 18px;
-      border-radius: 18px;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.72);
-      color: var(--muted);
-      font-size: 14px;
+      padding: 18px 20px;
+      background: linear-gradient(135deg, rgba(30, 104, 112, 0.10), rgba(167, 82, 49, 0.09));
+      color: var(--ink);
+      font-size: 15px;
       line-height: 1.6;
-    }
-
-    .content-grid {
-      display: grid;
-      grid-template-columns: 1.08fr 0.92fr;
-      gap: 16px;
-      margin-bottom: 16px;
     }
 
     .panel {
-      padding: 20px;
-      background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(250, 244, 236, 0.74));
+      padding: 22px;
+      display: grid;
+      gap: 16px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 249, 248, 0.92));
     }
 
     .section-head {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 14px;
+      display: grid;
+      gap: 8px;
     }
 
     .section-head h2 {
-      font-size: 27px;
-      line-height: 1.05;
       margin-top: 4px;
+      font-size: 29px;
+      line-height: 1.08;
     }
 
     .section-copy {
+      max-width: 42ch;
       color: var(--muted);
       font-size: 14px;
-      line-height: 1.6;
-      max-width: 44ch;
+      line-height: 1.65;
     }
 
-    .list {
+    .list,
+    .workspace-wrap {
       display: grid;
       gap: 12px;
     }
@@ -301,12 +562,12 @@
     .item,
     .subpanel {
       border-radius: var(--radius-md);
-      border: 1px solid rgba(23, 35, 45, 0.08);
-      background: rgba(255, 252, 248, 0.88);
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
     }
 
     .item {
-      padding: 16px;
+      padding: 18px;
     }
 
     .item-top,
@@ -314,58 +575,66 @@
     .workspace-list {
       display: flex;
       gap: 10px;
-      align-items: center;
     }
 
     .item-top {
-      justify-content: space-between;
-      margin-bottom: 8px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 10px;
     }
 
     .item-title {
+      max-width: 100%;
       font-size: 18px;
-      line-height: 1.25;
+      line-height: 1.3;
       font-weight: 700;
     }
 
     .item-title small {
       display: block;
-      margin-top: 4px;
-      font-weight: 500;
+      margin-top: 5px;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 14px;
+      line-height: 1.55;
+      font-weight: 500;
     }
 
     .pill {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: fit-content;
+      max-width: 100%;
       padding: 7px 11px;
       border-radius: 999px;
+      background: rgba(20, 33, 42, 0.08);
+      color: var(--ink);
       font-size: 12px;
       font-weight: 700;
-      white-space: nowrap;
-      background: rgba(23, 35, 45, 0.08);
-      color: var(--ink);
+      white-space: normal;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      text-wrap: pretty;
     }
 
     .pill-good {
-      background: rgba(30, 122, 78, 0.12);
+      background: var(--good-soft);
       color: var(--good);
     }
 
     .pill-warn {
-      background: rgba(154, 106, 24, 0.14);
+      background: var(--warn-soft);
       color: var(--warn);
     }
 
     .pill-danger {
-      background: rgba(164, 59, 48, 0.12);
+      background: var(--danger-soft);
       color: var(--danger);
     }
 
     .pill-sky {
-      background: rgba(28, 107, 115, 0.11);
+      background: var(--support-soft);
       color: var(--support);
     }
 
@@ -385,17 +654,17 @@
     .fact {
       padding: 12px;
       border-radius: 14px;
-      background: rgba(244, 238, 229, 0.86);
-      border: 1px solid rgba(23, 35, 45, 0.05);
+      border: 1px solid var(--line);
+      background: rgba(246, 248, 246, 0.96);
     }
 
     .fact strong {
       display: block;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--muted);
       margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     .step-list {
@@ -406,17 +675,19 @@
 
     .step-line {
       padding: 10px 12px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.78);
-      border: 1px solid rgba(23, 35, 45, 0.05);
-      font-size: 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(20, 33, 42, 0.06);
+      background: rgba(255, 255, 255, 0.92);
       color: var(--ink);
-      line-height: 1.5;
+      font-size: 14px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
     }
 
     .action-row {
-      margin-top: 14px;
       flex-wrap: wrap;
+      align-items: center;
+      margin-top: 14px;
     }
 
     .action-row button {
@@ -424,13 +695,9 @@
       min-width: 126px;
     }
 
-    .workspace-wrap {
-      display: grid;
-      gap: 14px;
-    }
-
     .workspace-list {
       flex-wrap: wrap;
+      align-items: center;
     }
 
     .workspace-chip {
@@ -439,127 +706,272 @@
       gap: 8px;
       width: auto;
       padding: 11px 14px;
+      border: 1px solid var(--line-strong);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.92);
       color: var(--ink);
-      font-weight: 600;
+      font-weight: 650;
     }
 
     .workspace-chip.is-active {
-      background: linear-gradient(135deg, rgba(189, 93, 56, 0.14), rgba(28, 107, 115, 0.08));
-      border-color: rgba(189, 93, 56, 0.24);
+      border-color: rgba(167, 82, 49, 0.28);
+      background: linear-gradient(135deg, rgba(167, 82, 49, 0.15), rgba(30, 104, 112, 0.08));
     }
 
     .workspace-chip small {
       color: var(--muted);
+      font-size: 13px;
       font-weight: 500;
     }
 
     .subgrid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .subpanel {
-      padding: 16px;
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 249, 247, 0.92));
     }
 
     .subpanel h3 {
-      font-size: 20px;
       margin-bottom: 12px;
+      font-size: 21px;
+      line-height: 1.15;
     }
 
     .empty {
-      background: rgba(255, 252, 248, 0.64);
+      background: rgba(249, 250, 249, 0.94);
+    }
+
+    @keyframes panel-fade {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 1120px) {
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .context-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     @media (max-width: 1024px) {
+
       .hero,
-      .content-grid,
-      .summary-grid,
-      .subgrid {
+      .focus-grid,
+      .detail-grid,
+      .subgrid,
+      .command-grid {
         grid-template-columns: 1fr;
+      }
+
+      .detail-grid .full-span {
+        grid-column: auto;
+      }
+
+      .dashboard-header-top {
+        flex-direction: column;
+      }
+
+      .dashboard-actions {
+        justify-content: flex-start;
       }
     }
 
     @media (max-width: 720px) {
       .page-shell {
         width: min(100%, calc(100% - 18px));
-        padding: 14px;
-        margin: 10px auto 18px;
+        margin: 12px auto 20px;
       }
 
       .hero-copy,
       .access-panel,
       .panel,
-      .summary-card {
+      .summary-card,
+      .context-bar {
         border-radius: 24px;
       }
 
       .hero-copy,
       .access-panel,
-      .panel {
+      .panel,
+      .subpanel {
         padding: 18px;
       }
 
       .field-grid,
-      .fact-grid {
+      .fact-grid,
+      .summary-grid,
+      .command-grid {
         grid-template-columns: 1fr;
+      }
+
+      .context-list {
+        grid-template-columns: 1fr;
+      }
+
+      .dashboard-nav {
+        padding: 6px;
+      }
+
+      .tab-button {
+        width: 100%;
+      }
+
+      .section-head {
+        gap: 10px;
       }
 
       .hero h1 {
         max-width: none;
       }
+
+      .item-top {
+        flex-direction: column;
+      }
+
+      .form-actions button,
+      .action-row button,
+      .dashboard-actions button,
+      .secondary-link {
+        width: 100%;
+      }
     }
   </style>
 </head>
+
 <body>
   <main class="page-shell">
     <section class="hero">
       <article class="hero-copy">
-        <div class="eyebrow">AI Workspace Operations</div>
-        <h1>Approve with confidence. Measure what changed.</h1>
-        <p>AgentOpt watches how your AI workspace is configured, suggests safer improvements, and helps you roll them out only after approval.</p>
+        <div class="eyebrow">Workspace Dashboard</div>
+        <h1 id="sessionHeading">Review changes, approve safely, and connect each CLI with its own token.</h1>
+        <p id="sessionSummary">The dashboard now starts from a signed-in web session. Use it to issue CLI tokens, approve rollout plans, and keep local execution separated from browser access.</p>
         <div class="hero-note-row">
-          <span class="hero-note">No raw code upload</span>
-          <span class="hero-note">Approval before rollout</span>
-          <span class="hero-note">Impact tracked after changes</span>
+          <span class="hero-note">Signed-in org context</span>
+          <span class="hero-note">CLI token issued from web</span>
+          <span class="hero-note">Local apply only after approval</span>
         </div>
       </article>
-      <form class="access-panel" onsubmit="event.preventDefault(); load();">
+
+      <aside class="access-panel">
         <div>
-          <div class="section-kicker">Workspace access</div>
-          <p class="section-copy">Open one workspace, review its suggestions, and decide what should change next.</p>
+          <div class="section-kicker">Signed-in session</div>
+          <p class="section-copy">Your browser session drives the dashboard. The CLI uses a separate token that you can issue below and paste into `agentopt login`.</p>
         </div>
-        <div class="field-grid">
-          <label class="field">
-            <span class="field-label">Access token</span>
-            <input id="apiToken" placeholder="agentopt token">
-          </label>
-          <label class="field">
+
+        <div class="context-list">
+          <div class="context-card">
+            <span class="field-label">User</span>
+            <strong id="contextUser">-</strong>
+          </div>
+          <div class="context-card">
             <span class="field-label">Organization</span>
-            <input id="orgId" placeholder="organization id" value="demo-org">
-          </label>
-          <label class="field">
+            <strong id="contextOrg">-</strong>
+          </div>
+          <div class="context-card">
             <span class="field-label">Workspace</span>
-            <input id="projectId" placeholder="leave blank to use the first workspace">
-          </label>
-          <label class="field">
-            <span class="field-label">Reviewer</span>
-            <input id="requestedBy" placeholder="your user id">
-          </label>
-          <label class="field">
-            <span class="field-label">Rollout scope</span>
-            <select id="applyScope">
-              <option value="user">Just me</option>
-              <option value="project">Entire workspace</option>
-            </select>
-          </label>
+            <strong id="contextProject">Waiting for selection</strong>
+          </div>
+          <div class="context-card">
+            <span class="field-label">Scope</span>
+            <strong id="contextScope">Just me</strong>
+          </div>
         </div>
-        <button id="loadBtn" class="primary-button" type="submit">Open dashboard</button>
-        <div class="status" id="status">Enter your access details to load a workspace.</div>
-      </form>
+
+        <label class="field">
+          <span class="field-label">Rollout scope</span>
+          <select id="applyScope">
+            <option value="user">Just me</option>
+            <option value="project">Entire workspace</option>
+          </select>
+        </label>
+
+        <div class="dashboard-actions">
+          <button id="issueTokenBtn" class="primary-button" type="button" data-action="issue-cli-token">Issue CLI token</button>
+          <button id="loadBtn" class="secondary-button" type="button" data-action="refresh-dashboard">Refresh dashboard</button>
+          <button id="signOutBtn" class="secondary-button" type="button" data-action="sign-out">Sign out</button>
+        </div>
+
+        <div class="status" id="status" data-tone="info" aria-live="polite">Loading workspace signals...</div>
+      </aside>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">CLI onboarding</div>
+          <h2>Install and connect the CLI</h2>
+        </div>
+        <div class="section-copy">Generate a CLI token in this dashboard, then run the login command locally and paste the token when prompted.</div>
+      </div>
+
+      <div class="command-grid">
+        <article class="command-card">
+          <span class="field-label">1. Install</span>
+          <div class="command-shell" id="installCommand">go install github.com/liushuangls/go-server-template/cmd/agentopt@latest</div>
+          <div class="command-actions">
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="installCommand" data-copy-label="install command">Copy</button>
+          </div>
+        </article>
+        <article class="command-card">
+          <span class="field-label">2. Authenticate</span>
+          <div class="command-shell" id="loginCommand">agentopt login --server http://127.0.0.1:8082</div>
+          <div class="command-actions">
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="loginCommand" data-copy-label="login command">Copy</button>
+          </div>
+        </article>
+        <article class="command-card">
+          <span class="field-label">3. Select workspace</span>
+          <div class="command-shell" id="projectCommand">agentopt use-project --project-id &lt;select a workspace&gt;</div>
+          <div class="command-actions">
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="projectCommand" data-copy-label="workspace command">Copy</button>
+          </div>
+        </article>
+        <article class="command-card">
+          <span class="field-label">4. Check queue</span>
+          <div class="command-shell" id="pendingCommand">agentopt pending --project-id &lt;select a workspace&gt;</div>
+          <div class="command-actions">
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="pendingCommand" data-copy-label="pending command">Copy</button>
+          </div>
+        </article>
+        <article class="command-card">
+          <span class="field-label">5. Apply approved plan</span>
+          <div class="command-shell" id="syncCommand">agentopt sync --project-id &lt;select a workspace&gt;</div>
+          <div class="command-actions">
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="syncCommand" data-copy-label="sync command">Copy</button>
+          </div>
+        </article>
+        <article class="command-card">
+          <span class="field-label">6. Latest CLI token</span>
+          <div class="command-shell token-output" id="issuedCliToken">Issue a CLI token from this dashboard.</div>
+          <div class="command-actions">
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="issuedCliToken" data-copy-label="CLI token">Copy</button>
+          </div>
+        </article>
+      </div>
+
+      <div class="form-note" id="cliTokenMeta">CLI tokens are shown once, scoped to your account, and expire after 30 days. Workspace-specific commands update when you switch the selected project below.</div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <div class="section-kicker">CLI tokens</div>
+          <h2>Manage issued CLI access</h2>
+        </div>
+        <div class="section-copy">Active CLI tokens stay separate from your browser session. Revoke any token that should no longer authenticate local devices.</div>
+      </div>
+      <div class="list" id="cliTokenList"></div>
     </section>
 
     <section class="summary-grid">
@@ -589,92 +1001,116 @@
       Recommendations will sharpen after a few more sessions and setup snapshots.
     </section>
 
-    <section class="content-grid">
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <div class="section-kicker">Recommended next</div>
-            <h2>Recommended changes for this workspace</h2>
+    <nav class="dashboard-nav" aria-label="Dashboard views">
+      <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="focus">Focus View</button>
+      <button class="tab-button" type="button" data-action="switch-tab" data-tab="rollout">Rollout</button>
+      <button class="tab-button" type="button" data-action="switch-tab" data-tab="workspace">Workspace</button>
+    </nav>
+
+    <section class="tab-panel is-active" data-tab-panel="focus">
+      <div class="focus-grid">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Recommended next</div>
+              <h2>Recommended changes for this workspace</h2>
+            </div>
+            <div class="section-copy">The first screen now stays focused on the next changes that need your decision.</div>
           </div>
-          <div class="section-copy">Each suggestion explains why it matters now and what will change before you approve anything.</div>
-        </div>
-        <div class="list" id="recommendationList"></div>
-      </article>
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <div class="section-kicker">Needs approval</div>
-            <h2>Waiting for your sign-off</h2>
+          <div class="list" id="recommendationList"></div>
+        </article>
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Needs approval</div>
+              <h2>Waiting for your sign-off</h2>
+            </div>
+            <div class="section-copy">Only reviewed plans stay here, so the approval queue is easy to scan.</div>
           </div>
-          <div class="section-copy">Only approved plans can be picked up by the local CLI agent.</div>
-        </div>
-        <div class="list" id="reviewQueueList"></div>
-      </article>
+          <div class="list" id="reviewQueueList"></div>
+        </article>
+      </div>
     </section>
 
-    <section class="content-grid">
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <div class="section-kicker">Queued rollout</div>
-            <h2>Ready to apply</h2>
+    <section class="tab-panel" data-tab-panel="rollout" hidden>
+      <div class="detail-grid">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Queued rollout</div>
+              <h2>Ready to apply</h2>
+            </div>
+            <div class="section-copy">Approved plans wait here for the next safe local sync.</div>
           </div>
-          <div class="section-copy">These plans are approved and waiting for the next safe local sync.</div>
-        </div>
-        <div class="list" id="pendingApplyList"></div>
-      </article>
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <div class="section-kicker">Measured outcomes</div>
-            <h2>What improved after rollout</h2>
+          <div class="list" id="pendingApplyList"></div>
+        </article>
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Measured outcomes</div>
+              <h2>What improved after rollout</h2>
+            </div>
+            <div class="section-copy">Outcome tracking stays separate so it does not crowd the decision view.</div>
           </div>
-          <div class="section-copy">AgentOpt compares before and after signals so you can see whether a change actually helped.</div>
-        </div>
-        <div class="list" id="impactList"></div>
-      </article>
+          <div class="list" id="impactList"></div>
+        </article>
+        <article class="panel full-span">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Recent changes</div>
+              <h2>Rollout history at a glance</h2>
+            </div>
+            <div class="section-copy">Review the recent execution trail only when you need rollout context.</div>
+          </div>
+          <div class="list" id="applyHistoryList"></div>
+        </article>
+      </div>
     </section>
 
-    <section class="content-grid">
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <div class="section-kicker">Current workspace</div>
-            <h2>Setup and recent patterns</h2>
+    <section class="tab-panel" data-tab-panel="workspace" hidden>
+      <div class="detail-grid">
+        <article class="panel full-span">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Current workspace</div>
+              <h2>Setup and recent patterns</h2>
+            </div>
+            <div class="section-copy">Configuration context and recent work patterns are grouped here instead of sharing the main screen.</div>
           </div>
-          <div class="section-copy">A compact view of the workspace you are currently reviewing.</div>
-        </div>
-        <div class="workspace-wrap">
-          <div class="workspace-list" id="projectList"></div>
-          <div class="subgrid">
-            <section class="subpanel">
-              <h3>Setup snapshot</h3>
-              <div class="list" id="configSnapshotList"></div>
-            </section>
-            <section class="subpanel">
-              <h3>Recent work patterns</h3>
-              <div class="list" id="sessionSummaryList"></div>
-            </section>
+          <div class="workspace-wrap">
+            <div class="workspace-list" id="projectList"></div>
+            <div class="subgrid">
+              <section class="subpanel">
+                <h3>Setup snapshot</h3>
+                <div class="list" id="configSnapshotList"></div>
+              </section>
+              <section class="subpanel">
+                <h3>Recent work patterns</h3>
+                <div class="list" id="sessionSummaryList"></div>
+              </section>
+            </div>
           </div>
-        </div>
-      </article>
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <div class="section-kicker">Recent changes</div>
-            <h2>Rollout history at a glance</h2>
-          </div>
-          <div class="section-copy">See what was approved, applied, or rolled back without exposing low-level internal details.</div>
-        </div>
-        <div class="list" id="applyHistoryList"></div>
-      </article>
+        </article>
+      </div>
     </section>
   </main>
 
   <script>
+    const STORAGE_KEYS = {
+      sessionUser: "agentopt_session_user",
+      sessionOrg: "agentopt_session_org",
+      projectId: "agentopt_project_id",
+      applyScope: "agentopt_apply_scope",
+      activeTab: "agentopt_dashboard_tab"
+    };
+    const TAB_IDS = ["focus", "rollout", "workspace"];
+
     const state = {
+      busy: false,
+      activeTab: "focus",
       selectedProjectID: "",
-      recommendationIndex: new Map()
+      recommendationIndex: new Map(),
+      session: null
     };
 
     const $ = (id) => document.getElementById(id);
@@ -689,20 +1125,272 @@
       }[char]));
     }
 
+    function escapeAttr(value) {
+      return escapeHTML(value);
+    }
+
+    function readStorage(key, fallback = "") {
+      try {
+        const value = window.localStorage.getItem(key);
+        return value == null ? fallback : value;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function writeStorage(key, value) {
+      try {
+        if (value == null || value === "") {
+          window.localStorage.removeItem(key);
+          return;
+        }
+        window.localStorage.setItem(key, value);
+      } catch (error) {
+        // Storage is optional for the dashboard; ignore browser restrictions.
+      }
+    }
+
+    function readJSONStorage(key, fallback = null) {
+      const value = readStorage(key);
+      if (!value) {
+        return fallback;
+      }
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        return fallback;
+      }
+    }
+
     function setStatus(text, isError = false) {
       const el = $("status");
       el.textContent = text;
-      el.style.color = isError ? "#a43b30" : "#5d6a73";
+      el.dataset.tone = isError ? "error" : "info";
     }
 
-    function authHeaders() {
-      const token = $("apiToken").value.trim();
-      const headers = {};
-      if (token) {
-        headers["X-AgentOpt-Token"] = token;
-        localStorage.setItem("agentopt_api_token", token);
+    function setActiveTab(nextTab) {
+      const tab = TAB_IDS.includes(nextTab) ? nextTab : "focus";
+      state.activeTab = tab;
+      writeStorage(STORAGE_KEYS.activeTab, tab);
+
+      document.querySelectorAll("[data-tab]").forEach((button) => {
+        const active = button.dataset.tab === tab;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+
+      document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+        const active = panel.dataset.tabPanel === tab;
+        panel.classList.toggle("is-active", active);
+        panel.hidden = !active;
+      });
+    }
+
+    function cacheSession(session) {
+      state.session = session;
+      writeStorage(STORAGE_KEYS.sessionUser, JSON.stringify((session && session.user) || {}));
+      writeStorage(STORAGE_KEYS.sessionOrg, JSON.stringify((session && session.organization) || {}));
+    }
+
+    function clearSession() {
+      [
+        STORAGE_KEYS.sessionUser,
+        STORAGE_KEYS.sessionOrg,
+        STORAGE_KEYS.projectId,
+        STORAGE_KEYS.activeTab
+      ].forEach((key) => writeStorage(key, ""));
+      state.session = null;
+      state.selectedProjectID = "";
+    }
+
+    function renderSessionContext(projects = []) {
+      const session = state.session || {
+        user: readJSONStorage(STORAGE_KEYS.sessionUser, {}) || {},
+        organization: readJSONStorage(STORAGE_KEYS.sessionOrg, {}) || {}
+      };
+      const user = session.user || {};
+      const org = session.organization || {};
+      const projectID = state.selectedProjectID || readStorage(STORAGE_KEYS.projectId);
+      const scope = $("applyScope").value || "user";
+      const project = projects.find((item) => item.id === projectID) || null;
+      const projectName = project && project.name ? project.name : (projectID || "First connected workspace");
+      const projectSummary = projectID ? `${projectName} (${projectID})` : projectName;
+
+      $("sessionHeading").textContent = user.name
+        ? `Welcome back, ${user.name}.`
+        : "Review changes, approve safely, and connect each CLI with its own token.";
+      $("sessionSummary").textContent = org.name
+        ? `${org.name} stays signed in here. Issue a CLI token when you want a local install to authenticate and sync workspace signals.`
+        : "Sign in on the landing page to issue CLI tokens and review rollout plans.";
+      $("contextUser").textContent = user.name || user.email || "-";
+      $("contextOrg").textContent = org.name || org.id || "-";
+      $("contextProject").textContent = projectSummary;
+      $("contextScope").textContent = scope === "project" ? "Entire workspace" : "Just me";
+      renderCLICommands(projectID);
+    }
+
+    function syncBusyUI() {
+      const busy = state.busy;
+      const loadBtn = $("loadBtn");
+      const issueTokenBtn = $("issueTokenBtn");
+      const applyScope = $("applyScope");
+
+      loadBtn.disabled = busy;
+      loadBtn.textContent = busy ? "Loading dashboard..." : "Refresh dashboard";
+      issueTokenBtn.disabled = busy;
+      issueTokenBtn.textContent = busy ? "Working..." : "Issue CLI token";
+      applyScope.disabled = busy;
+
+      document.querySelectorAll("button[data-action]").forEach((button) => {
+        button.disabled = busy;
+      });
+    }
+
+    async function requestJSON(url, options = {}, fallbackMessage = "Request failed.") {
+      const headers = Object.assign({}, options.headers || {});
+      const response = await fetch(url, Object.assign({ credentials: "same-origin" }, options, { headers }));
+      const rawBody = await response.text();
+
+      let envelope = null;
+      if (rawBody) {
+        try {
+          envelope = JSON.parse(rawBody);
+        } catch (error) {
+          const unreadable = new Error(response.ok ? "The server returned an unreadable response." : fallbackMessage);
+          unreadable.status = response.status;
+          throw unreadable;
+        }
       }
-      return headers;
+
+      if (!response.ok) {
+        const failure = new Error((envelope && (envelope.msg || envelope.message)) || fallbackMessage);
+        failure.status = response.status;
+        throw failure;
+      }
+      if (!envelope || typeof envelope !== "object") {
+        const unexpected = new Error("The server returned an unexpected response.");
+        unexpected.status = response.status;
+        throw unexpected;
+      }
+      if (envelope.code !== 0) {
+        const applicationError = new Error(envelope.msg || envelope.message || fallbackMessage);
+        applicationError.status = response.status;
+        throw applicationError;
+      }
+
+      return envelope.data || {};
+    }
+
+    function persistPreferences() {
+      writeStorage(STORAGE_KEYS.applyScope, $("applyScope").value || "user");
+    }
+
+    function restorePreferences() {
+      $("applyScope").value = readStorage(STORAGE_KEYS.applyScope, "user");
+      state.activeTab = readStorage(STORAGE_KEYS.activeTab, "focus");
+      state.selectedProjectID = readStorage(STORAGE_KEYS.projectId);
+      state.session = {
+        user: readJSONStorage(STORAGE_KEYS.sessionUser, {}) || {},
+        organization: readJSONStorage(STORAGE_KEYS.sessionOrg, {}) || {}
+      };
+      renderSessionContext();
+    }
+
+    function isUnauthorized(error) {
+      return Boolean(error && typeof error === "object" && error.status === 401);
+    }
+
+    function redirectToLanding(message) {
+      clearSession();
+      if (message) {
+        try {
+          window.sessionStorage.setItem("agentopt_redirect_notice", message);
+        } catch (error) {
+          // Ignore sessionStorage failures and continue the redirect.
+        }
+      }
+      window.location.replace("/");
+    }
+
+    async function ensureSession() {
+      try {
+        const session = await requestJSON("/api/v1/auth/me", {}, "Failed to restore the signed-in session.");
+        cacheSession(session);
+        renderSessionContext();
+        return true;
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          redirectToLanding("Your session expired. Sign in again.");
+          return false;
+        }
+        throw error;
+      }
+    }
+
+    function renderCLICommands(projectID = "") {
+      const origin = window.location.origin || "http://127.0.0.1:8082";
+      const selectedProjectID = projectID || state.selectedProjectID || readStorage(STORAGE_KEYS.projectId);
+      $("installCommand").textContent = "go install github.com/liushuangls/go-server-template/cmd/agentopt@latest";
+      $("loginCommand").textContent = `agentopt login --server ${origin}`;
+      $("projectCommand").textContent = selectedProjectID
+        ? `agentopt use-project --project-id ${selectedProjectID}`
+        : "agentopt use-project --project-id <select a workspace>";
+      $("pendingCommand").textContent = selectedProjectID
+        ? `agentopt pending --project-id ${selectedProjectID}`
+        : "agentopt pending --project-id <select a workspace>";
+      $("syncCommand").textContent = selectedProjectID
+        ? `agentopt sync --project-id ${selectedProjectID}`
+        : "agentopt sync --project-id <select a workspace>";
+    }
+
+    async function copyText(value) {
+      const text = String(value || "").trim();
+      if (!text) {
+        return false;
+      }
+
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (error) {
+          // Fall back to a temporary textarea below.
+        }
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "readonly");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } catch (error) {
+        copied = false;
+      }
+
+      document.body.removeChild(textarea);
+      return copied;
+    }
+
+    async function copyCommand(targetID, label) {
+      const target = $(targetID);
+      if (!target) {
+        setStatus("The requested command block is missing.", true);
+        return;
+      }
+
+      const copied = await copyText(target.textContent);
+      if (!copied) {
+        setStatus(`Failed to copy the ${label || "command"}.`, true);
+        return;
+      }
+
+      setStatus(`Copied the ${label || "command"}.`);
     }
 
     function toArray(value) {
@@ -713,18 +1401,16 @@
       return new Intl.NumberFormat("en-US").format(Number(value || 0));
     }
 
-    function formatPercent(value) {
-      return `${Math.round(Number(value || 0) * 100)}%`;
-    }
-
     function formatDateTime(value) {
       if (!value) {
         return "Not yet";
       }
+
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) {
         return String(value);
       }
+
       return new Intl.DateTimeFormat("en-US", {
         dateStyle: "medium",
         timeStyle: "short"
@@ -783,6 +1469,20 @@
       return "sky";
     }
 
+    function tokenTone(status) {
+      const raw = String(status || "").toLowerCase();
+      if (raw === "active") {
+        return "good";
+      }
+      if (raw === "expired") {
+        return "warn";
+      }
+      if (raw === "revoked") {
+        return "danger";
+      }
+      return "sky";
+    }
+
     function conciseStatus(status) {
       switch (String(status || "").toLowerCase()) {
         case "awaiting_review":
@@ -806,10 +1506,7 @@
       const action = String(overview.action_summary || "").trim();
       const outcome = String(overview.outcome_summary || "").trim();
       const combined = `${action} ${outcome}`.trim();
-      if (combined) {
-        return combined;
-      }
-      return "AgentOpt is collecting enough setup and session context to produce steadier recommendations.";
+      return combined || "AgentOpt is collecting enough setup and session context to produce steadier recommendations.";
     }
 
     function truncateText(value, maxLength = 96) {
@@ -836,12 +1533,28 @@
       return "Update workspace configuration";
     }
 
+    function tokenSummary(item) {
+      if (item.last_used_at) {
+        return `Last used ${formatDateTime(item.last_used_at)}.`;
+      }
+      if (item.status === "revoked" && item.revoked_at) {
+        return `Revoked ${formatDateTime(item.revoked_at)}.`;
+      }
+      if (item.expires_at) {
+        return `Expires ${formatDateTime(item.expires_at)}.`;
+      }
+      return "Ready to authenticate a local CLI install.";
+    }
+
     function renderStepList(items, limit = 3) {
       const summaries = toArray(items).map(stepSummary).filter(Boolean);
       const visible = summaries.slice(0, limit);
+
       if (summaries.length > limit) {
-        visible.push(`${summaries.length - limit} more step${summaries.length - limit === 1 ? "" : "s"} in this plan`);
+        const extraCount = summaries.length - limit;
+        visible.push(`${extraCount} more step${extraCount === 1 ? "" : "s"} in this plan`);
       }
+
       return visible.map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("");
     }
 
@@ -868,13 +1581,13 @@
     }
 
     function recommendationTitle(recommendationID) {
-      const rec = state.recommendationIndex.get(recommendationID);
-      return rec ? rec.title : "Configuration update";
+      const recommendation = state.recommendationIndex.get(recommendationID);
+      return recommendation ? recommendation.title : "Configuration update";
     }
 
     function recommendationSummary(recommendationID) {
-      const rec = state.recommendationIndex.get(recommendationID);
-      return rec ? rec.summary : "A reviewed configuration update for this workspace.";
+      const recommendation = state.recommendationIndex.get(recommendationID);
+      return recommendation ? recommendation.summary : "A reviewed configuration update for this workspace.";
     }
 
     function impactTone(item) {
@@ -888,10 +1601,11 @@
     }
 
     function impactLabel(item) {
-      if (impactTone(item) === "good") {
+      const tone = impactTone(item);
+      if (tone === "good") {
         return "Helping";
       }
-      if (impactTone(item) === "warn") {
+      if (tone === "warn") {
         return "Needs follow-up";
       }
       return "Still measuring";
@@ -940,16 +1654,18 @@
     }
 
     function renderOverview(overview) {
+      const avgQueriesPerSession = Math.round(Number(overview.avg_queries_per_session || 0));
+      const failedExecutions = formatCount(overview.failed_execution_count);
+
       $("totalProjects").textContent = formatCount(overview.total_projects);
       $("pendingReviewCount").textContent = formatCount(overview.pending_review_count);
       $("approvedQueueCount").textContent = formatCount(overview.approved_queue_count);
       $("avgTokensPerQuery").textContent = formatCount(Math.round(Number(overview.avg_tokens_per_query || 0)));
-      const successfulRollouts = formatCount(overview.successful_rollout_count);
-      const failedExecutions = formatCount(overview.failed_execution_count);
+
       $("totalProjects").nextElementSibling.textContent = `${formatCount(overview.total_sessions)} session signal(s) have been uploaded so far.`;
-      $("approvedQueueCount").nextElementSibling.textContent = `${successfulRollouts} rollout(s) have completed successfully so far.`;
+      $("approvedQueueCount").nextElementSibling.textContent = `${formatCount(overview.successful_rollout_count)} rollout(s) have completed successfully so far.`;
       $("avgTokensPerQuery").nextElementSibling.textContent = failedExecutions === "0"
-        ? `${formatCount(Math.round(Number(overview.avg_queries_per_session || 0)))} captured quer${Math.round(Number(overview.avg_queries_per_session || 0)) === 1 ? "y" : "ies"} per session on average.`
+        ? `${formatCount(avgQueriesPerSession)} captured quer${avgQueriesPerSession === 1 ? "y" : "ies"} per session on average.`
         : `${failedExecutions} rollout(s) still need follow-up after local execution.`;
       $("overviewNarrative").textContent = workloadNarrative(overview);
     }
@@ -963,22 +1679,21 @@
         return;
       }
 
-      $("recommendationList").innerHTML = items.slice(0, 4).map((item) => `
+      $("recommendationList").innerHTML = items.slice(0, 3).map((item) => `
         <div class="item">
           <div class="item-top">
             <div class="item-title">
               ${escapeHTML(item.title)}
-              <small>${escapeHTML(item.summary)}</small>
+              <small>${escapeHTML(truncateText(item.summary, 150))}</small>
             </div>
             ${pill(item.risk || "Low risk", riskTone(item.risk))}
           </div>
           <div class="step-list">
-            <div class="step-line">${escapeHTML(item.reason)}</div>
+            <div class="step-line">${escapeHTML(truncateText(item.reason, 150))}</div>
             <div class="step-line">${escapeHTML(recommendationPlanSummary(item))}</div>
-            <div class="step-line">${escapeHTML(item.expected_benefit || item.expected_impact || "This change is expected to improve the workspace experience after rollout.")}</div>
           </div>
           <div class="action-row">
-            <button class="primary-button" type="button" onclick="requestApply('${item.id}')">Review this change</button>
+            <button class="primary-button" type="button" data-action="request-apply" data-recommendation-id="${escapeAttr(item.id)}">Review this change</button>
           </div>
         </div>
       `).join("");
@@ -1004,12 +1719,11 @@
           </div>
           <div class="step-list">
             <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
-            <div class="step-line">Waiting for your decision before anything changes locally.</div>
             <div class="step-line">${escapeHTML(`Requested ${formatDateTime(item.requested_at)}.`)}</div>
           </div>
           <div class="action-row">
-            <button class="primary-button" type="button" onclick="reviewPlan('${item.apply_id}', 'approve')">Approve</button>
-            <button class="secondary-button" type="button" onclick="reviewPlan('${item.apply_id}', 'reject')">Decline</button>
+            <button class="primary-button" type="button" data-action="review-plan" data-apply-id="${escapeAttr(item.apply_id)}" data-decision="approve">Approve</button>
+            <button class="secondary-button" type="button" data-action="review-plan" data-apply-id="${escapeAttr(item.apply_id)}" data-decision="reject">Decline</button>
           </div>
         </div>
       `).join("");
@@ -1024,29 +1738,27 @@
         return;
       }
 
-      $("pendingApplyList").innerHTML = items.map((item) => {
-        const approvalLabel = "Ready";
-        return `
-          <div class="item">
-            <div class="item-top">
-              <div class="item-title">
-                ${escapeHTML(recommendationTitle(item.recommendation_id))}
-                <small>${escapeHTML(recommendationSummary(item.recommendation_id))}</small>
-              </div>
-              ${pill(approvalLabel, "good")}
+      $("pendingApplyList").innerHTML = items.map((item) => `
+        <div class="item">
+          <div class="item-top">
+            <div class="item-title">
+              ${escapeHTML(recommendationTitle(item.recommendation_id))}
+              <small>${escapeHTML(recommendationSummary(item.recommendation_id))}</small>
             </div>
-            <div class="step-list">
-              <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
-              <div class="step-line">Approved and waiting for the next safe local sync.</div>
-              <div class="step-line">${escapeHTML(`Queued ${formatDateTime(item.requested_at)}.`)}</div>
-            </div>
+            ${pill("Ready", "good")}
           </div>
-        `;
-      }).join("");
+          <div class="step-list">
+            <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
+            <div class="step-line">Approved and waiting for the next safe local sync.</div>
+            <div class="step-line">${escapeHTML(`Queued ${formatDateTime(item.requested_at)}.`)}</div>
+          </div>
+        </div>
+      `).join("");
     }
 
     function impactHighlights(item) {
       const lines = [];
+
       if (Number(item.sessions_after) > 0) {
         lines.push(`${formatCount(item.sessions_after)} follow-up session${Number(item.sessions_after) === 1 ? "" : "s"} have been observed since rollout.`);
       }
@@ -1060,9 +1772,10 @@
       } else if (Number(item.tokens_per_session_delta) > 150) {
         lines.push("Per-session token usage is trending up after the rollout.");
       }
-      if (lines.length === 0) {
+      if (!lines.length) {
         lines.push("More post-change usage will make this read clearer.");
       }
+
       return lines;
     }
 
@@ -1075,7 +1788,7 @@
         return;
       }
 
-      $("impactList").innerHTML = items.slice(0, 4).map((item) => `
+      $("impactList").innerHTML = items.slice(0, 3).map((item) => `
         <div class="item">
           <div class="item-top">
             <div class="item-title">
@@ -1084,7 +1797,7 @@
             </div>
             ${pill(impactLabel(item), impactTone(item))}
           </div>
-          <div class="step-list">${impactHighlights(item).map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("")}</div>
+          <div class="step-list">${impactHighlights(item).slice(0, 2).map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("")}</div>
         </div>
       `).join("");
     }
@@ -1101,9 +1814,13 @@
       $("projectList").innerHTML = items.map((item) => {
         const active = item.id === state.selectedProjectID ? " is-active" : "";
         const activity = item.last_ingested_at ? `Updated ${formatDateTime(item.last_ingested_at)}` : "Waiting for activity";
+        const identity = item.name && item.name !== item.id
+          ? `${item.name} (${item.id})`
+          : item.id;
+
         return `
-          <button class="workspace-chip${active}" type="button" onclick="selectProject('${item.id}')">
-            <span>${escapeHTML(item.name || item.id)}</span>
+          <button class="workspace-chip${active}" type="button" data-action="select-project" data-project-id="${escapeAttr(item.id)}">
+            <span>${escapeHTML(identity)}</span>
             <small>${escapeHTML(activity)}</small>
           </button>
         `;
@@ -1145,8 +1862,8 @@
     function sessionSummaryLines(item) {
       const queries = toArray(item.raw_queries);
       const totalTokens = Number(item.token_in || 0) + Number(item.token_out || 0);
-      const lines = [];
-      lines.push(`${formatCount(queries.length)} raw quer${queries.length === 1 ? "y" : "ies"} captured from the CLI.`);
+      const lines = [`${formatCount(queries.length)} raw quer${queries.length === 1 ? "y" : "ies"} captured from the CLI.`];
+
       if (totalTokens > 0) {
         lines.push(`${formatCount(totalTokens)} total tokens were uploaded for this session.`);
       }
@@ -1158,6 +1875,7 @@
       } else {
         lines.push("More raw queries will make the next instruction suggestion more specific.");
       }
+
       return lines;
     }
 
@@ -1170,7 +1888,7 @@
         return;
       }
 
-      $("sessionSummaryList").innerHTML = items.slice(0, 3).map((item) => `
+      $("sessionSummaryList").innerHTML = items.slice(0, 2).map((item) => `
         <div class="item">
           <div class="item-top">
             <div class="item-title">
@@ -1179,7 +1897,7 @@
             </div>
             ${pill(sessionLabel(item), sessionTone(item))}
           </div>
-          <div class="step-list">${sessionSummaryLines(item).map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("")}</div>
+          <div class="step-list">${sessionSummaryLines(item).slice(0, 3).map((line) => `<div class="step-line">${escapeHTML(line)}</div>`).join("")}</div>
         </div>
       `).join("");
     }
@@ -1200,8 +1918,9 @@
         return;
       }
 
-      $("applyHistoryList").innerHTML = items.slice(0, 5).map((item) => {
+      $("applyHistoryList").innerHTML = items.slice(0, 4).map((item) => {
         const when = item.applied_at || item.reviewed_at || item.requested_at;
+
         return `
           <div class="item">
             <div class="item-top">
@@ -1218,128 +1937,249 @@
       }).join("");
     }
 
+    function renderCLITokens(items) {
+      if (!items.length) {
+        $("cliTokenList").innerHTML = emptyState(
+          "No CLI tokens issued yet",
+          "Issue a CLI token from this dashboard when you want a local machine to authenticate."
+        );
+        return;
+      }
+
+      $("cliTokenList").innerHTML = items.map((item) => {
+        const canRevoke = String(item.status || "").toLowerCase() === "active";
+        const identity = item.label || item.token_prefix || item.token_id;
+        return `
+          <div class="item">
+            <div class="item-top">
+              <div class="item-title">
+                ${escapeHTML(identity)}
+                <small>${escapeHTML(item.token_prefix || item.token_id)}</small>
+              </div>
+              ${pill(titleize(item.status || "active"), tokenTone(item.status))}
+            </div>
+            <div class="step-list">
+              <div class="step-line">${escapeHTML(`Issued ${formatDateTime(item.created_at)}.`)}</div>
+              <div class="step-line">${escapeHTML(tokenSummary(item))}</div>
+            </div>
+            ${canRevoke ? `
+              <div class="action-row">
+                <button class="secondary-button" type="button" data-action="revoke-cli-token" data-token-id="${escapeAttr(item.token_id)}">Revoke token</button>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function withBusy(task) {
+      if (state.busy) {
+        return false;
+      }
+
+      state.busy = true;
+      syncBusyUI();
+
+      try {
+        await task();
+        return true;
+      } finally {
+        state.busy = false;
+        syncBusyUI();
+      }
+    }
+
     function selectProject(projectID) {
-      $("projectId").value = projectID;
-      localStorage.setItem("agentopt_project_id", projectID);
+      if (!projectID || state.busy) {
+        return;
+      }
+
+      state.selectedProjectID = projectID;
+      writeStorage(STORAGE_KEYS.projectId, projectID);
+      renderSessionContext();
       load();
     }
 
     async function requestApply(recommendationID) {
-      const token = $("apiToken").value.trim();
-      const requestedBy = $("requestedBy").value.trim();
       const scope = $("applyScope").value || "user";
+      const requestedBy = state.session && state.session.user ? state.session.user.id : "";
 
-      if (!token || !requestedBy) {
-        setStatus("Access token and reviewer are required before you can request a plan.", true);
+      if (!requestedBy) {
+        redirectToLanding("Sign in again to request rollout plans.");
         return;
       }
 
       try {
-        const resp = await fetch("/api/v1/recommendations/apply", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-AgentOpt-Token": token
-          },
-          body: JSON.stringify({
-            recommendation_id: recommendationID,
-            requested_by: requestedBy,
-            scope
-          })
+        await withBusy(async () => {
+          const data = await requestJSON("/api/v1/recommendations/apply", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recommendation_id: recommendationID,
+              requested_by: requestedBy,
+              scope
+            })
+          }, "Failed to create a review plan.");
+
+          const message = data.policy_mode === "auto_approved"
+            ? "The plan was fast-tracked by policy and is ready for the next local sync."
+            : "The plan is now waiting for approval.";
+
+          await load({ skipBusy: true });
+          setStatus(message);
         });
-        const env = await resp.json();
-        if (env.code !== 0) {
-          throw new Error(env.msg || "Failed to create a review plan.");
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          redirectToLanding("Your session expired. Sign in again.");
+          return;
         }
-        const message = env.data.policy_mode === "auto_approved"
-          ? "The plan was fast-tracked by policy and is ready for the next local sync."
-          : "The plan is now waiting for approval.";
-        await load();
-        setStatus(message);
-      } catch (err) {
-        setStatus(err.message || "Failed to create a review plan.", true);
+        setStatus(error instanceof Error ? error.message : "Failed to create a review plan.", true);
       }
     }
 
     async function reviewPlan(applyID, decision) {
-      const token = $("apiToken").value.trim();
-      const reviewer = $("requestedBy").value.trim();
+      const reviewer = state.session && state.session.user ? state.session.user.id : "";
 
-      if (!token || !reviewer) {
-        setStatus("Access token and reviewer are required before you can approve or decline a plan.", true);
+      if (!reviewer) {
+        redirectToLanding("Sign in again to review rollout plans.");
         return;
       }
 
       try {
-        const resp = await fetch("/api/v1/change-plans/review", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-AgentOpt-Token": token
-          },
-          body: JSON.stringify({
-            apply_id: applyID,
-            decision,
-            reviewed_by: reviewer,
-            review_note: `dashboard ${decision}`
-          })
+        await withBusy(async () => {
+          await requestJSON("/api/v1/change-plans/review", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              apply_id: applyID,
+              decision,
+              reviewed_by: reviewer,
+              review_note: `dashboard ${decision}`
+            })
+          }, "Failed to update the review decision.");
+
+          await load({ skipBusy: true });
+          setStatus(decision === "approve"
+            ? "Approved. The local CLI can pick up this change on the next sync."
+            : "Declined. The plan will stay out of the rollout queue.");
         });
-        const env = await resp.json();
-        if (env.code !== 0) {
-          throw new Error(env.msg || "Failed to update the review decision.");
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          redirectToLanding("Your session expired. Sign in again.");
+          return;
         }
-        await load();
-        setStatus(decision === "approve"
-          ? "Approved. The local CLI can pick up this change on the next sync."
-          : "Declined. The plan will stay out of the rollout queue.");
-      } catch (err) {
-        setStatus(err.message || "Failed to update the review decision.", true);
+        setStatus(error instanceof Error ? error.message : "Failed to update the review decision.", true);
       }
     }
 
-    async function load() {
-      const orgID = $("orgId").value.trim();
-      if (!orgID) {
-        setStatus("Organization is required.", true);
+    async function issueCLIToken() {
+      try {
+        await withBusy(async () => {
+          const data = await requestJSON("/api/v1/auth/cli-tokens", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              label: state.selectedProjectID
+                ? `CLI for ${state.selectedProjectID}`
+                : "CLI login token"
+            })
+          }, "Failed to issue a CLI token.");
+
+          $("issuedCliToken").textContent = data.token || "Token was issued.";
+          $("cliTokenMeta").textContent = data.expires_at
+            ? `CLI token issued for ${data.label || "CLI login"} and expires ${formatDateTime(data.expires_at)}. Paste it into \`agentopt login\` on the machine you want to connect.`
+            : "CLI token issued. Paste it into `agentopt login` on the machine you want to connect.";
+          const tokens = await requestJSON("/api/v1/auth/cli-tokens", {}, "Failed to refresh issued CLI tokens.");
+          renderCLITokens(toArray(tokens.items));
+          setStatus("CLI token issued. Paste it into `agentopt login` on the device you want to connect.");
+        });
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          redirectToLanding("Your session expired. Sign in again.");
+          return;
+        }
+        setStatus(error instanceof Error ? error.message : "Failed to issue a CLI token.", true);
+      }
+    }
+
+    async function revokeCLIToken(tokenID) {
+      try {
+        await withBusy(async () => {
+          await requestJSON("/api/v1/auth/cli-tokens/revoke", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token_id: tokenID })
+          }, "Failed to revoke the CLI token.");
+
+          const tokens = await requestJSON("/api/v1/auth/cli-tokens", {}, "Failed to refresh issued CLI tokens.");
+          renderCLITokens(toArray(tokens.items));
+          setStatus("CLI token revoked. That token can no longer authenticate a local CLI install.");
+        });
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          redirectToLanding("Your session expired. Sign in again.");
+          return;
+        }
+        setStatus(error instanceof Error ? error.message : "Failed to revoke the CLI token.", true);
+      }
+    }
+
+    async function signOut() {
+      try {
+        await requestJSON("/api/v1/auth/logout", {
+          method: "POST"
+        }, "Failed to sign out.");
+      } catch (error) {
+        if (!isUnauthorized(error)) {
+          setStatus(error instanceof Error ? error.message : "Failed to sign out.", true);
+          return;
+        }
+      }
+
+      clearSession();
+      window.location.replace("/");
+    }
+
+    async function load(options = {}) {
+      const manageBusy = !options.skipBusy;
+      if (manageBusy && state.busy) {
         return;
       }
 
-      localStorage.setItem("agentopt_org_id", orgID);
-      localStorage.setItem("agentopt_requested_by", $("requestedBy").value.trim());
-      localStorage.setItem("agentopt_apply_scope", $("applyScope").value);
+      const orgID = state.session && state.session.organization ? state.session.organization.id : "";
+      if (!orgID) {
+        redirectToLanding("Sign in again to open the dashboard.");
+        return;
+      }
 
+      if (manageBusy) {
+        state.busy = true;
+        syncBusyUI();
+      }
+
+      persistPreferences();
       setStatus("Loading workspace signals...");
 
       try {
-        const [overviewResp, projectsResp] = await Promise.all([
-          fetch(`/api/v1/dashboard/overview?org_id=${encodeURIComponent(orgID)}`, { headers: authHeaders() }),
-          fetch(`/api/v1/projects?org_id=${encodeURIComponent(orgID)}`, { headers: authHeaders() })
+        const [overview, projectsData, cliTokensData] = await Promise.all([
+          requestJSON(`/api/v1/dashboard/overview?org_id=${encodeURIComponent(orgID)}`, {}, "Failed to load the dashboard overview."),
+          requestJSON(`/api/v1/projects?org_id=${encodeURIComponent(orgID)}`, {}, "Failed to load your workspaces."),
+          requestJSON("/api/v1/auth/cli-tokens", {}, "Failed to load issued CLI tokens.")
         ]);
 
-        const overviewEnv = await overviewResp.json();
-        const projectsEnv = await projectsResp.json();
-
-        if (overviewEnv.code !== 0) {
-          throw new Error(overviewEnv.msg || "Failed to load the dashboard overview.");
-        }
-        if (projectsEnv.code !== 0) {
-          throw new Error(projectsEnv.msg || "Failed to load your workspaces.");
-        }
-
-        const overview = overviewEnv.data;
-        const projects = toArray(projectsEnv.data.items);
-        let projectID = $("projectId").value.trim();
+        const projects = toArray(projectsData.items);
+        let projectID = state.selectedProjectID || readStorage(STORAGE_KEYS.projectId);
         if (!projectID && projects.length > 0) {
           projectID = projects[0].id;
-          $("projectId").value = projectID;
         }
-        if (projectID) {
-          localStorage.setItem("agentopt_project_id", projectID);
-        }
+
         state.selectedProjectID = projectID;
+        writeStorage(STORAGE_KEYS.projectId, projectID);
+        renderSessionContext(projects);
 
         renderOverview(overview);
         renderProjects(projects);
+        renderCLITokens(toArray(cliTokensData.items));
 
         state.recommendationIndex = new Map();
 
@@ -1352,58 +2192,28 @@
         let sessions = [];
 
         if (projectID) {
-          const requestedBy = $("requestedBy").value.trim();
+          const requestedBy = state.session && state.session.user ? state.session.user.id : "";
           const pendingPath = requestedBy
             ? `/api/v1/applies/pending?project_id=${encodeURIComponent(projectID)}&user_id=${encodeURIComponent(requestedBy)}`
             : `/api/v1/applies/pending?project_id=${encodeURIComponent(projectID)}`;
 
-          const [recResp, reviewResp, pendingResp, impactResp, historyResp, snapshotResp, sessionResp] = await Promise.all([
-            fetch(`/api/v1/recommendations?project_id=${encodeURIComponent(projectID)}`, { headers: authHeaders() }),
-            fetch(`/api/v1/change-plans?project_id=${encodeURIComponent(projectID)}&status=awaiting_review`, { headers: authHeaders() }),
-            fetch(pendingPath, { headers: authHeaders() }),
-            fetch(`/api/v1/impact?project_id=${encodeURIComponent(projectID)}`, { headers: authHeaders() }),
-            fetch(`/api/v1/applies?project_id=${encodeURIComponent(projectID)}`, { headers: authHeaders() }),
-            fetch(`/api/v1/config-snapshots?project_id=${encodeURIComponent(projectID)}`, { headers: authHeaders() }),
-            fetch(`/api/v1/session-summaries?project_id=${encodeURIComponent(projectID)}&limit=5`, { headers: authHeaders() })
+          const [recommendationsData, reviewData, pendingData, impactData, historyData, snapshotData, sessionData] = await Promise.all([
+            requestJSON(`/api/v1/recommendations?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load workspace suggestions."),
+            requestJSON(`/api/v1/change-plans?project_id=${encodeURIComponent(projectID)}&status=awaiting_review`, {}, "Failed to load the approval queue."),
+            requestJSON(pendingPath, {}, "Failed to load approved changes."),
+            requestJSON(`/api/v1/impact?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load measured outcomes."),
+            requestJSON(`/api/v1/applies?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load rollout history."),
+            requestJSON(`/api/v1/config-snapshots?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load the latest setup snapshot."),
+            requestJSON(`/api/v1/session-summaries?project_id=${encodeURIComponent(projectID)}&limit=5`, {}, "Failed to load recent work patterns.")
           ]);
 
-          const recEnv = await recResp.json();
-          const reviewEnv = await reviewResp.json();
-          const pendingEnv = await pendingResp.json();
-          const impactEnv = await impactResp.json();
-          const historyEnv = await historyResp.json();
-          const snapshotEnv = await snapshotResp.json();
-          const sessionEnv = await sessionResp.json();
-
-          if (recEnv.code !== 0) {
-            throw new Error(recEnv.msg || "Failed to load workspace suggestions.");
-          }
-          if (reviewEnv.code !== 0) {
-            throw new Error(reviewEnv.msg || "Failed to load the approval queue.");
-          }
-          if (pendingEnv.code !== 0) {
-            throw new Error(pendingEnv.msg || "Failed to load approved changes.");
-          }
-          if (impactEnv.code !== 0) {
-            throw new Error(impactEnv.msg || "Failed to load measured outcomes.");
-          }
-          if (historyEnv.code !== 0) {
-            throw new Error(historyEnv.msg || "Failed to load rollout history.");
-          }
-          if (snapshotEnv.code !== 0) {
-            throw new Error(snapshotEnv.msg || "Failed to load the latest setup snapshot.");
-          }
-          if (sessionEnv.code !== 0) {
-            throw new Error(sessionEnv.msg || "Failed to load recent work patterns.");
-          }
-
-          recommendations = toArray(recEnv.data.items);
-          reviewQueue = toArray(reviewEnv.data.items);
-          pendingApplies = toArray(pendingEnv.data.items);
-          impacts = toArray(impactEnv.data.items);
-          applyHistory = toArray(historyEnv.data.items);
-          snapshots = toArray(snapshotEnv.data.items);
-          sessions = toArray(sessionEnv.data.items);
+          recommendations = toArray(recommendationsData.items);
+          reviewQueue = toArray(reviewData.items);
+          pendingApplies = toArray(pendingData.items);
+          impacts = toArray(impactData.items);
+          applyHistory = toArray(historyData.items);
+          snapshots = toArray(snapshotData.items);
+          sessions = toArray(sessionData.items);
 
           recommendations.forEach((item) => {
             state.recommendationIndex.set(item.id, item);
@@ -1424,16 +2234,80 @@
         } else {
           setStatus("Showing your organization overview. Select a workspace to review its suggestions.");
         }
-      } catch (err) {
-        setStatus(err.message || "Failed to load the dashboard.", true);
+      } catch (error) {
+        if (isUnauthorized(error)) {
+          redirectToLanding("Your session expired. Sign in again.");
+          return;
+        }
+        setStatus(error instanceof Error ? error.message : "Failed to load the dashboard.", true);
+      } finally {
+        if (manageBusy) {
+          state.busy = false;
+          syncBusyUI();
+        }
       }
     }
 
-    $("apiToken").value = localStorage.getItem("agentopt_api_token") || "";
-    $("orgId").value = localStorage.getItem("agentopt_org_id") || "demo-org";
-    $("projectId").value = localStorage.getItem("agentopt_project_id") || "";
-    $("requestedBy").value = localStorage.getItem("agentopt_requested_by") || "";
-    $("applyScope").value = localStorage.getItem("agentopt_apply_scope") || "user";
+    function handleActionClick(event) {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+
+      const button = event.target.closest("button[data-action]");
+      if (!button || button.disabled) {
+        return;
+      }
+
+      switch (button.dataset.action) {
+        case "refresh-dashboard":
+          load();
+          break;
+        case "issue-cli-token":
+          issueCLIToken();
+          break;
+        case "revoke-cli-token":
+          revokeCLIToken(button.dataset.tokenId || "");
+          break;
+        case "switch-tab":
+          setActiveTab(button.dataset.tab || "focus");
+          break;
+        case "select-project":
+          selectProject(button.dataset.projectId || "");
+          break;
+        case "copy-command":
+          copyCommand(button.dataset.copyTarget || "", button.dataset.copyLabel || "command");
+          break;
+        case "request-apply":
+          requestApply(button.dataset.recommendationId || "");
+          break;
+        case "review-plan":
+          reviewPlan(button.dataset.applyId || "", button.dataset.decision || "");
+          break;
+        case "sign-out":
+          signOut();
+          break;
+        default:
+          break;
+      }
+    }
+
+    document.addEventListener("click", handleActionClick);
+
+    async function boot() {
+      restorePreferences();
+      renderCLICommands();
+      setActiveTab(state.activeTab);
+      syncBusyUI();
+
+      if (!(await ensureSession())) {
+        return;
+      }
+
+      load();
+    }
+
+    boot();
   </script>
 </body>
+
 </html>

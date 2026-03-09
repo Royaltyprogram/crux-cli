@@ -2,6 +2,77 @@ package response
 
 import "time"
 
+type AuthUserResp struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type AuthOrganizationResp struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type LoginResp struct {
+	SessionToken     string               `json:"session_token"`
+	SessionExpiresAt *time.Time           `json:"session_expires_at"`
+	User             AuthUserResp         `json:"user"`
+	Organization     AuthOrganizationResp `json:"organization"`
+}
+
+type AuthSessionResp struct {
+	User         AuthUserResp         `json:"user"`
+	Organization AuthOrganizationResp `json:"organization"`
+}
+
+type LogoutResp struct {
+	Status    string    `json:"status"`
+	RevokedAt time.Time `json:"revoked_at"`
+}
+
+type CLITokenIssueResp struct {
+	TokenID     string     `json:"token_id"`
+	Token       string     `json:"token"`
+	TokenPrefix string     `json:"token_prefix"`
+	Label       string     `json:"label"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+}
+
+type CLITokenItemResp struct {
+	TokenID     string     `json:"token_id"`
+	TokenPrefix string     `json:"token_prefix"`
+	Label       string     `json:"label"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	RevokedAt   *time.Time `json:"revoked_at"`
+}
+
+type CLITokenListResp struct {
+	Items []CLITokenItemResp `json:"items"`
+}
+
+type CLITokenRevokeResp struct {
+	TokenID   string    `json:"token_id"`
+	Status    string    `json:"status"`
+	RevokedAt time.Time `json:"revoked_at"`
+}
+
+type CLILoginResp struct {
+	AgentID       string    `json:"agent_id"`
+	DeviceID      string    `json:"device_id"`
+	OrgID         string    `json:"org_id"`
+	OrgName       string    `json:"org_name"`
+	UserID        string    `json:"user_id"`
+	UserName      string    `json:"user_name"`
+	UserEmail     string    `json:"user_email"`
+	Status        string    `json:"status"`
+	ConsentScopes []string  `json:"consent_scopes"`
+	RegisteredAt  time.Time `json:"registered_at"`
+}
+
 type AgentRegistrationResp struct {
 	AgentID       string    `json:"agent_id"`
 	DeviceID      string    `json:"device_id"`

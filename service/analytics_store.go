@@ -19,6 +19,7 @@ type AnalyticsStore struct {
 
 	organizations          map[string]*Organization
 	users                  map[string]*User
+	accessTokens           map[string]*AccessToken
 	agents                 map[string]*Agent
 	projects               map[string]*Project
 	configSnapshots        map[string][]*ConfigSnapshot
@@ -33,6 +34,7 @@ type analyticsStoreState struct {
 	Seq                    uint64                       `json:"seq"`
 	Organizations          map[string]*Organization     `json:"organizations"`
 	Users                  map[string]*User             `json:"users"`
+	AccessTokens           map[string]*AccessToken      `json:"access_tokens"`
 	Agents                 map[string]*Agent            `json:"agents"`
 	Projects               map[string]*Project          `json:"projects"`
 	ConfigSnapshots        map[string][]*ConfigSnapshot `json:"config_snapshots"`
@@ -49,9 +51,14 @@ type Organization struct {
 }
 
 type User struct {
-	ID    string
-	OrgID string
-	Email string
+	ID           string
+	OrgID        string
+	Email        string
+	Name         string
+	PasswordSalt string
+	PasswordHash string
+	CreatedAt    time.Time
+	LastLoginAt  *time.Time
 }
 
 type Agent struct {
@@ -183,6 +190,7 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 		filePath:               conf.App.StorePath,
 		organizations:          make(map[string]*Organization),
 		users:                  make(map[string]*User),
+		accessTokens:           make(map[string]*AccessToken),
 		agents:                 make(map[string]*Agent),
 		projects:               make(map[string]*Project),
 		configSnapshots:        make(map[string][]*ConfigSnapshot),
@@ -193,6 +201,9 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 		audits:                 make([]*AuditEvent, 0, 32),
 	}
 	if err := store.loadFromDisk(); err != nil {
+		return nil, err
+	}
+	if err := store.ensureBootstrapData(); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -212,6 +223,7 @@ func (s *AnalyticsStore) persistLocked() error {
 		Seq:                    s.seq,
 		Organizations:          s.organizations,
 		Users:                  s.users,
+		AccessTokens:           s.accessTokens,
 		Agents:                 s.agents,
 		Projects:               s.projects,
 		ConfigSnapshots:        s.configSnapshots,
@@ -263,6 +275,7 @@ func (s *AnalyticsStore) loadFromDisk() error {
 	s.seq = state.Seq
 	s.organizations = ensureMap(state.Organizations)
 	s.users = ensureMap(state.Users)
+	s.accessTokens = ensureMap(state.AccessTokens)
 	s.agents = ensureMap(state.Agents)
 	s.projects = ensureMap(state.Projects)
 	s.configSnapshots = ensureNestedMap(state.ConfigSnapshots)

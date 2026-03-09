@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,28 @@ import (
 	"github.com/liushuangls/go-server-template/dto/request"
 	"github.com/liushuangls/go-server-template/dto/response"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = original
+	}()
+
+	fn()
+
+	require.NoError(t, writer.Close())
+	output, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	return strings.TrimSpace(string(output))
+}
 
 func TestReadOptionalJSONMapMissingFile(t *testing.T) {
 	var out map[string]any
@@ -63,6 +86,193 @@ func TestApplyBackupRoundTrip(t *testing.T) {
 func TestAPIClientAddsTokenHeader(t *testing.T) {
 	client := newAPIClient("http://example.com", "test-token")
 	require.Equal(t, "test-token", client.token)
+}
+
+func TestRunLoginAuthenticatesWithIssuedCLIToken(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	var uploaded request.CLILoginReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/auth/cli/login", r.URL.Path)
+		require.Equal(t, "issued-cli-token", r.Header.Get("X-AgentOpt-Token"))
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&uploaded))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.CLILoginResp{
+				AgentID:      "device-123",
+				DeviceID:     "device-123",
+				OrgID:        "demo-org",
+				OrgName:      "Demo Org",
+				UserID:       "demo-user",
+				UserName:     "Demo Operator",
+				UserEmail:    "demo@example.com",
+				Status:       "registered",
+				RegisteredAt: time.Now().UTC(),
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	err := runLogin([]string{
+		"--server", server.URL,
+		"--token", "issued-cli-token",
+		"--device", "work-mac",
+		"--hostname", "work-mac.local",
+		"--platform", "darwin/arm64",
+		"--tools", "codex",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, "work-mac", uploaded.DeviceName)
+	require.Equal(t, "work-mac.local", uploaded.Hostname)
+	require.Equal(t, "darwin/arm64", uploaded.Platform)
+	require.Equal(t, []string{"codex"}, uploaded.Tools)
+
+	st, err := loadState()
+	require.NoError(t, err)
+	require.Equal(t, server.URL, st.ServerURL)
+	require.Equal(t, "issued-cli-token", st.APIToken)
+	require.Equal(t, "demo-org", st.OrgID)
+	require.Equal(t, "demo-user", st.UserID)
+	require.Equal(t, "device-123", st.AgentID)
+}
+
+func TestRunUseProjectSwitchesLocalProjectState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/v1/projects", r.URL.Path)
+		require.Equal(t, "token-projects", r.Header.Get("X-AgentOpt-Token"))
+		require.Equal(t, "org-1", r.URL.Query().Get("org_id"))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.ProjectListResp{
+				Items: []response.ProjectResp{
+					{ID: "project-1", Name: "alpha"},
+					{ID: "project-2", Name: "beta"},
+				},
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL: server.URL,
+		APIToken:  "token-projects",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	err := runUseProject([]string{"--project-id", "project-2"})
+	require.NoError(t, err)
+
+	st, err := loadState()
+	require.NoError(t, err)
+	require.Equal(t, "project-2", st.ProjectID)
+	require.Equal(t, "beta", st.ProjectName)
+}
+
+func TestRunProjectsMarksActiveProject(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/v1/projects", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.ProjectListResp{
+				Items: []response.ProjectResp{
+					{ID: "project-1", Name: "alpha"},
+					{ID: "project-2", Name: "beta"},
+				},
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL:   server.URL,
+		APIToken:    "token-projects",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		ProjectID:   "project-2",
+		ProjectName: "beta",
+	}))
+
+	output := captureStdout(t, func() {
+		require.NoError(t, runProjects(nil))
+	})
+
+	var payload struct {
+		ActiveProjectID string `json:"active_project_id"`
+		Items           []struct {
+			ID     string `json:"id"`
+			Active bool   `json:"active"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	require.Equal(t, "project-2", payload.ActiveProjectID)
+	require.Len(t, payload.Items, 2)
+	require.False(t, payload.Items[0].Active)
+	require.True(t, payload.Items[1].Active)
+}
+
+func TestRunPendingIncludesProjectContext(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodGet, r.Method)
+		require.Equal(t, "/api/v1/applies/pending", r.URL.Path)
+		require.Equal(t, "project-2", r.URL.Query().Get("project_id"))
+		require.Equal(t, "user-1", r.URL.Query().Get("user_id"))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.PendingApplyResp{
+				Items: []response.PendingApplyItem{{
+					ApplyID: "apply-1",
+					Status:  "approved_for_local_apply",
+				}},
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL:   server.URL,
+		APIToken:    "token-projects",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		ProjectID:   "project-2",
+		ProjectName: "beta",
+	}))
+
+	output := captureStdout(t, func() {
+		require.NoError(t, runPending(nil))
+	})
+
+	var payload struct {
+		ProjectID   string `json:"project_id"`
+		ProjectName string `json:"project_name"`
+		Items       []struct {
+			ApplyID string `json:"apply_id"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	require.Equal(t, "project-2", payload.ProjectID)
+	require.Equal(t, "beta", payload.ProjectName)
+	require.Len(t, payload.Items, 1)
+	require.Equal(t, "apply-1", payload.Items[0].ApplyID)
 }
 
 func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {

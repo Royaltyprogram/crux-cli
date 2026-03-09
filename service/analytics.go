@@ -26,13 +26,313 @@ func NewAnalyticsService(opt Options) *AnalyticsService {
 	}
 }
 
-func (s *AnalyticsService) RegisterAgent(ctx context.Context, req *request.RegisterAgentReq) (*response.AgentRegistrationResp, error) {
+func (s *AnalyticsService) Login(ctx context.Context, req *request.LoginReq) (*response.LoginResp, error) {
 	_ = ctx
 
 	now := time.Now().UTC()
 
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
+
+	user := s.AnalyticsStore.findUserByEmailLocked(req.Email)
+	if !verifyPassword(user, req.Password) {
+		return nil, ecode.Unauthorized(1002, "invalid email or password")
+	}
+
+	org, ok := s.AnalyticsStore.organizations[user.OrgID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
+	}
+
+	tokenValue, tokenRecord, err := s.AnalyticsStore.issueAccessTokenLocked(TokenKindWebSession, user.OrgID, user.ID, "dashboard session", defaultSessionTokenTTL, now)
+	if err != nil {
+		return nil, err
+	}
+
+	user.LastLoginAt = &now
+	s.appendAuditLocked(user.OrgID, "", "auth.login", "dashboard session created")
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	return &response.LoginResp{
+		SessionToken:     tokenValue,
+		SessionExpiresAt: tokenRecord.ExpiresAt,
+		User:             toSessionUser(user),
+		Organization:     toSessionOrganization(org),
+	}, nil
+}
+
+func (s *AnalyticsService) CurrentSession(ctx context.Context) (*response.AuthSessionResp, error) {
+	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession, TokenKindCLI)
+	if err != nil {
+		return nil, err
+	}
+
+	s.AnalyticsStore.mu.RLock()
+	defer s.AnalyticsStore.mu.RUnlock()
+
+	user, ok := s.AnalyticsStore.users[identity.UserID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown user_id"))
+	}
+	org, ok := s.AnalyticsStore.organizations[identity.OrgID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
+	}
+
+	return &response.AuthSessionResp{
+		User:         toSessionUser(user),
+		Organization: toSessionOrganization(org),
+	}, nil
+}
+
+func (s *AnalyticsService) Logout(ctx context.Context) (*response.LogoutResp, error) {
+	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession, TokenKindCLI)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	record, ok := s.AnalyticsStore.accessTokens[identity.TokenID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown token_id"))
+	}
+	record.RevokedAt = &now
+	s.appendAuditLocked(identity.OrgID, "", "auth.logout", "dashboard session revoked")
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	return &response.LogoutResp{
+		Status:    "signed_out",
+		RevokedAt: now,
+	}, nil
+}
+
+func (s *AnalyticsService) IssueCLIToken(ctx context.Context, req *request.IssueCLITokenReq) (*response.CLITokenIssueResp, error) {
+	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	if _, ok := s.AnalyticsStore.users[identity.UserID]; !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown user_id"))
+	}
+
+	label := strings.TrimSpace(req.Label)
+	if label == "" {
+		label = "CLI login token"
+	}
+
+	tokenValue, tokenRecord, err := s.AnalyticsStore.issueAccessTokenLocked(TokenKindCLI, identity.OrgID, identity.UserID, label, defaultCLITokenTTL, now)
+	if err != nil {
+		return nil, err
+	}
+
+	s.appendAuditLocked(identity.OrgID, "", "auth.cli_token_issued", "cli token issued from dashboard")
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	return &response.CLITokenIssueResp{
+		TokenID:     tokenRecord.ID,
+		Token:       tokenValue,
+		TokenPrefix: tokenRecord.TokenPrefix,
+		Label:       tokenRecord.Label,
+		CreatedAt:   tokenRecord.CreatedAt,
+		ExpiresAt:   tokenRecord.ExpiresAt,
+	}, nil
+}
+
+func (s *AnalyticsService) ListCLITokens(ctx context.Context) (*response.CLITokenListResp, error) {
+	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.RLock()
+	defer s.AnalyticsStore.mu.RUnlock()
+
+	items := make([]response.CLITokenItemResp, 0)
+	for _, record := range s.AnalyticsStore.accessTokens {
+		if record.Kind != TokenKindCLI || record.OrgID != identity.OrgID || record.UserID != identity.UserID {
+			continue
+		}
+		items = append(items, response.CLITokenItemResp{
+			TokenID:     record.ID,
+			TokenPrefix: record.TokenPrefix,
+			Label:       record.Label,
+			Status:      accessTokenStatus(record, now),
+			CreatedAt:   record.CreatedAt,
+			ExpiresAt:   record.ExpiresAt,
+			LastUsedAt:  record.LastUsedAt,
+			RevokedAt:   record.RevokedAt,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].TokenID > items[j].TokenID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+
+	return &response.CLITokenListResp{Items: items}, nil
+}
+
+func (s *AnalyticsService) RevokeCLIToken(ctx context.Context, req *request.RevokeCLITokenReq) (*response.CLITokenRevokeResp, error) {
+	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	record, ok := s.AnalyticsStore.accessTokens[req.TokenID]
+	if !ok || record.Kind != TokenKindCLI {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown token_id"))
+	}
+	if record.OrgID != identity.OrgID || record.UserID != identity.UserID {
+		return nil, ecode.Forbidden(1006, "token cannot be managed by this user")
+	}
+	record.RevokedAt = &now
+	s.appendAuditLocked(identity.OrgID, "", "auth.cli_token_revoked", "cli token revoked from dashboard")
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	return &response.CLITokenRevokeResp{
+		TokenID:   record.ID,
+		Status:    "revoked",
+		RevokedAt: now,
+	}, nil
+}
+
+func (s *AnalyticsService) AuthenticateCLI(ctx context.Context, req *request.CLILoginReq) (*response.CLILoginResp, error) {
+	identity, err := s.requireUserIdentity(ctx, TokenKindCLI)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	user, ok := s.AnalyticsStore.users[identity.UserID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown user_id"))
+	}
+	org, ok := s.AnalyticsStore.organizations[identity.OrgID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
+	}
+
+	deviceID := firstNonEmpty(req.DeviceID, req.AgentID)
+	if deviceID == "" {
+		deviceID = s.AnalyticsStore.nextID("device")
+	}
+
+	consentScopes := append([]string(nil), req.ConsentScopes...)
+	if len(consentScopes) == 0 {
+		consentScopes = []string{"config_snapshot", "session_summary", "execution_result"}
+	}
+	if record, ok := s.AnalyticsStore.accessTokens[identity.TokenID]; ok {
+		record.LastUsedAt = &now
+	}
+
+	s.AnalyticsStore.agents[deviceID] = &Agent{
+		ID:            deviceID,
+		OrgID:         identity.OrgID,
+		UserID:        identity.UserID,
+		DeviceName:    req.DeviceName,
+		Hostname:      req.Hostname,
+		Platform:      req.Platform,
+		CLIVersion:    req.CLIVersion,
+		Tools:         append([]string(nil), req.Tools...),
+		ConsentScopes: consentScopes,
+		RegisteredAt:  now,
+	}
+
+	s.appendAuditLocked(identity.OrgID, "", "device.registered", "local cli device registered")
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	return &response.CLILoginResp{
+		AgentID:       deviceID,
+		DeviceID:      deviceID,
+		OrgID:         org.ID,
+		OrgName:       org.Name,
+		UserID:        user.ID,
+		UserName:      user.Name,
+		UserEmail:     user.Email,
+		Status:        "registered",
+		ConsentScopes: consentScopes,
+		RegisteredAt:  now,
+	}, nil
+}
+
+func (s *AnalyticsService) requireUserIdentity(ctx context.Context, allowedKinds ...string) (AuthIdentity, error) {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || identity.UserID == "" || identity.OrgID == "" {
+		return AuthIdentity{}, ecode.Unauthorized(1003, "login is required")
+	}
+	if len(allowedKinds) > 0 && !stringInSlice(identity.TokenKind, allowedKinds) {
+		return AuthIdentity{}, ecode.Forbidden(1004, "token type cannot access this route")
+	}
+	return identity, nil
+}
+
+func (s *AnalyticsService) authorizeOrg(ctx context.Context, orgID string) error {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || identity.TokenKind == TokenKindStatic || identity.OrgID == "" {
+		return nil
+	}
+	if identity.OrgID != orgID {
+		return ecode.Forbidden(1005, "token cannot access this organization")
+	}
+	return nil
+}
+
+func (s *AnalyticsService) authorizeProject(ctx context.Context, project *Project) error {
+	if project == nil {
+		return ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	return s.authorizeOrg(ctx, project.OrgID)
+}
+
+func (s *AnalyticsService) actorFromContext(ctx context.Context, fallback string) string {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || identity.UserID == "" || identity.TokenKind == TokenKindStatic {
+		return strings.TrimSpace(fallback)
+	}
+	return identity.UserID
+}
+
+func (s *AnalyticsService) RegisterAgent(ctx context.Context, req *request.RegisterAgentReq) (*response.AgentRegistrationResp, error) {
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	if err := s.authorizeOrg(ctx, req.OrgID); err != nil {
+		return nil, err
+	}
 
 	deviceID := req.DeviceID
 	if deviceID == "" {
@@ -48,14 +348,31 @@ func (s *AnalyticsService) RegisterAgent(ctx context.Context, req *request.Regis
 	if req.OrgName == "" {
 		req.OrgName = req.OrgID
 	}
-	s.AnalyticsStore.organizations[req.OrgID] = &Organization{
-		ID:   req.OrgID,
-		Name: req.OrgName,
+	org := s.AnalyticsStore.organizations[req.OrgID]
+	if org == nil {
+		org = &Organization{ID: req.OrgID, Name: req.OrgName}
+		s.AnalyticsStore.organizations[req.OrgID] = org
+	} else if strings.TrimSpace(req.OrgName) != "" {
+		org.Name = req.OrgName
 	}
-	s.AnalyticsStore.users[req.UserID] = &User{
-		ID:    req.UserID,
-		OrgID: req.OrgID,
-		Email: req.UserEmail,
+
+	user := s.AnalyticsStore.users[req.UserID]
+	if user == nil {
+		user = &User{
+			ID:        req.UserID,
+			OrgID:     req.OrgID,
+			Email:     req.UserEmail,
+			CreatedAt: now,
+		}
+		s.AnalyticsStore.users[req.UserID] = user
+	} else {
+		user.OrgID = req.OrgID
+		if strings.TrimSpace(req.UserEmail) != "" {
+			user.Email = req.UserEmail
+		}
+		if user.CreatedAt.IsZero() {
+			user.CreatedAt = now
+		}
 	}
 	s.AnalyticsStore.agents[deviceID] = &Agent{
 		ID:            deviceID,
@@ -87,34 +404,48 @@ func (s *AnalyticsService) RegisterAgent(ctx context.Context, req *request.Regis
 }
 
 func (s *AnalyticsService) RegisterProject(ctx context.Context, req *request.RegisterProjectReq) (*response.ProjectRegistrationResp, error) {
-	_ = ctx
-
 	now := time.Now().UTC()
 
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
-	if _, ok := s.AnalyticsStore.agents[req.AgentID]; !ok {
+	agent, ok := s.AnalyticsStore.agents[req.AgentID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown agent_id"))
 	}
-
-	projectID := req.ProjectID
-	if projectID == "" {
-		projectID = s.AnalyticsStore.nextID("project")
+	if err := s.authorizeOrg(ctx, req.OrgID); err != nil {
+		return nil, err
+	}
+	if agent.OrgID != req.OrgID {
+		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("agent_id does not belong to org_id"))
 	}
 
-	project := &Project{
-		ID:          projectID,
-		OrgID:       req.OrgID,
-		AgentID:     req.AgentID,
-		Name:        req.Name,
-		RepoHash:    req.RepoHash,
-		RepoPath:    req.RepoPath,
-		LanguageMix: cloneFloatMap(req.LanguageMix),
-		DefaultTool: req.DefaultTool,
-		ConnectedAt: now,
+	projectID := strings.TrimSpace(req.ProjectID)
+	project := s.AnalyticsStore.projects[projectID]
+	if project == nil {
+		project = s.findProjectForConnectLocked(req.OrgID, req.RepoHash, req.RepoPath)
+		if project != nil {
+			projectID = project.ID
+		}
 	}
-	s.AnalyticsStore.projects[projectID] = project
+	if project == nil {
+		if projectID == "" {
+			projectID = s.AnalyticsStore.nextID("project")
+		}
+		project = &Project{
+			ID:    projectID,
+			OrgID: req.OrgID,
+		}
+		s.AnalyticsStore.projects[projectID] = project
+	}
+
+	project.AgentID = req.AgentID
+	project.Name = req.Name
+	project.RepoHash = req.RepoHash
+	project.RepoPath = req.RepoPath
+	project.LanguageMix = cloneFloatMap(req.LanguageMix)
+	project.DefaultTool = req.DefaultTool
+	project.ConnectedAt = now
 
 	s.appendAuditLocked(req.OrgID, projectID, "project.connected", "project connected to aiops workspace")
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
@@ -128,15 +459,49 @@ func (s *AnalyticsService) RegisterProject(ctx context.Context, req *request.Reg
 	}, nil
 }
 
-func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *request.ConfigSnapshotReq) (*response.ConfigSnapshotResp, error) {
-	_ = ctx
+func (s *AnalyticsService) findProjectForConnectLocked(orgID, repoHash, repoPath string) *Project {
+	repoHash = strings.TrimSpace(repoHash)
+	if repoHash == "" {
+		return nil
+	}
 
+	repoPath = strings.TrimSpace(repoPath)
+	var (
+		pathMatch *Project
+		hashMatch *Project
+	)
+
+	for _, project := range s.AnalyticsStore.projects {
+		if project.OrgID != orgID || strings.TrimSpace(project.RepoHash) != repoHash {
+			continue
+		}
+		if repoPath != "" && strings.TrimSpace(project.RepoPath) == repoPath {
+			if pathMatch == nil || project.ConnectedAt.After(pathMatch.ConnectedAt) || (project.ConnectedAt.Equal(pathMatch.ConnectedAt) && project.ID > pathMatch.ID) {
+				pathMatch = project
+			}
+			continue
+		}
+		if hashMatch == nil || project.ConnectedAt.After(hashMatch.ConnectedAt) || (project.ConnectedAt.Equal(hashMatch.ConnectedAt) && project.ID > hashMatch.ID) {
+			hashMatch = project
+		}
+	}
+
+	if pathMatch != nil {
+		return pathMatch
+	}
+	return hashMatch
+}
+
+func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *request.ConfigSnapshotReq) (*response.ConfigSnapshotResp, error) {
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
 	project, ok := s.AnalyticsStore.projects[req.ProjectID]
 	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	capturedAt := req.CapturedAt.UTC()
@@ -181,13 +546,15 @@ func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *reques
 }
 
 func (s *AnalyticsService) ListConfigSnapshots(ctx context.Context, req *request.ConfigSnapshotListReq) (*response.ConfigSnapshotListResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	items := make([]response.ConfigSnapshotItem, 0, len(s.AnalyticsStore.configSnapshots[req.ProjectID]))
@@ -217,14 +584,15 @@ func (s *AnalyticsService) ListConfigSnapshots(ctx context.Context, req *request
 }
 
 func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *request.SessionSummaryReq) (*response.SessionIngestResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
 	project, ok := s.AnalyticsStore.projects[req.ProjectID]
 	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	recordedAt := req.Timestamp.UTC()
@@ -283,13 +651,15 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 }
 
 func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *request.SessionSummaryListReq) (*response.SessionSummaryListResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	limit := req.Limit
@@ -323,13 +693,15 @@ func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *reques
 }
 
 func (s *AnalyticsService) ListRecommendations(ctx context.Context, req *request.RecommendationListReq) (*response.RecommendationListResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	ids := s.AnalyticsStore.projectRecommendations[req.ProjectID]
@@ -352,13 +724,14 @@ func (s *AnalyticsService) ListRecommendations(ctx context.Context, req *request
 }
 
 func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.DashboardOverviewReq) (*response.DashboardOverviewResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
 	if _, ok := s.AnalyticsStore.organizations[req.OrgID]; !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
+	}
+	if err := s.authorizeOrg(ctx, req.OrgID); err != nil {
+		return nil, err
 	}
 
 	projectIDs := make([]string, 0)
@@ -451,13 +824,14 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 }
 
 func (s *AnalyticsService) ListProjects(ctx context.Context, req *request.ProjectListReq) (*response.ProjectListResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
 	if _, ok := s.AnalyticsStore.organizations[req.OrgID]; !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
+	}
+	if err := s.authorizeOrg(ctx, req.OrgID); err != nil {
+		return nil, err
 	}
 
 	items := make([]response.ProjectResp, 0)
@@ -487,14 +861,24 @@ func (s *AnalyticsService) ListProjects(ctx context.Context, req *request.Projec
 }
 
 func (s *AnalyticsService) CreateApplyPlan(ctx context.Context, req *request.ApplyRecommendationReq) (*response.ApplyPlanResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
 	rec, ok := s.AnalyticsStore.recommendations[req.RecommendationID]
 	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown recommendation_id"))
+	}
+	project, ok := s.AnalyticsStore.projects[rec.ProjectID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
+
+	req.RequestedBy = s.actorFromContext(ctx, req.RequestedBy)
+	if req.RequestedBy == "" {
+		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("requested_by is required"))
 	}
 
 	scope := req.Scope
@@ -534,7 +918,7 @@ func (s *AnalyticsService) CreateApplyPlan(ctx context.Context, req *request.App
 		auditType = "change_plan.auto_approved"
 		auditMessage = "change plan auto-approved by policy engine"
 	}
-	s.appendAuditLocked(s.AnalyticsStore.projects[rec.ProjectID].OrgID, rec.ProjectID, auditType, auditMessage)
+	s.appendAuditLocked(project.OrgID, rec.ProjectID, auditType, auditMessage)
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
 	}
@@ -556,14 +940,17 @@ func (s *AnalyticsService) CreateApplyPlan(ctx context.Context, req *request.App
 }
 
 func (s *AnalyticsService) ListChangePlans(ctx context.Context, req *request.ChangePlanListReq) (*response.ApplyHistoryResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
 	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
+	req.UserID = s.actorFromContext(ctx, req.UserID)
 
 	items := make([]response.ApplyHistoryItem, 0)
 	for _, op := range s.AnalyticsStore.applyOperations {
@@ -589,14 +976,19 @@ func (s *AnalyticsService) ListChangePlans(ctx context.Context, req *request.Cha
 }
 
 func (s *AnalyticsService) ReviewChangePlan(ctx context.Context, req *request.ReviewChangePlanReq) (*response.ChangePlanReviewResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
 	op, ok := s.AnalyticsStore.applyOperations[req.ApplyID]
 	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown apply_id"))
+	}
+	project, ok := s.AnalyticsStore.projects[op.ProjectID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	decision := strings.ToLower(strings.TrimSpace(req.Decision))
@@ -605,6 +997,10 @@ func (s *AnalyticsService) ReviewChangePlan(ctx context.Context, req *request.Re
 	}
 
 	now := time.Now().UTC()
+	req.ReviewedBy = s.actorFromContext(ctx, req.ReviewedBy)
+	if req.ReviewedBy == "" {
+		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("reviewed_by is required"))
+	}
 	op.ReviewedBy = req.ReviewedBy
 	op.ReviewNote = req.ReviewNote
 	op.ReviewedAt = &now
@@ -614,12 +1010,12 @@ func (s *AnalyticsService) ReviewChangePlan(ctx context.Context, req *request.Re
 		op.Decision = "approved"
 		op.ApprovalStatus = "approved"
 		op.Status = "approved_for_local_apply"
-		s.appendAuditLocked(s.AnalyticsStore.projects[op.ProjectID].OrgID, op.ProjectID, "change_plan.approved", "change plan approved for local apply")
+		s.appendAuditLocked(project.OrgID, op.ProjectID, "change_plan.approved", "change plan approved for local apply")
 	default:
 		op.Decision = "rejected"
 		op.ApprovalStatus = "rejected"
 		op.Status = "rejected"
-		s.appendAuditLocked(s.AnalyticsStore.projects[op.ProjectID].OrgID, op.ProjectID, "change_plan.rejected", "change plan rejected during review")
+		s.appendAuditLocked(project.OrgID, op.ProjectID, "change_plan.rejected", "change plan rejected during review")
 	}
 
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
@@ -640,13 +1036,15 @@ func (s *AnalyticsService) ReviewChangePlan(ctx context.Context, req *request.Re
 }
 
 func (s *AnalyticsService) ApplyHistory(ctx context.Context, req *request.ApplyHistoryReq) (*response.ApplyHistoryResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	items := make([]response.ApplyHistoryItem, 0)
@@ -667,14 +1065,17 @@ func (s *AnalyticsService) ApplyHistory(ctx context.Context, req *request.ApplyH
 }
 
 func (s *AnalyticsService) PendingApplies(ctx context.Context, req *request.PendingApplyReq) (*response.PendingApplyResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
 	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
+	req.UserID = s.actorFromContext(ctx, req.UserID)
 
 	items := make([]response.PendingApplyItem, 0)
 	for _, op := range s.AnalyticsStore.applyOperations {
@@ -716,13 +1117,15 @@ func (s *AnalyticsService) PendingApplies(ctx context.Context, req *request.Pend
 }
 
 func (s *AnalyticsService) ImpactSummary(ctx context.Context, req *request.ImpactSummaryReq) (*response.ImpactSummaryResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
-	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+	project, ok := s.AnalyticsStore.projects[req.ProjectID]
+	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	items := make([]response.ImpactSummaryItem, 0)
@@ -771,13 +1174,14 @@ func (s *AnalyticsService) ImpactSummary(ctx context.Context, req *request.Impac
 }
 
 func (s *AnalyticsService) AuditList(ctx context.Context, req *request.AuditListReq) (*response.AuditListResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
 	if _, ok := s.AnalyticsStore.organizations[req.OrgID]; !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
+	}
+	if err := s.authorizeOrg(ctx, req.OrgID); err != nil {
+		return nil, err
 	}
 
 	items := make([]response.AuditEventResp, 0)
@@ -806,14 +1210,19 @@ func (s *AnalyticsService) AuditList(ctx context.Context, req *request.AuditList
 }
 
 func (s *AnalyticsService) ReportApplyResult(ctx context.Context, req *request.ApplyResultReq) (*response.ApplyResultResp, error) {
-	_ = ctx
-
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
 	op, ok := s.AnalyticsStore.applyOperations[req.ApplyID]
 	if !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown apply_id"))
+	}
+	project, ok := s.AnalyticsStore.projects[op.ProjectID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
 	}
 
 	now := time.Now().UTC()
@@ -835,7 +1244,6 @@ func (s *AnalyticsService) ReportApplyResult(ctx context.Context, req *request.A
 		op.ApprovalStatus = "approved"
 	}
 
-	project := s.AnalyticsStore.projects[op.ProjectID]
 	s.appendAuditLocked(project.OrgID, op.ProjectID, "execution.result", op.Status)
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
@@ -1081,6 +1489,45 @@ func (s *AnalyticsService) appendAuditLocked(orgID, projectID, eventType, messag
 		Message:   message,
 		CreatedAt: time.Now().UTC(),
 	})
+}
+
+func toSessionUser(user *User) response.AuthUserResp {
+	if user == nil {
+		return response.AuthUserResp{}
+	}
+	return response.AuthUserResp{
+		ID:    user.ID,
+		Name:  user.Name,
+		Email: user.Email,
+	}
+}
+
+func toSessionOrganization(org *Organization) response.AuthOrganizationResp {
+	if org == nil {
+		return response.AuthOrganizationResp{}
+	}
+	return response.AuthOrganizationResp{
+		ID:   org.ID,
+		Name: org.Name,
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func stringInSlice(target string, values []string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
 }
 
 func round(in float64) float64 {

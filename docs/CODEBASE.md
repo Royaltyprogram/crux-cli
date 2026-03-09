@@ -19,7 +19,7 @@ It has four runtime surfaces:
    - is currently a local personal-usage MVP, not a live API integration
 
 3. `AIops Server`
-   - exposes ingestion, review, execution, dashboard, and audit APIs
+   - exposes auth, ingestion, review, execution, dashboard, and audit APIs
    - persists state to an on-disk JSON store
    - tracks rollout state and token-based impact metrics
 
@@ -49,6 +49,7 @@ Server
   -> data/agentopt-store.json
 
 Dashboard
+  -> GET /
   -> GET /dashboard
   -> fetch /api/v1/*
 ```
@@ -93,6 +94,7 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
 - [routes.go](/Users/doyechan/Desktop/codes/aiops/routes/routes.go)
 - [analytics.go](/Users/doyechan/Desktop/codes/aiops/routes/controller/analytics.go)
 - [web.go](/Users/doyechan/Desktop/codes/aiops/routes/controller/web.go)
+- [landing.html](/Users/doyechan/Desktop/codes/aiops/routes/controller/assets/landing.html)
 - [dashboard.html](/Users/doyechan/Desktop/codes/aiops/routes/controller/assets/dashboard.html)
 
 ### Services
@@ -111,25 +113,34 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
 ## Current Product Flow
 
 1. `login`
-   - registers a device and consent scope
-2. `connect`
+   - authenticates a local CLI install with a dashboard-issued CLI token
+2. Web login
+   - signs in at `/`
+   - opens `/dashboard`
+   - issues a scoped CLI token from the dashboard
+3. `connect`
    - connects a project
-3. `snapshot` / `session`
+   - reuses the existing project record when the same repo is connected again
+4. `projects` / `use-project`
+   - `projects` lists project IDs visible to the current org
+   - `use-project` switches the active project stored in local CLI state
+5. `snapshot` / `session`
    - uploads config snapshots plus token usage and raw query history
    - `session` can auto-collect the latest local Codex session JSONL under `~/.codex/sessions`
    - `session --recent N` uploads the most recent `N` local Codex sessions in chronological order
-4. `recommendations`
+6. `recommendations`
    - lists research-agent output
-5. `apply`
+7. `apply`
    - creates a change plan in `awaiting_review`
    - low-risk single-file config merges may be auto-approved by policy
-6. `review`
+8. `review`
    - approves or rejects the plan
-7. `sync`
+9. `sync`
    - applies approved plans locally
-8. `preflight`
+   - accepts `--project-id` to target a different connected project without changing stored state
+10. `preflight`
    - validates a queued change plan against local guard rules before execution
-9. `impact`
+11. `impact`
    - compares pre/post execution signals
 
 ## Persistence Model
@@ -140,6 +151,7 @@ Persisted entities:
 
 - organizations
 - users
+- access tokens
 - devices
 - projects
 - config snapshots

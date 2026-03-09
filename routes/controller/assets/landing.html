@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentOpt Login</title>
+  <style>
+    :root {
+      --canvas-top: #f3ece1;
+      --canvas-bottom: #e8f0ec;
+      --surface: rgba(255, 255, 255, 0.95);
+      --surface-soft: rgba(247, 249, 247, 0.94);
+      --line: rgba(20, 33, 42, 0.10);
+      --line-strong: rgba(20, 33, 42, 0.16);
+      --ink: #14212a;
+      --muted: #5a6973;
+      --accent: #a75231;
+      --accent-deep: #7d3a1f;
+      --support: #1e6870;
+      --shadow: 0 18px 42px rgba(20, 33, 42, 0.08);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      color-scheme: light;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      background:
+        radial-gradient(circle at top left, rgba(167, 82, 49, 0.18), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(30, 104, 112, 0.14), transparent 28%),
+        linear-gradient(160deg, var(--canvas-top) 0%, #f7f4ee 38%, var(--canvas-bottom) 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+      background-size: 36px 36px;
+      opacity: 0.22;
+    }
+
+    h1,
+    h2,
+    p {
+      margin: 0;
+    }
+
+    .page-shell {
+      position: relative;
+      width: min(1180px, calc(100% - 32px));
+      margin: 24px auto 40px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero,
+    .workflow-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero {
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.9fr);
+      align-items: stretch;
+    }
+
+    .hero-copy,
+    .login-panel,
+    .workflow-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-copy {
+      padding: 36px;
+      display: grid;
+      gap: 18px;
+      min-height: 360px;
+      align-content: start;
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.82), transparent 42%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.97), rgba(247, 242, 234, 0.94));
+    }
+
+    .hero-copy::after {
+      content: "";
+      position: absolute;
+      right: -42px;
+      bottom: -56px;
+      width: 190px;
+      height: 190px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(167, 82, 49, 0.18), rgba(30, 104, 112, 0.06));
+    }
+
+    .hero-copy h1,
+    .workflow-card h2 {
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      font-weight: 600;
+    }
+
+    .hero-copy h1 {
+      max-width: 11ch;
+      font-size: clamp(40px, 5vw, 68px);
+      line-height: 0.98;
+    }
+
+    .hero-copy p,
+    .section-copy,
+    .status,
+    .workflow-card p,
+    .credential-note {
+      color: var(--muted);
+    }
+
+    .hero-copy p,
+    .workflow-card p {
+      max-width: 58ch;
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    .eyebrow,
+    .section-kicker,
+    .field-label {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-deep);
+    }
+
+    .hero-note-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .hero-note,
+    .credential-note {
+      display: inline-flex;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.88);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .login-panel {
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+      align-content: start;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(242, 247, 244, 0.96));
+    }
+
+    .section-copy {
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    input,
+    button,
+    a {
+      border-radius: 16px;
+      font: inherit;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px 14px;
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.96);
+      color: var(--ink);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    input::placeholder {
+      color: rgba(90, 105, 115, 0.7);
+    }
+
+    input:focus,
+    button:focus-visible,
+    a:focus-visible {
+      outline: none;
+      border-color: rgba(30, 104, 112, 0.36);
+      box-shadow: 0 0 0 3px rgba(30, 104, 112, 0.12);
+    }
+
+    button,
+    .secondary-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      border: 1px solid transparent;
+      cursor: pointer;
+      padding: 13px 16px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    }
+
+    button:hover,
+    .secondary-link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 24px rgba(20, 33, 42, 0.10);
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .primary-button {
+      background: linear-gradient(135deg, var(--accent), #c56b45);
+      color: #fff;
+    }
+
+    .secondary-link {
+      border-color: var(--line-strong);
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--ink);
+    }
+
+    .form-actions {
+      display: grid;
+      gap: 10px;
+    }
+
+    .credential-block {
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(30, 104, 112, 0.12);
+      background: rgba(246, 249, 248, 0.96);
+    }
+
+    .credential-note {
+      width: fit-content;
+      color: var(--support);
+    }
+
+    .status {
+      min-height: 22px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(246, 248, 246, 0.96);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .status[data-tone="error"] {
+      border-color: rgba(162, 61, 51, 0.22);
+      background: rgba(255, 246, 245, 0.96);
+      color: #a23d33;
+    }
+
+    .workflow-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .workflow-card {
+      padding: 22px;
+      display: grid;
+      gap: 10px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 246, 0.94));
+    }
+
+    .workflow-step {
+      width: 34px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: rgba(167, 82, 49, 0.12);
+      color: var(--accent-deep);
+      font-weight: 700;
+    }
+
+    .workflow-card h2 {
+      font-size: 24px;
+      line-height: 1.15;
+    }
+
+    @media (max-width: 1024px) {
+      .hero,
+      .workflow-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page-shell {
+        width: min(100%, calc(100% - 18px));
+        margin: 12px auto 20px;
+      }
+
+      .hero-copy,
+      .login-panel,
+      .workflow-card {
+        padding: 18px;
+        border-radius: 24px;
+      }
+
+      .hero-copy h1 {
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page-shell">
+    <section class="hero">
+      <article class="hero-copy">
+        <div class="eyebrow">AI Workspace Operations</div>
+        <h1>Approve with confidence. Measure what changed.</h1>
+        <p>Sign in on the web, issue a CLI token, and let each local install authenticate itself before it uploads signals or applies an approved rollout.</p>
+        <div class="hero-note-row">
+          <span class="hero-note">Web login first</span>
+          <span class="hero-note">CLI token issued after login</span>
+          <span class="hero-note">Local apply only after approval</span>
+        </div>
+      </article>
+
+      <form id="loginForm" class="login-panel">
+        <div>
+          <div class="section-kicker">Workspace login</div>
+          <p class="section-copy">Use a web account to open the dashboard. CLI tokens are generated after login, so the browser and local agent stay on separate credentials.</p>
+        </div>
+
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input id="email" type="email" autocomplete="username" placeholder="demo@example.com" value="demo@example.com">
+          </label>
+          <label class="field">
+            <span class="field-label">Password</span>
+            <input id="password" type="password" autocomplete="current-password" placeholder="demo1234" value="demo1234">
+          </label>
+        </div>
+
+        <div class="credential-block">
+          <span class="credential-note">MVP demo account</span>
+          <p class="section-copy">Email: <strong>demo@example.com</strong><br>Password: <strong>demo1234</strong></p>
+        </div>
+
+        <div class="form-actions">
+          <button id="loginButton" class="primary-button" type="submit">Sign in to dashboard</button>
+          <a class="secondary-link" href="/dashboard">Open existing dashboard session</a>
+        </div>
+
+        <div class="status" id="status" data-tone="info" aria-live="polite">Sign in to open the dashboard and issue a CLI token.</div>
+      </form>
+    </section>
+
+    <section class="workflow-grid">
+      <article class="workflow-card">
+        <span class="workflow-step">1</span>
+        <div class="section-kicker">Web login</div>
+        <h2>Open the dashboard with a real user session</h2>
+        <p>The browser signs in first, so the dashboard can load organization context without exposing the CLI token on the public landing page.</p>
+      </article>
+      <article class="workflow-card">
+        <span class="workflow-step">2</span>
+        <div class="section-kicker">Issue token</div>
+        <h2>Generate a CLI token from inside the dashboard</h2>
+        <p>CLI tokens are time-limited and shown once. The dashboard keeps the issuance step separate from the sign-in screen.</p>
+      </article>
+      <article class="workflow-card">
+        <span class="workflow-step">3</span>
+        <div class="section-kicker">Connect CLI</div>
+        <h2>Run `agentopt login` and paste the token</h2>
+        <p>The local CLI authenticates with the issued token, registers the device, then uploads snapshots, sessions, and approved rollout results.</p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const STORAGE_KEYS = {
+      sessionUser: "agentopt_session_user",
+      sessionOrg: "agentopt_session_org",
+      lastEmail: "agentopt_last_email",
+      projectId: "agentopt_project_id",
+      activeTab: "agentopt_dashboard_tab",
+      applyScope: "agentopt_apply_scope"
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function readStorage(key, fallback = "") {
+      try {
+        const value = window.localStorage.getItem(key);
+        return value == null ? fallback : value;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function writeStorage(key, value) {
+      try {
+        if (value == null || value === "") {
+          window.localStorage.removeItem(key);
+          return;
+        }
+        window.localStorage.setItem(key, value);
+      } catch (error) {
+        // Storage is optional in restrictive browsers.
+      }
+    }
+
+    function setStatus(text, isError = false) {
+      const status = $("status");
+      status.textContent = text;
+      status.dataset.tone = isError ? "error" : "info";
+    }
+
+    async function requestJSON(url, options = {}, fallbackMessage = "Request failed.") {
+      const response = await fetch(url, Object.assign({ credentials: "same-origin" }, options));
+      const rawBody = await response.text();
+
+      let envelope = null;
+      if (rawBody) {
+        try {
+          envelope = JSON.parse(rawBody);
+        } catch (error) {
+          const unreadable = new Error(response.ok ? "The server returned an unreadable response." : fallbackMessage);
+          unreadable.status = response.status;
+          throw unreadable;
+        }
+      }
+
+      if (!response.ok || !envelope || envelope.code !== 0) {
+        const failure = new Error((envelope && (envelope.msg || envelope.message)) || fallbackMessage);
+        failure.status = response.status;
+        throw failure;
+      }
+
+      return envelope.data || {};
+    }
+
+    function restoreInputs() {
+      $("email").value = readStorage(STORAGE_KEYS.lastEmail, "demo@example.com");
+      try {
+        const notice = window.sessionStorage.getItem("agentopt_redirect_notice");
+        if (notice) {
+          setStatus(notice, false);
+          window.sessionStorage.removeItem("agentopt_redirect_notice");
+        }
+      } catch (error) {
+        // Ignore sessionStorage failures.
+      }
+    }
+
+    async function handleLogin(event) {
+      event.preventDefault();
+
+      const email = $("email").value.trim();
+      const password = $("password").value;
+      if (!email || !password) {
+        setStatus("Email and password are required.", true);
+        return;
+      }
+
+      const button = $("loginButton");
+      button.disabled = true;
+      button.textContent = "Signing in...";
+      setStatus("Signing in...");
+
+      try {
+        const data = await requestJSON("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        }, "Login failed.");
+
+        writeStorage(STORAGE_KEYS.sessionUser, JSON.stringify(data.user || {}));
+        writeStorage(STORAGE_KEYS.sessionOrg, JSON.stringify(data.organization || {}));
+        writeStorage(STORAGE_KEYS.lastEmail, email);
+        writeStorage(STORAGE_KEYS.activeTab, "focus");
+        if (!readStorage(STORAGE_KEYS.applyScope)) {
+          writeStorage(STORAGE_KEYS.applyScope, "user");
+        }
+
+        setStatus("Signed in. Opening the dashboard...");
+        window.location.assign("/dashboard");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Login failed.", true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Sign in to dashboard";
+      }
+    }
+
+    $("loginForm").addEventListener("submit", handleLogin);
+    restoreInputs();
+  </script>
+</body>
+
+</html>
