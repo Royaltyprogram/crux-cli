@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -83,6 +84,43 @@ type preflightStep struct {
 	Allowed      bool   `json:"allowed"`
 }
 
+type codexSessionLine struct {
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+type codexSessionMetaPayload struct {
+	Timestamp string `json:"timestamp"`
+}
+
+type codexTokenUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
+type codexTokenCountInfo struct {
+	TotalTokenUsage *codexTokenUsage `json:"total_token_usage"`
+}
+
+type codexEventMsgPayload struct {
+	Type    string               `json:"type"`
+	Message string               `json:"message"`
+	Info    *codexTokenCountInfo `json:"info"`
+}
+
+type codexResponseContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type codexResponseItemPayload struct {
+	Type    string                 `json:"type"`
+	Role    string                 `json:"role"`
+	Content []codexResponseContent `json:"content"`
+}
+
 type apiClient struct {
 	baseURL string
 	token   string
@@ -152,7 +190,7 @@ func printUsage() {
   login             register a CLI agent and persist local state
   connect           connect a project to the current org/agent
   snapshot          upload a config snapshot from a JSON file
-  session           upload a session summary from a JSON file or defaults
+  session           upload a session summary from a JSON file or local Codex session files
   snapshots         list config snapshots for the current project
   sessions          list recent session summaries for the current project
   recommendations   list active recommendations for the current project
@@ -331,8 +369,9 @@ func runSnapshot(args []string) error {
 
 func runSession(args []string) error {
 	fs := flag.NewFlagSet("session", flag.ContinueOnError)
-	filePath := fs.String("file", "", "session summary JSON file path")
+	filePath := fs.String("file", "", "session summary JSON or Codex session JSONL path")
 	tool := fs.String("tool", "codex", "tool name")
+	codexHome := fs.String("codex-home", "", "override Codex home used for automatic session collection")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -342,21 +381,9 @@ func runSession(args []string) error {
 		return err
 	}
 
-	req := request.SessionSummaryReq{
-		Tool:     *tool,
-		TokenIn:  18000,
-		TokenOut: 6400,
-		RawQueries: []string{
-			"Inspect the repo layout before proposing a patch.",
-			"Find the files related to the failing analytics route and summarize the likely cause.",
-			"After the edit, list the exact verification steps needed for the changed files.",
-		},
-		Timestamp: time.Now().UTC(),
-	}
-	if *filePath != "" {
-		if err := loadJSONFile(*filePath, &req); err != nil {
-			return err
-		}
+	req, err := loadSessionSummaryInput(*filePath, *tool, *codexHome)
+	if err != nil {
+		return err
 	}
 	req.ProjectID = st.ProjectID
 	if req.Tool == "" {
@@ -1017,6 +1044,211 @@ func readOptionalJSONMap(path string, out *map[string]any) (bool, error) {
 	return true, json.Unmarshal(data, out)
 }
 
+func loadSessionSummaryInput(path, tool, codexHome string) (request.SessionSummaryReq, error) {
+	if strings.TrimSpace(path) != "" {
+		if strings.EqualFold(filepath.Ext(path), ".jsonl") {
+			return collectCodexSessionSummary(path, tool)
+		}
+		var req request.SessionSummaryReq
+		if err := loadJSONFile(path, &req); err != nil {
+			return request.SessionSummaryReq{}, err
+		}
+		return req, nil
+	}
+
+	sessionPath, err := latestCodexSessionFile(codexHome)
+	if err != nil {
+		return request.SessionSummaryReq{}, err
+	}
+	return collectCodexSessionSummary(sessionPath, tool)
+}
+
+func latestCodexSessionFile(codexHome string) (string, error) {
+	root, err := codexHomePath(codexHome)
+	if err != nil {
+		return "", err
+	}
+
+	sessionsRoot := filepath.Join(root, "sessions")
+	var (
+		latestPath string
+		latestTime time.Time
+	)
+
+	err = filepath.WalkDir(sessionsRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".jsonl") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if latestPath == "" || info.ModTime().After(latestTime) {
+			latestPath = path
+			latestTime = info.ModTime()
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("no Codex sessions found under %s; pass --file or set --codex-home", sessionsRoot)
+		}
+		return "", err
+	}
+	if latestPath == "" {
+		return "", fmt.Errorf("no Codex sessions found under %s; pass --file or set --codex-home", sessionsRoot)
+	}
+	return latestPath, nil
+}
+
+func codexHomePath(override string) (string, error) {
+	override = strings.TrimSpace(override)
+	if override != "" {
+		return override, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return request.SessionSummaryReq{}, err
+	}
+	defer file.Close()
+
+	req := request.SessionSummaryReq{Tool: tool}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	seenQueries := map[string]struct{}{}
+	var latestTimestamp time.Time
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var item codexSessionLine
+		if err := json.Unmarshal(line, &item); err != nil {
+			return request.SessionSummaryReq{}, fmt.Errorf("parse Codex session line %d: %w", lineNo, err)
+		}
+		if ts, ok := parseCodexTimestamp(item.Timestamp); ok && ts.After(latestTimestamp) {
+			latestTimestamp = ts
+		}
+
+		switch item.Type {
+		case "session_meta":
+			var payload codexSessionMetaPayload
+			if err := json.Unmarshal(item.Payload, &payload); err != nil {
+				continue
+			}
+			if ts, ok := parseCodexTimestamp(payload.Timestamp); ok && ts.After(latestTimestamp) {
+				latestTimestamp = ts
+			}
+		case "event_msg":
+			var payload codexEventMsgPayload
+			if err := json.Unmarshal(item.Payload, &payload); err != nil {
+				continue
+			}
+			switch payload.Type {
+			case "user_message":
+				appendRawQuery(seenQueries, &req.RawQueries, payload.Message)
+			case "token_count":
+				if payload.Info != nil && payload.Info.TotalTokenUsage != nil {
+					req.TokenIn = maxInt(req.TokenIn, payload.Info.TotalTokenUsage.InputTokens)
+					req.TokenOut = maxInt(req.TokenOut, payload.Info.TotalTokenUsage.OutputTokens)
+				}
+			}
+		case "response_item":
+			var payload codexResponseItemPayload
+			if err := json.Unmarshal(item.Payload, &payload); err != nil {
+				continue
+			}
+			if payload.Type != "message" || payload.Role != "user" {
+				continue
+			}
+			for _, content := range payload.Content {
+				if content.Type != "input_text" {
+					continue
+				}
+				appendRawQuery(seenQueries, &req.RawQueries, content.Text)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return request.SessionSummaryReq{}, err
+	}
+
+	if latestTimestamp.IsZero() {
+		latestTimestamp = time.Now().UTC()
+	}
+	req.Timestamp = latestTimestamp
+
+	if len(req.RawQueries) == 0 {
+		return request.SessionSummaryReq{}, fmt.Errorf("no raw user queries found in Codex session %s", path)
+	}
+	return req, nil
+}
+
+func appendRawQuery(seen map[string]struct{}, dst *[]string, raw string) {
+	query := normalizeCodexUserMessage(raw)
+	if query == "" {
+		return
+	}
+	if _, ok := seen[query]; ok {
+		return
+	}
+	seen[query] = struct{}{}
+	*dst = append(*dst, query)
+}
+
+func normalizeCodexUserMessage(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	if marker := "## My request for Codex:"; strings.Contains(raw, marker) {
+		raw = raw[strings.LastIndex(raw, marker)+len(marker):]
+	} else if marker := "## My request for Codex"; strings.Contains(raw, marker) {
+		raw = raw[strings.LastIndex(raw, marker)+len(marker):]
+	}
+
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "<environment_context>") {
+		return ""
+	}
+
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\n\n", "\n")
+	raw = strings.TrimSpace(raw)
+	return raw
+}
+
+func parseCodexTimestamp(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts.UTC(), true
+}
+
 func parseLanguageMix(raw string) map[string]float64 {
 	out := map[string]float64{}
 	for _, item := range splitComma(raw) {
@@ -1055,6 +1287,13 @@ func sanitizeID(raw string) string {
 		return "unknown"
 	}
 	return raw
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func mergeMap(dst, src map[string]any) {

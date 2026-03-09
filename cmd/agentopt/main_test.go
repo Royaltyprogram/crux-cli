@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -121,6 +123,69 @@ func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {
 	require.Equal(t, 320, uploaded.TokenOut)
 	require.Len(t, uploaded.RawQueries, 2)
 	require.False(t, uploaded.Timestamp.IsZero())
+}
+
+func TestRunSessionCollectsLatestCodexSessionFromLocalFiles(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	codexHome := filepath.Join(root, ".codex")
+	oldSession := filepath.Join(codexHome, "sessions", "2026", "03", "08", "old.jsonl")
+	newSession := filepath.Join(codexHome, "sessions", "2026", "03", "09", "new.jsonl")
+	require.NoError(t, os.MkdirAll(filepath.Dir(oldSession), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(newSession), 0o755))
+
+	require.NoError(t, os.WriteFile(oldSession, []byte("{\"timestamp\":\"2026-03-08T09:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"obsolete prompt\"}}\n"), 0o644))
+	require.NoError(t, os.WriteFile(newSession, []byte(strings.Join([]string{
+		`{"timestamp":"2026-03-09T09:00:00Z","type":"session_meta","payload":{"timestamp":"2026-03-09T09:00:00Z"}}`,
+		`{"timestamp":"2026-03-09T09:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context>"}]}}`,
+		`{"timestamp":"2026-03-09T09:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"# Context from my IDE setup:\n\n## My request for Codex:\nInspect the analytics route and summarize the current control flow.\n"}}`,
+		`{"timestamp":"2026-03-09T09:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2100,"output_tokens":480,"total_tokens":2580}}}}`,
+		`{"timestamp":"2026-03-09T09:00:04Z","type":"event_msg","payload":{"type":"user_message","message":"List the exact tests to run after the patch."}}`,
+	}, "\n")+"\n"), 0o644))
+
+	oldTime := time.Date(2026, 3, 8, 9, 0, 0, 0, time.UTC)
+	newTime := time.Date(2026, 3, 9, 9, 0, 4, 0, time.UTC)
+	require.NoError(t, os.Chtimes(oldSession, oldTime, oldTime))
+	require.NoError(t, os.Chtimes(newSession, newTime, newTime))
+
+	var uploaded request.SessionSummaryReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/session-summaries", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&uploaded))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.SessionIngestResp{
+				SessionID:           "session-collector",
+				ProjectID:           "project-1",
+				RecommendationCount: 1,
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL: server.URL,
+		APIToken:  "token-session",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	err := runSession([]string{"--tool", "codex", "--codex-home", codexHome})
+	require.NoError(t, err)
+
+	require.Equal(t, "project-1", uploaded.ProjectID)
+	require.Equal(t, "codex", uploaded.Tool)
+	require.Equal(t, 2100, uploaded.TokenIn)
+	require.Equal(t, 480, uploaded.TokenOut)
+	require.Equal(t, []string{
+		"Inspect the analytics route and summarize the current control flow.",
+		"List the exact tests to run after the patch.",
+	}, uploaded.RawQueries)
+	require.Equal(t, newTime, uploaded.Timestamp)
 }
 
 func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
