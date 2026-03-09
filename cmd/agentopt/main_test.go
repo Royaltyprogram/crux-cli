@@ -1,12 +1,16 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/liushuangls/go-server-template/dto/request"
 	"github.com/liushuangls/go-server-template/dto/response"
 )
 
@@ -217,4 +221,268 @@ func TestRunSyncRejectsInvalidIntervalInWatchMode(t *testing.T) {
 	err = runSync([]string{"--watch", "--interval", "0s"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "greater than zero")
+}
+
+func TestRunRollbackRestoresFilesDeletesCreatedOnesAndReportsResult(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	var reported request.ApplyResultReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/applies/result", r.URL.Path)
+		require.Equal(t, "token-1", r.Header.Get("X-AgentOpt-Token"))
+
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&reported))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.ApplyResultResp{
+				ApplyID:    reported.ApplyID,
+				Status:     "rollback_confirmed",
+				RolledBack: true,
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL: server.URL,
+		APIToken:  "token-1",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	configTarget := filepath.Join(root, "config.json")
+	textTarget := filepath.Join(root, "AGENTS.md")
+	createdTarget := filepath.Join(root, ".mcp.json")
+
+	require.NoError(t, os.WriteFile(configTarget, []byte("{\"shell_profile\":\"safe\"}\n"), 0o644))
+	require.NoError(t, os.WriteFile(textTarget, []byte("# Existing\n\n## AgentOpt\n- rollout\n"), 0o644))
+	require.NoError(t, os.WriteFile(createdTarget, []byte("{\"new\":true}\n"), 0o644))
+
+	require.NoError(t, saveApplyBackup(applyBackup{
+		ApplyID:   "apply-rollback",
+		ProjectID: "project-1",
+		Files: []applyFileBackup{
+			{
+				FilePath:       configTarget,
+				FileKind:       "json_merge",
+				OriginalExists: true,
+				OriginalJSON: map[string]any{
+					"baseline": true,
+				},
+			},
+			{
+				FilePath:       textTarget,
+				FileKind:       "text_append",
+				OriginalExists: true,
+				OriginalText:   "# Existing\n",
+			},
+			{
+				FilePath:       createdTarget,
+				FileKind:       "json_merge",
+				OriginalExists: false,
+			},
+		},
+	}))
+
+	err := runRollback([]string{"--apply-id", "apply-rollback", "--note", "rollback from test"})
+	require.NoError(t, err)
+
+	configData, err := os.ReadFile(configTarget)
+	require.NoError(t, err)
+	require.Contains(t, string(configData), "\"baseline\": true")
+	require.NotContains(t, string(configData), "\"shell_profile\"")
+
+	textData, err := os.ReadFile(textTarget)
+	require.NoError(t, err)
+	require.Equal(t, "# Existing\n", string(textData))
+
+	_, err = os.Stat(createdTarget)
+	require.Error(t, err)
+	require.True(t, os.IsNotExist(err))
+
+	_, err = loadApplyBackup("apply-rollback")
+	require.Error(t, err)
+
+	require.Equal(t, "apply-rollback", reported.ApplyID)
+	require.True(t, reported.Success)
+	require.True(t, reported.RolledBack)
+	require.Equal(t, "rollback from test", reported.Note)
+	require.Contains(t, reported.AppliedFile, configTarget)
+	require.Contains(t, reported.AppliedFile, textTarget)
+	require.Contains(t, reported.AppliedFile, createdTarget)
+
+	restoredConfig, ok := reported.AppliedSettings[configTarget].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, restoredConfig["baseline"])
+}
+
+func TestRunApplyYesReviewsPlanBeforeLocalApply(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	configTarget := filepath.Join(root, "config.json")
+	require.NoError(t, os.WriteFile(configTarget, []byte("{\"baseline\":true}\n"), 0o644))
+
+	var (
+		reviewCalled bool
+		reported     request.ApplyResultReq
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token-apply", r.Header.Get("X-AgentOpt-Token"))
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/recommendations/apply":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request.ApplyRecommendationReq{}))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ApplyPlanResp{
+					ApplyID:        "apply-cli-review",
+					Status:         "awaiting_review",
+					PolicyMode:     "requires_review",
+					ApprovalStatus: "awaiting_review",
+					PatchPreview: []response.PatchPreviewItem{{
+						FilePath:  ".codex/config.json",
+						Operation: "merge_patch",
+						SettingsUpdates: map[string]any{
+							"shell_profile": "safe",
+						},
+					}},
+				}),
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/change-plans/review":
+			reviewCalled = true
+			var reviewReq request.ReviewChangePlanReq
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&reviewReq))
+			require.Equal(t, "apply-cli-review", reviewReq.ApplyID)
+			require.Equal(t, "approve", reviewReq.Decision)
+			require.Equal(t, "user-1", reviewReq.ReviewedBy)
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ChangePlanReviewResp{
+					ApplyID:        "apply-cli-review",
+					Status:         "approved_for_local_apply",
+					ApprovalStatus: "approved",
+					Decision:       "approved",
+				}),
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/applies/result":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&reported))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ApplyResultResp{
+					ApplyID: "apply-cli-review",
+					Status:  "applied",
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL: server.URL,
+		APIToken:  "token-apply",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	err := runApply([]string{"--recommendation-id", "rec-1", "--yes", "--target-config", configTarget})
+	require.NoError(t, err)
+	require.True(t, reviewCalled)
+
+	configData, err := os.ReadFile(configTarget)
+	require.NoError(t, err)
+	require.Contains(t, string(configData), "\"shell_profile\": \"safe\"")
+
+	require.Equal(t, "apply-cli-review", reported.ApplyID)
+	require.True(t, reported.Success)
+	require.Equal(t, configTarget, reported.AppliedFile)
+	require.Equal(t, "safe", reported.AppliedSettings["shell_profile"])
+
+	backup, err := loadApplyBackup("apply-cli-review")
+	require.NoError(t, err)
+	require.Len(t, backup.Files, 1)
+}
+
+func TestRunApplyYesSkipsReviewForAutoApprovedPlan(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	configTarget := filepath.Join(root, "config.json")
+	require.NoError(t, os.WriteFile(configTarget, []byte("{\"baseline\":true}\n"), 0o644))
+
+	var reported request.ApplyResultReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token-auto", r.Header.Get("X-AgentOpt-Token"))
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/recommendations/apply":
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ApplyPlanResp{
+					ApplyID:        "apply-cli-auto",
+					Status:         "approved_for_local_apply",
+					PolicyMode:     "auto_approved",
+					ApprovalStatus: "approved",
+					Decision:       "auto_approved",
+					PatchPreview: []response.PatchPreviewItem{{
+						FilePath:  ".codex/config.json",
+						Operation: "merge_patch",
+						SettingsUpdates: map[string]any{
+							"shell_profile": "safe",
+						},
+					}},
+				}),
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/change-plans/review":
+			t.Fatalf("review endpoint should not be called for auto-approved plans")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/applies/result":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&reported))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ApplyResultResp{
+					ApplyID: "apply-cli-auto",
+					Status:  "applied",
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL: server.URL,
+		APIToken:  "token-auto",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	err := runApply([]string{"--recommendation-id", "rec-auto", "--yes", "--target-config", configTarget})
+	require.NoError(t, err)
+
+	configData, err := os.ReadFile(configTarget)
+	require.NoError(t, err)
+	require.Contains(t, string(configData), "\"shell_profile\": \"safe\"")
+
+	require.Equal(t, "apply-cli-auto", reported.ApplyID)
+	require.True(t, reported.Success)
+	require.Equal(t, configTarget, reported.AppliedFile)
+}
+
+func mustJSONRawMessage(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return json.RawMessage(data)
 }
