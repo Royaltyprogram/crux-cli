@@ -367,23 +367,23 @@
       <form id="loginForm" class="login-panel">
         <div>
           <div class="section-kicker">Workspace login</div>
-          <p class="section-copy">Use a web account to open the dashboard. CLI tokens are generated after login, so the browser and local agent stay on separate credentials.</p>
+          <p class="section-copy">Use your closed beta web account to open the dashboard. CLI tokens are generated after login, so the browser and local agent stay on separate credentials.</p>
         </div>
 
         <div class="field-grid">
           <label class="field">
             <span class="field-label">Email</span>
-            <input id="email" type="email" autocomplete="username" placeholder="demo@example.com" value="demo@example.com">
+            <input id="email" type="email" autocomplete="username" placeholder="you@company.com">
           </label>
           <label class="field">
             <span class="field-label">Password</span>
-            <input id="password" type="password" autocomplete="current-password" placeholder="demo1234" value="demo1234">
+            <input id="password" type="password" autocomplete="current-password" placeholder="Enter your beta password">
           </label>
         </div>
 
         <div class="credential-block">
-          <span class="credential-note">MVP demo account</span>
-          <p class="section-copy">Email: <strong>demo@example.com</strong><br>Password: <strong>demo1234</strong></p>
+          <span class="credential-note">Closed beta access</span>
+          <p class="section-copy">Sign-in credentials are issued per beta participant. Ask the operator for access if you have not been onboarded yet.</p>
         </div>
 
         <div class="form-actions">
@@ -422,7 +422,6 @@
       sessionUser: "agentopt_session_user",
       sessionOrg: "agentopt_session_org",
       lastEmail: "agentopt_last_email",
-      projectId: "agentopt_project_id",
       activeTab: "agentopt_dashboard_tab",
       applyScope: "agentopt_apply_scope"
     };
@@ -481,7 +480,7 @@
     }
 
     function restoreInputs() {
-      $("email").value = readStorage(STORAGE_KEYS.lastEmail, "demo@example.com");
+      $("email").value = readStorage(STORAGE_KEYS.lastEmail, "");
       try {
         const notice = window.sessionStorage.getItem("agentopt_redirect_notice");
         if (notice) {

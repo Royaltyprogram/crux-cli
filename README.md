@@ -44,6 +44,8 @@ make install-codex-runner
 make run
 ```
 
+`make run` now uses `configs/local.yaml`, which keeps the local demo account enabled for development. Closed beta or production deployments should run with `APP_MODE=prod` plus seeded beta users and secrets supplied through env vars.
+
 In another shell:
 
 ```bash
@@ -72,7 +74,16 @@ go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID> --yes
 
 That path is useful for development because it creates, approves, and applies the plan locally in one step.
 
-Then open `http://127.0.0.1:8082/`, sign in with `demo@example.com / demo1234`, issue a CLI token from the dashboard, and run `agentopt login --server http://127.0.0.1:8082` on the machine you want to connect. The CLI prompts for the issued token if `--token` is omitted.
+For local development, open `http://127.0.0.1:8082/`, sign in with `demo@example.com / demo1234`, issue a CLI token from the dashboard, and run `agentopt login --server http://127.0.0.1:8082` on the machine you want to connect. The CLI prompts for the issued token if `--token` is omitted.
+
+For closed beta or production, disable the demo path and seed named beta accounts through env:
+
+```bash
+APP_MODE=prod \
+JWT_SECRET=replace-me \
+AUTH_BOOTSTRAP_USERS_JSON='[{"id":"beta-user-1","org_id":"beta-org","org_name":"Beta Org","email":"beta1@example.com","name":"Beta Operator","password":"replace-me"}]' \
+go run .
+```
 
 In this MVP every connected repository shares one workspace per organization. `agentopt connect` keeps that shared workspace current, and `pending`, `sync`, `history`, and `impact` always read from the same rollout stream.
 

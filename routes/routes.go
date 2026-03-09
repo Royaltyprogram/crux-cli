@@ -34,7 +34,7 @@ func NewEcho(conf *configs.Config, logger *slog.Logger, store *service.Analytics
 		echoMiddleware.Recover(),
 		echoMiddleware.RequestLogger(),
 		echoMiddleware.CORS("*"),
-		middleware.RequireAPIToken(conf.App.APIToken, store),
+		middleware.RequireAPIToken(conf.App.APIToken, conf.AllowsStaticToken(), store),
 	)
 
 	return e, nil

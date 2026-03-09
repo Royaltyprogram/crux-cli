@@ -80,9 +80,9 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 
 	projects, err := svc.ListProjects(ctx, &request.ProjectListReq{OrgID: "org-1"})
 	require.NoError(t, err)
-	require.Len(t, projects.Items, 2)
-	require.Equal(t, "alpha", projects.Items[0].Name)
-	require.Equal(t, "zeta", projects.Items[1].Name)
+	require.Len(t, projects.Items, 1)
+	require.Equal(t, "project-z", projects.Items[0].ID)
+	require.Equal(t, "Shared workspace", projects.Items[0].Name)
 
 	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-z"})
 	require.NoError(t, err)
@@ -192,10 +192,20 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Len(t, impact.Items, 2)
 	require.Equal(t, planNew.ApplyID, impact.Items[0].ApplyID)
 	require.Greater(t, impact.Items[0].SessionsAfter, 0)
+	require.Equal(t, 333.33, impact.Items[0].AvgInputTokensPerQueryBefore)
+	require.Equal(t, 400.0, impact.Items[0].AvgInputTokensPerQueryAfter)
+	require.Equal(t, 133.33, impact.Items[0].AvgOutputTokensPerQueryBefore)
+	require.Equal(t, 150.0, impact.Items[0].AvgOutputTokensPerQueryAfter)
+	require.Equal(t, 66.67, impact.Items[0].InputTokensPerQueryDelta)
+	require.Equal(t, 16.67, impact.Items[0].OutputTokensPerQueryDelta)
 
 	overview, err := svc.DashboardOverview(ctx, &request.DashboardOverviewReq{OrgID: "org-1"})
 	require.NoError(t, err)
 	require.Greater(t, overview.AvgTokensPerQuery, 0.0)
+	require.Equal(t, 1800, overview.TotalInputTokens)
+	require.Equal(t, 700, overview.TotalOutputTokens)
+	require.Equal(t, 360.0, overview.AvgInputTokensPerQuery)
+	require.Equal(t, 140.0, overview.AvgOutputTokensPerQuery)
 	require.Greater(t, overview.TotalTokens, 0)
 	require.Equal(t, 2, overview.SuccessfulRolloutCount)
 	require.NotEmpty(t, overview.ActionSummary)
@@ -276,6 +286,7 @@ func TestRegisterProjectReusesExistingProjectAndPreservesSignals(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, projects.Items, 1)
 	require.Equal(t, "project-1", projects.Items[0].ID)
+	require.Equal(t, "Shared workspace", projects.Items[0].Name)
 	require.Equal(t, "/tmp/demo-repo", projects.Items[0].RepoPath)
 	require.Equal(t, "baseline", projects.Items[0].LastProfileID)
 	require.NotNil(t, projects.Items[0].LastIngestedAt)
@@ -343,6 +354,31 @@ func TestAnalyticsServiceAuthWorkflow(t *testing.T) {
 	require.Equal(t, "demo-org", cliLoginResp.OrgID)
 	require.Equal(t, "demo-user", cliLoginResp.UserID)
 
+	projectResp, err := svc.RegisterProject(cliCtx, &request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "demo-repo",
+		RepoHash:    "demo-repo-hash",
+		RepoPath:    "/tmp/demo-repo",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, projectResp.ProjectID)
+
+	_, err = svc.UploadSessionSummary(cliCtx, &request.SessionSummaryReq{
+		Tool:     "codex",
+		TokenIn:  900,
+		TokenOut: 120,
+		RawQueries: []string{
+			"Inspect the shared workspace flow after login.",
+		},
+	})
+	require.NoError(t, err)
+
+	recommendations, err := svc.ListRecommendations(cliCtx, &request.RecommendationListReq{})
+	require.NoError(t, err)
+	require.NotEmpty(t, recommendations.Items)
+
 	tokenListResp, err = svc.ListCLITokens(sessionCtx)
 	require.NoError(t, err)
 	require.Len(t, tokenListResp.Items, 1)
@@ -360,6 +396,43 @@ func TestAnalyticsServiceAuthWorkflow(t *testing.T) {
 	logoutResp, err := svc.Logout(sessionCtx)
 	require.NoError(t, err)
 	require.Equal(t, "signed_out", logoutResp.Status)
+}
+
+func TestAnalyticsServiceProdBootstrapAuthDisablesDefaultDemoUser(t *testing.T) {
+	ctx := context.Background()
+	conf := &configs.Config{}
+	conf.App.Mode = "prod"
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
+		ID:       "beta-user",
+		OrgID:    "beta-org",
+		OrgName:  "Beta Org",
+		Email:    "beta@example.com",
+		Name:     "Beta User",
+		Password: "beta-pass",
+	}}
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:         conf,
+		AnalyticsStore: store,
+	})
+
+	_, err = svc.Login(ctx, &request.LoginReq{
+		Email:    "demo@example.com",
+		Password: "demo1234",
+	})
+	require.Error(t, err)
+
+	loginResp, err := svc.Login(ctx, &request.LoginReq{
+		Email:    "beta@example.com",
+		Password: "beta-pass",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "beta-user", loginResp.User.ID)
+	require.Equal(t, "beta-org", loginResp.Organization.ID)
 }
 
 func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
@@ -602,6 +675,8 @@ func TestReportApplyResultTracksApplyAndRollbackLifecycle(t *testing.T) {
 	require.Len(t, impact.Items, 1)
 	require.Equal(t, plan.ApplyID, impact.Items[0].ApplyID)
 	require.Greater(t, impact.Items[0].SessionsAfter, 0)
+	require.Equal(t, 33.33, impact.Items[0].InputTokensPerQueryDelta)
+	require.Equal(t, 16.67, impact.Items[0].OutputTokensPerQueryDelta)
 
 	rollbackResult, err := svc.ReportApplyResult(ctx, &request.ApplyResultReq{
 		ApplyID:     plan.ApplyID,
@@ -623,6 +698,10 @@ func TestReportApplyResultTracksApplyAndRollbackLifecycle(t *testing.T) {
 	overview, err := svc.DashboardOverview(ctx, &request.DashboardOverviewReq{OrgID: "org-exec"})
 	require.NoError(t, err)
 	require.Greater(t, overview.AvgQueriesPerSession, 0.0)
+	require.Equal(t, 1400, overview.TotalInputTokens)
+	require.Equal(t, 400, overview.TotalOutputTokens)
+	require.Equal(t, 280.0, overview.AvgInputTokensPerQuery)
+	require.Equal(t, 80.0, overview.AvgOutputTokensPerQuery)
 	require.Greater(t, overview.TotalTokens, 0)
 	require.Equal(t, 0, overview.SuccessfulRolloutCount)
 	require.Equal(t, 0, overview.FailedExecutionCount)

@@ -1,6 +1,7 @@
 App:
   Addr: ":8082"
   Mode: release
+  APIToken: ""
 
 DB:
   Dialect: mysql
@@ -27,3 +28,20 @@ Log:
 Jwt:
   Secret: "secret_122"
   Issuer: "test.com"
+
+Auth:
+  AllowDemoUser: false
+  StaticTokenEnabled: false
+  BootstrapUsers:
+    - ID: beta-user-1
+      OrgID: beta-org
+      OrgName: Beta Org
+      Email: beta1@example.com
+      Name: Beta Operator 1
+      Password: "replace-me"
+
+HTTP:
+  AllowedOrigins:
+    - https://dashboard.example.com
+  RateLimitPerMinute: 60
+  LogToStdout: true

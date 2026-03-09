@@ -15,7 +15,7 @@ go run .
 http://127.0.0.1:8082
 ```
 
-로그인 계정:
+로컬 개발용 로그인 계정:
 
 ```text
 demo@example.com
@@ -60,6 +60,8 @@ go run ./cmd/agentopt login --server http://127.0.0.1:8082
 ```
 
 프롬프트가 뜨면 대시보드에서 발급한 CLI 토큰을 붙여넣는다.
+
+closed beta 배포에서는 위 demo 계정을 쓰지 않고, 서버 기동 시 `AUTH_BOOTSTRAP_USERS_JSON`으로 베타 사용자 계정을 주입해야 한다.
 
 ## 4. 프로젝트 연결
 

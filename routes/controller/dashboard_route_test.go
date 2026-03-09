@@ -37,7 +37,8 @@ func TestLandingRouteServesLandingPage(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "Sign in to dashboard")
 	require.Contains(t, rec.Body.String(), `id="loginForm"`)
 	require.Contains(t, rec.Body.String(), "Run `agentopt login` and paste the token")
-	require.Contains(t, rec.Body.String(), "demo@example.com")
+	require.Contains(t, rec.Body.String(), "closed beta")
+	require.NotContains(t, rec.Body.String(), "demo@example.com")
 }
 
 func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
@@ -61,11 +62,11 @@ func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "Review changes, approve safely, and connect each CLI with its own token.")
 	require.Contains(t, rec.Body.String(), "Recommended changes for this workspace")
-	require.Contains(t, rec.Body.String(), "Avg Tokens / Query")
+	require.Contains(t, rec.Body.String(), "Shared Workspace")
 	require.Contains(t, rec.Body.String(), "Install and connect the CLI")
-	require.Contains(t, rec.Body.String(), "agentopt use-project --project-id")
-	require.Contains(t, rec.Body.String(), "agentopt pending --project-id")
-	require.Contains(t, rec.Body.String(), "agentopt sync --project-id")
+	require.Contains(t, rec.Body.String(), "agentopt connect --project demo-repo --repo-path .")
+	require.Contains(t, rec.Body.String(), "agentopt pending")
+	require.Contains(t, rec.Body.String(), "agentopt sync")
 	require.Contains(t, rec.Body.String(), `data-action="copy-command"`)
 	require.Contains(t, rec.Body.String(), "Manage issued CLI access")
 	require.Contains(t, rec.Body.String(), `data-action="issue-cli-token"`)

@@ -123,3 +123,66 @@ func TestRequireAPITokenProtectsAnalyticsAPI(t *testing.T) {
 	echo.ServeHTTP(meRec, meReq)
 	require.Equal(t, http.StatusOK, meRec.Code)
 }
+
+func TestRequireAPITokenDisablesStaticTokenByDefaultInProd(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.Mode = "prod"
+	conf.App.APIToken = "secret-token"
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
+		ID:       "beta-user",
+		OrgID:    "beta-org",
+		OrgName:  "Beta Org",
+		Email:    "beta@example.com",
+		Name:     "Beta User",
+		Password: "beta-pass",
+	}}
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	echo, err := NewEcho(conf, slog.Default(), store)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:         conf,
+		AnalyticsStore: store,
+	})
+
+	engine := NewHttpEngine(Options{
+		Router: echo,
+		Conf:   conf,
+		Analytics: controller.NewAnalyticsRoute(controller.Options{
+			AnalyticsService: analyticsSvc,
+		}),
+	})
+	engine.RegisterRoute()
+
+	payload, err := json.Marshal(request.RegisterAgentReq{
+		OrgID:      "beta-org",
+		UserID:     "beta-user",
+		DeviceName: "mbp",
+	})
+	require.NoError(t, err)
+
+	apiReq := httptest.NewRequest(http.MethodPost, "/api/v1/agents/register", bytes.NewReader(payload))
+	apiReq = apiReq.WithContext(context.Background())
+	apiReq.Header.Set("Content-Type", "application/json")
+	apiReq.Header.Set("X-AgentOpt-Token", "secret-token")
+	apiRec := httptest.NewRecorder()
+	echo.ServeHTTP(apiRec, apiReq)
+	require.Equal(t, http.StatusUnauthorized, apiRec.Code)
+
+	loginPayload, err := json.Marshal(request.LoginReq{
+		Email:    "beta@example.com",
+		Password: "beta-pass",
+	})
+	require.NoError(t, err)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginPayload))
+	loginReq = loginReq.WithContext(context.Background())
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	echo.ServeHTTP(loginRec, loginReq)
+	require.Equal(t, http.StatusOK, loginRec.Code)
+}

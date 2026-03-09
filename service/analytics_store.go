@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -14,8 +15,10 @@ import (
 type AnalyticsStore struct {
 	mu sync.RWMutex
 
-	filePath string
-	seq      uint64
+	filePath       string
+	allowDemoUser  bool
+	bootstrapUsers []configs.BootstrapUser
+	seq            uint64
 
 	organizations          map[string]*Organization
 	users                  map[string]*User
@@ -188,6 +191,8 @@ type AuditEvent struct {
 func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 	store := &AnalyticsStore{
 		filePath:               conf.App.StorePath,
+		allowDemoUser:          conf.AllowsDemoUser(),
+		bootstrapUsers:         append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
 		organizations:          make(map[string]*Organization),
 		users:                  make(map[string]*User),
 		accessTokens:           make(map[string]*AccessToken),
@@ -359,4 +364,143 @@ func cloneChangePlanSteps(input []ChangePlanStep) []ChangePlanStep {
 		})
 	}
 	return out
+}
+
+func (s *AnalyticsStore) collapseProjectsLocked() bool {
+	orgProjects := make(map[string][]*Project)
+	for _, project := range s.projects {
+		if project == nil || project.OrgID == "" {
+			continue
+		}
+		orgProjects[project.OrgID] = append(orgProjects[project.OrgID], project)
+	}
+
+	modified := false
+	for _, projects := range orgProjects {
+		if len(projects) <= 1 {
+			continue
+		}
+
+		canonical := latestProject(projects)
+		if canonical == nil {
+			continue
+		}
+
+		recommendationIDs := make([]string, 0, len(s.projectRecommendations[canonical.ID]))
+		seenRecommendationIDs := make(map[string]struct{}, len(s.projectRecommendations[canonical.ID]))
+		for _, id := range s.projectRecommendations[canonical.ID] {
+			if _, exists := seenRecommendationIDs[id]; exists {
+				continue
+			}
+			seenRecommendationIDs[id] = struct{}{}
+			recommendationIDs = append(recommendationIDs, id)
+		}
+
+		for _, project := range projects {
+			if project == nil || project.ID == canonical.ID {
+				continue
+			}
+			modified = true
+
+			if canonical.LastIngestedAt == nil || (project.LastIngestedAt != nil && project.LastIngestedAt.After(*canonical.LastIngestedAt)) {
+				canonical.LastIngestedAt = project.LastIngestedAt
+			}
+			if canonical.LastProfileID == "" && project.LastProfileID != "" {
+				canonical.LastProfileID = project.LastProfileID
+			}
+			if canonical.DefaultTool == "" && project.DefaultTool != "" {
+				canonical.DefaultTool = project.DefaultTool
+			}
+			if canonical.RepoHash == "" && project.RepoHash != "" {
+				canonical.RepoHash = project.RepoHash
+			}
+			if canonical.RepoPath == "" && project.RepoPath != "" {
+				canonical.RepoPath = project.RepoPath
+			}
+			if len(canonical.LanguageMix) == 0 && len(project.LanguageMix) > 0 {
+				canonical.LanguageMix = cloneFloatMap(project.LanguageMix)
+			}
+			if project.ConnectedAt.After(canonical.ConnectedAt) {
+				canonical.AgentID = project.AgentID
+				canonical.RepoHash = project.RepoHash
+				canonical.RepoPath = project.RepoPath
+				canonical.LanguageMix = cloneFloatMap(project.LanguageMix)
+				canonical.DefaultTool = project.DefaultTool
+				canonical.ConnectedAt = project.ConnectedAt
+			}
+
+			for _, snapshot := range s.configSnapshots[project.ID] {
+				if snapshot == nil {
+					continue
+				}
+				snapshot.ProjectID = canonical.ID
+				s.configSnapshots[canonical.ID] = append(s.configSnapshots[canonical.ID], snapshot)
+			}
+			delete(s.configSnapshots, project.ID)
+
+			for _, session := range s.sessionSummaries[project.ID] {
+				if session == nil {
+					continue
+				}
+				session.ProjectID = canonical.ID
+				s.sessionSummaries[canonical.ID] = append(s.sessionSummaries[canonical.ID], session)
+			}
+			delete(s.sessionSummaries, project.ID)
+
+			for _, recommendationID := range s.projectRecommendations[project.ID] {
+				rec := s.recommendations[recommendationID]
+				if rec != nil {
+					rec.ProjectID = canonical.ID
+				}
+				if _, exists := seenRecommendationIDs[recommendationID]; exists {
+					continue
+				}
+				seenRecommendationIDs[recommendationID] = struct{}{}
+				recommendationIDs = append(recommendationIDs, recommendationID)
+			}
+			delete(s.projectRecommendations, project.ID)
+
+			for _, rec := range s.recommendations {
+				if rec != nil && rec.ProjectID == project.ID {
+					rec.ProjectID = canonical.ID
+				}
+			}
+
+			for _, op := range s.applyOperations {
+				if op != nil && op.ProjectID == project.ID {
+					op.ProjectID = canonical.ID
+				}
+			}
+
+			for _, audit := range s.audits {
+				if audit != nil && audit.ProjectID == project.ID {
+					audit.ProjectID = canonical.ID
+				}
+			}
+
+			delete(s.projects, project.ID)
+		}
+
+		if modified {
+			canonical.Name = sharedWorkspaceName
+			s.projectRecommendations[canonical.ID] = recommendationIDs
+		}
+	}
+
+	return modified
+}
+
+func latestProject(projects []*Project) *Project {
+	if len(projects) == 0 {
+		return nil
+	}
+
+	sorted := append([]*Project(nil), projects...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].ConnectedAt.Equal(sorted[j].ConnectedAt) {
+			return sorted[i].ID > sorted[j].ID
+		}
+		return sorted[i].ConnectedAt.After(sorted[j].ConnectedAt)
+	})
+	return sorted[0]
 }

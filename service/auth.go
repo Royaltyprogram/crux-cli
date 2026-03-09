@@ -64,7 +64,21 @@ func (s *AnalyticsStore) ensureBootstrapData() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.ensureDemoUserLocked(time.Now().UTC()) {
+	now := time.Now().UTC()
+	modified := false
+	if s.allowDemoUser {
+		modified = s.ensureDemoUserLocked(now)
+	} else if s.removeDemoUserLocked() {
+		modified = true
+	}
+	if s.ensureConfiguredUsersLocked(now) {
+		modified = true
+	}
+	if s.collapseProjectsLocked() {
+		modified = true
+	}
+
+	if !modified {
 		return nil
 	}
 
@@ -122,6 +136,126 @@ func (s *AnalyticsStore) ensureDemoUserLocked(now time.Time) bool {
 		user.PasswordSalt = salt
 		user.PasswordHash = hash
 		modified = true
+	}
+
+	return modified
+}
+
+func (s *AnalyticsStore) removeDemoUserLocked() bool {
+	modified := false
+
+	if _, ok := s.users[defaultDemoUserID]; ok {
+		delete(s.users, defaultDemoUserID)
+		modified = true
+	}
+	for id, user := range s.users {
+		if user != nil && normalizeEmail(user.Email) == defaultDemoEmail {
+			delete(s.users, id)
+			modified = true
+		}
+	}
+	for id, token := range s.accessTokens {
+		if token == nil {
+			continue
+		}
+		if token.UserID == defaultDemoUserID || token.OrgID == defaultDemoOrgID {
+			delete(s.accessTokens, id)
+			modified = true
+		}
+	}
+	if org, ok := s.organizations[defaultDemoOrgID]; ok {
+		deleteOrg := true
+		for _, user := range s.users {
+			if user != nil && user.OrgID == org.ID {
+				deleteOrg = false
+				break
+			}
+		}
+		if deleteOrg {
+			delete(s.organizations, defaultDemoOrgID)
+			modified = true
+		}
+	}
+	return modified
+}
+
+func (s *AnalyticsStore) ensureConfiguredUsersLocked(now time.Time) bool {
+	modified := false
+
+	for _, item := range s.bootstrapUsers {
+		email := normalizeEmail(item.Email)
+		password := strings.TrimSpace(item.Password)
+		if email == "" || password == "" {
+			continue
+		}
+
+		orgID := strings.TrimSpace(item.OrgID)
+		if orgID == "" {
+			orgID = defaultDemoOrgID
+		}
+		orgName := strings.TrimSpace(item.OrgName)
+		if orgName == "" {
+			orgName = orgID
+		}
+
+		org := s.organizations[orgID]
+		if org == nil {
+			s.organizations[orgID] = &Organization{
+				ID:   orgID,
+				Name: orgName,
+			}
+			modified = true
+		} else if strings.TrimSpace(org.Name) == "" {
+			org.Name = orgName
+			modified = true
+		}
+
+		userID := strings.TrimSpace(item.ID)
+		if userID == "" {
+			userID = bootstrapUserID(email)
+		}
+
+		user := s.users[userID]
+		if user == nil {
+			user = s.findUserByEmailLocked(email)
+		}
+		if user == nil {
+			salt, hash := hashPassword(password, "")
+			s.users[userID] = &User{
+				ID:           userID,
+				OrgID:        orgID,
+				Email:        email,
+				Name:         firstNonEmpty(strings.TrimSpace(item.Name), userID),
+				PasswordSalt: salt,
+				PasswordHash: hash,
+				CreatedAt:    now,
+			}
+			modified = true
+			continue
+		}
+
+		if strings.TrimSpace(user.OrgID) == "" {
+			user.OrgID = orgID
+			modified = true
+		}
+		if normalizeEmail(user.Email) == "" {
+			user.Email = email
+			modified = true
+		}
+		if strings.TrimSpace(user.Name) == "" && strings.TrimSpace(item.Name) != "" {
+			user.Name = strings.TrimSpace(item.Name)
+			modified = true
+		}
+		if user.CreatedAt.IsZero() {
+			user.CreatedAt = now
+			modified = true
+		}
+		salt, hash := hashPassword(password, user.PasswordSalt)
+		if user.PasswordSalt != salt || user.PasswordHash != hash {
+			user.PasswordSalt = salt
+			user.PasswordHash = hash
+			modified = true
+		}
 	}
 
 	return modified
@@ -231,6 +365,13 @@ func verifyPassword(user *User, password string) bool {
 
 	_, hash := hashPassword(password, user.PasswordSalt)
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(user.PasswordHash)) == 1
+}
+
+func bootstrapUserID(email string) string {
+	email = normalizeEmail(email)
+	email = strings.ReplaceAll(email, "@", "-at-")
+	email = strings.ReplaceAll(email, ".", "-")
+	return "user-" + email
 }
 
 func newAccessTokenValue(kind string) (string, error) {

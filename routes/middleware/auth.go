@@ -11,7 +11,7 @@ import (
 
 const APIAuthHeader = "X-AgentOpt-Token"
 
-func RequireAPIToken(configuredToken string, store *service.AnalyticsStore) echo.MiddlewareFunc {
+func RequireAPIToken(configuredToken string, staticTokenEnabled bool, store *service.AnalyticsStore) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path
@@ -34,7 +34,7 @@ func RequireAPIToken(configuredToken string, store *service.AnalyticsStore) echo
 				}
 				return ecode.Unauthorized(1001, "invalid api token")
 			}
-			if configuredToken != "" && token == configuredToken {
+			if staticTokenEnabled && configuredToken != "" && token == configuredToken {
 				ctx := service.WithAuthIdentity(c.Request().Context(), service.AuthIdentity{TokenKind: service.TokenKindStatic})
 				c.SetRequest(c.Request().WithContext(ctx))
 				return next(c)

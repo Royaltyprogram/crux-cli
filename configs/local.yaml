@@ -1,12 +1,12 @@
 App:
   Addr: ":8082"
-  Mode: prod
+  Mode: local
   StorePath: "data/agentopt-store.json"
-  APIToken: ""
+  APIToken: "agentopt-dev-token"
 
 DB:
   Dialect: sqlite3
-  DSN: file:agentopt?mode=memory&cache=shared&_fk=1
+  DSN: file:agentopt-local?mode=memory&cache=shared&_fk=1
   MaxIdle: 2
   MaxActive: 4
   MaxLifetime: 300
@@ -27,15 +27,17 @@ Log:
   AddSource: true
 
 Jwt:
-  Secret: ""
+  Secret: "dev-secret"
   Issuer: "agentopt.local"
 
 Auth:
-  AllowDemoUser: false
-  StaticTokenEnabled: false
+  AllowDemoUser: true
+  StaticTokenEnabled: true
   BootstrapUsers: []
 
 HTTP:
-  AllowedOrigins: []
-  RateLimitPerMinute: 60
+  AllowedOrigins:
+    - http://127.0.0.1:8082
+    - http://localhost:8082
+  RateLimitPerMinute: 120
   LogToStdout: true

@@ -1,5 +1,5 @@
 run:
-	APP_MODE=prod go run main.go wire_gen.go
+	APP_MODE=local go run main.go wire_gen.go
 
 run-cli:
 	go run ./cmd/agentopt --help
