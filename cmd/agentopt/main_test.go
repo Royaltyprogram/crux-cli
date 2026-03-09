@@ -137,7 +137,7 @@ func TestRunSessionCollectsLatestCodexSessionFromLocalFiles(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(oldSession, []byte("{\"timestamp\":\"2026-03-08T09:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"obsolete prompt\"}}\n"), 0o644))
 	require.NoError(t, os.WriteFile(newSession, []byte(strings.Join([]string{
-		`{"timestamp":"2026-03-09T09:00:00Z","type":"session_meta","payload":{"timestamp":"2026-03-09T09:00:00Z"}}`,
+		`{"timestamp":"2026-03-09T09:00:00Z","type":"session_meta","payload":{"id":"codex-session-123","timestamp":"2026-03-09T09:00:00Z"}}`,
 		`{"timestamp":"2026-03-09T09:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context>"}]}}`,
 		`{"timestamp":"2026-03-09T09:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"# Context from my IDE setup:\n\n## My request for Codex:\nInspect the analytics route and summarize the current control flow.\n"}}`,
 		`{"timestamp":"2026-03-09T09:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2100,"output_tokens":480,"total_tokens":2580}}}}`,
@@ -178,6 +178,7 @@ func TestRunSessionCollectsLatestCodexSessionFromLocalFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "project-1", uploaded.ProjectID)
+	require.Equal(t, "codex-session-123", uploaded.SessionID)
 	require.Equal(t, "codex", uploaded.Tool)
 	require.Equal(t, 2100, uploaded.TokenIn)
 	require.Equal(t, 480, uploaded.TokenOut)

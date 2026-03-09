@@ -91,6 +91,7 @@ type codexSessionLine struct {
 }
 
 type codexSessionMetaPayload struct {
+	ID        string `json:"id"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -1151,6 +1152,9 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 			if err := json.Unmarshal(item.Payload, &payload); err != nil {
 				continue
 			}
+			if req.SessionID == "" {
+				req.SessionID = strings.TrimSpace(payload.ID)
+			}
 			if ts, ok := parseCodexTimestamp(payload.Timestamp); ok && ts.After(latestTimestamp) {
 				latestTimestamp = ts
 			}
@@ -1192,6 +1196,9 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 		latestTimestamp = time.Now().UTC()
 	}
 	req.Timestamp = latestTimestamp
+	if req.SessionID == "" {
+		req.SessionID = sanitizeID(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	}
 
 	if len(req.RawQueries) == 0 {
 		return request.SessionSummaryReq{}, fmt.Errorf("no raw user queries found in Codex session %s", path)

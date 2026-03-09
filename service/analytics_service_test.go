@@ -269,6 +269,79 @@ func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
 	require.Empty(t, plan.ReviewedBy)
 }
 
+func TestUploadSessionSummaryReplacesExistingSessionByID(t *testing.T) {
+	ctx := context.Background()
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:         conf,
+		AnalyticsStore: store,
+	})
+
+	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+		OrgID:      "org-replace",
+		UserID:     "user-replace",
+		DeviceName: "macbook",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-replace",
+		AgentID:     agentResp.AgentID,
+		ProjectID:   "project-replace",
+		Name:        "replace",
+		RepoHash:    "replace-hash",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+
+	firstTimestamp := time.Date(2026, 3, 9, 9, 0, 0, 0, time.UTC)
+	secondTimestamp := firstTimestamp.Add(5 * time.Minute)
+
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID: "project-replace",
+		SessionID: "codex-session-1",
+		Tool:      "codex",
+		TokenIn:   500,
+		TokenOut:  120,
+		RawQueries: []string{
+			"Inspect the analytics route before editing.",
+		},
+		Timestamp: firstTimestamp,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID: "project-replace",
+		SessionID: "codex-session-1",
+		Tool:      "codex",
+		TokenIn:   900,
+		TokenOut:  240,
+		RawQueries: []string{
+			"Inspect the analytics route before editing.",
+			"List the exact tests to run after the patch.",
+		},
+		Timestamp: secondTimestamp,
+	})
+	require.NoError(t, err)
+
+	sessions, err := svc.ListSessionSummaries(ctx, &request.SessionSummaryListReq{ProjectID: "project-replace"})
+	require.NoError(t, err)
+	require.Len(t, sessions.Items, 1)
+	require.Equal(t, "codex-session-1", sessions.Items[0].ID)
+	require.Equal(t, 900, sessions.Items[0].TokenIn)
+	require.Equal(t, 240, sessions.Items[0].TokenOut)
+	require.Equal(t, []string{
+		"Inspect the analytics route before editing.",
+		"List the exact tests to run after the patch.",
+	}, sessions.Items[0].RawQueries)
+	require.Equal(t, secondTimestamp, sessions.Items[0].Timestamp)
+}
+
 func TestReportApplyResultTracksApplyAndRollbackLifecycle(t *testing.T) {
 	ctx := context.Background()
 	conf := &configs.Config{}

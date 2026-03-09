@@ -246,8 +246,21 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		Timestamp:  recordedAt,
 	}
 
-	s.AnalyticsStore.sessionSummaries[req.ProjectID] = append(s.AnalyticsStore.sessionSummaries[req.ProjectID], summary)
-	project.LastIngestedAt = &recordedAt
+	existingIndex := -1
+	for i, item := range s.AnalyticsStore.sessionSummaries[req.ProjectID] {
+		if item.ID == sessionID {
+			existingIndex = i
+			break
+		}
+	}
+	if existingIndex >= 0 {
+		s.AnalyticsStore.sessionSummaries[req.ProjectID][existingIndex] = summary
+	} else {
+		s.AnalyticsStore.sessionSummaries[req.ProjectID] = append(s.AnalyticsStore.sessionSummaries[req.ProjectID], summary)
+	}
+	if project.LastIngestedAt == nil || recordedAt.After(*project.LastIngestedAt) {
+		project.LastIngestedAt = &recordedAt
+	}
 
 	recommendations := s.refreshRecommendationsLocked(project)
 	ids := make([]string, 0, len(recommendations))
