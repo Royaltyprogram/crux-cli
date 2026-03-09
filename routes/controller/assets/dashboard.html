@@ -848,6 +848,17 @@
       return `${steps.length} coordinated updates will be applied together.`;
     }
 
+    function patchPreviewSummary(items) {
+      const steps = toArray(items);
+      if (!steps.length) {
+        return "One reviewed update is queued for this workspace.";
+      }
+      if (steps.length === 1) {
+        return stepSummary(steps[0]);
+      }
+      return `${steps.length} reviewed updates will land together.`;
+    }
+
     function recommendationTitle(recommendationID) {
       const rec = state.recommendationIndex.get(recommendationID);
       return rec ? rec.title : "Configuration update";
@@ -982,8 +993,11 @@
             </div>
             ${pill("Needs approval", "warn")}
           </div>
-          <div class="meta">Requested by ${escapeHTML(item.requested_by || "a teammate")} on ${escapeHTML(formatDateTime(item.requested_at))}.</div>
-          <div class="step-list">${renderStepList(item.patch_preview, 3)}</div>
+          <div class="step-list">
+            <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
+            <div class="step-line">Waiting for your decision before anything changes locally.</div>
+            <div class="step-line">${escapeHTML(`Requested ${formatDateTime(item.requested_at)}.`)}</div>
+          </div>
           <div class="action-row">
             <button class="primary-button" type="button" onclick="reviewPlan('${item.apply_id}', 'approve')">Approve</button>
             <button class="secondary-button" type="button" onclick="reviewPlan('${item.apply_id}', 'reject')">Decline</button>
@@ -1012,8 +1026,11 @@
               </div>
               ${pill(approvalLabel, "good")}
             </div>
-            <div class="meta">Ready for the next local sync. Requested ${escapeHTML(formatDateTime(item.requested_at))}.</div>
-            <div class="step-list">${renderStepList(item.patch_preview, 2)}</div>
+            <div class="step-list">
+              <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
+              <div class="step-line">Approved and waiting for the next safe local sync.</div>
+              <div class="step-line">${escapeHTML(`Queued ${formatDateTime(item.requested_at)}.`)}</div>
+            </div>
           </div>
         `;
       }).join("");
