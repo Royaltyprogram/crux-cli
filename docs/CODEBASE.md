@@ -8,13 +8,13 @@ It has four runtime surfaces:
 
 1. `Local CLI Agent`
    - registers a local device
-   - uploads structured config snapshots and session summaries
+   - uploads config snapshots and session summaries
    - pulls only approved change plans
    - applies or rolls back local configuration safely
 
 2. `Cloud Research Agent`
    - lives in the server process for now
-   - analyzes metrics and config snapshots
+   - analyzes token usage, raw query history, and config snapshots
    - emits ranked recommendations with structured change plans
    - is currently an `OpenAI placeholder`, not a live API integration
 
@@ -62,7 +62,7 @@ Dashboard
 - `Config Snapshot`
   - structured config state, fingerprints, MCP count, hooks, instruction files
 - `Session Summary`
-  - usage metrics and derived features, no raw transcript
+  - token usage and raw query history collected by the CLI
 - `Recommendation`
   - ranked proposal from the cloud research agent
 - `Change Plan`
@@ -115,7 +115,7 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
 2. `connect`
    - connects a project
 3. `snapshot` / `session`
-   - uploads structured metrics only
+   - uploads config snapshots plus token usage and raw query history
 4. `recommendations`
    - lists research-agent output
 5. `apply`
@@ -149,7 +149,7 @@ Persisted entities:
 ## Notes
 
 - API auth is still a shared token
-- no raw code or transcript upload exists
+- raw query history is uploaded for recommendation analysis, but no raw code is collected
 - the OpenAI API integration is intentionally left as a placeholder in this branch
 - the local CLI executor only applies allowlisted config files such as `AGENTS.md`, `.mcp.json`, `.codex/config.json`, and `.claude/settings.local.json`
 - approved change plans may contain multiple local patch steps, and rollback restores them in reverse order

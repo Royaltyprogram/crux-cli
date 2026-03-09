@@ -63,6 +63,70 @@ func TestAPIClientAddsTokenHeader(t *testing.T) {
 	require.Equal(t, "test-token", client.token)
 }
 
+func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	sessionFile := filepath.Join(root, "session.json")
+	err := os.WriteFile(sessionFile, []byte(`{
+  "token_in": 1440,
+  "token_out": 320,
+  "raw_queries": [
+    "Inspect the auth middleware and summarize the current token validation flow.",
+    "Recommend the smallest patch that fixes the failing analytics test."
+  ]
+}`), 0o644)
+	require.NoError(t, err)
+
+	require.NoError(t, saveState(state{
+		ServerURL: "http://127.0.0.1:8082",
+		APIToken:  "token-session",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	var uploaded request.SessionSummaryReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v1/session-summaries", r.URL.Path)
+		require.Equal(t, "token-session", r.Header.Get("X-AgentOpt-Token"))
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&uploaded))
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.SessionIngestResp{
+				SessionID:           "session-1",
+				ProjectID:           "project-1",
+				RecommendationCount: 0,
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL: server.URL,
+		APIToken:  "token-session",
+		OrgID:     "org-1",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	}))
+
+	err = runSession([]string{"--file", sessionFile, "--tool", "codex"})
+	require.NoError(t, err)
+
+	require.Equal(t, "project-1", uploaded.ProjectID)
+	require.Equal(t, "codex", uploaded.Tool)
+	require.Equal(t, 1440, uploaded.TokenIn)
+	require.Equal(t, 320, uploaded.TokenOut)
+	require.Len(t, uploaded.RawQueries, 2)
+	require.Zero(t, uploaded.TotalToolCalls)
+	require.Zero(t, uploaded.BashCallsCount)
+	require.Zero(t, uploaded.PermissionRejectCount)
+	require.Empty(t, uploaded.TaskType)
+	require.False(t, uploaded.Timestamp.IsZero())
+}
+
 func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)

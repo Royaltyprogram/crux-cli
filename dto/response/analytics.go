@@ -69,6 +69,7 @@ type SessionSummaryItem struct {
 	RetryCount               int                `json:"retry_count"`
 	TokenIn                  int                `json:"token_in"`
 	TokenOut                 int                `json:"token_out"`
+	RawQueries               []string           `json:"raw_queries"`
 	EstimatedCost            float64            `json:"estimated_cost"`
 	TaskType                 string             `json:"task_type"`
 	RepoSizeBucket           string             `json:"repo_size_bucket"`

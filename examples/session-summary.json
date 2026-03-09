@@ -1,38 +1,11 @@
 {
   "tool": "codex",
-  "project_hash": "demo-hash",
-  "language_mix": {
-    "go": 0.9,
-    "yaml": 0.1
-  },
-  "total_prompts_count": 16,
-  "total_tool_calls": 38,
-  "bash_calls_count": 11,
-  "read_ops": 26,
-  "edit_ops": 12,
-  "write_ops": 4,
-  "mcp_usage_count": 2,
-  "permission_reject_count": 4,
-  "retry_count": 3,
   "token_in": 22400,
   "token_out": 7900,
-  "estimated_cost": 1.05,
-  "task_type": "bugfix",
-  "repo_size_bucket": "large",
-  "config_profile_id": "baseline",
-  "task_type_distribution": {
-    "bugfix": 0.7,
-    "test": 0.3
-  },
-  "repo_exploration_intensity": 0.68,
-  "shell_heavy": true,
-  "workload_tags": [
-    "bugfix",
-    "verification-heavy"
+  "raw_queries": [
+    "Find the analytics route that is failing and explain the current control flow.",
+    "Check whether the health controller and analytics controller share the same response contract.",
+    "Draft the smallest patch that fixes the regression and list the exact tests to run."
   ],
-  "acceptance_proxy": 0.74,
-  "event_summaries": [
-    "session summary only, no raw transcript uploaded",
-    "collector observed multiple shell and edit phases"
-  ]
+  "timestamp": "2026-03-09T00:00:00Z"
 }

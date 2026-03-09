@@ -10,7 +10,7 @@ The product shape is:
   - pulls only approved change plans
   - applies local changes safely and can roll them back
 - `Cloud Research Agent`
-  - analyzes structured metrics and config snapshots
+  - analyzes token usage, raw query history, and config snapshots
   - generates ranked recommendations and structured change plans
   - is wired as an `OpenAI placeholder` in this development build
 - `AIops Server`
@@ -30,7 +30,7 @@ Detailed codebase documentation:
 - Low-risk single-file config merges can be `auto-approved` by the policy engine
 - Only approved plans appear in the local execution queue
 - The dashboard now favors a user-facing approval surface instead of a developer-style operations console
-- Config snapshots and session summaries now carry richer config metrics and derived features
+- Session summaries now focus on token usage and raw query history for MVP research analysis
 - Local apply supports both `JSON merge patches` and safe `text append` patches such as `AGENTS.md`
 
 ## Quickstart

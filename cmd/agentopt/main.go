@@ -333,8 +333,6 @@ func runSession(args []string) error {
 	fs := flag.NewFlagSet("session", flag.ContinueOnError)
 	filePath := fs.String("file", "", "session summary JSON file path")
 	tool := fs.String("tool", "codex", "tool name")
-	task := fs.String("task", "bugfix", "task type")
-	repoSize := fs.String("repo-size", "large", "repo size bucket")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -345,31 +343,15 @@ func runSession(args []string) error {
 	}
 
 	req := request.SessionSummaryReq{
-		Tool:                     *tool,
-		TaskType:                 *task,
-		ProjectHash:              sanitizeID(st.ProjectName),
-		LanguageMix:              map[string]float64{"go": 0.9, "yaml": 0.1},
-		TotalPromptsCount:        14,
-		TotalToolCalls:           32,
-		BashCallsCount:           9,
-		ReadOps:                  24,
-		EditOps:                  11,
-		WriteOps:                 4,
-		MCPUsageCount:            1,
-		PermissionRejectCount:    3,
-		RetryCount:               2,
-		TokenIn:                  18000,
-		TokenOut:                 6400,
-		EstimatedCost:            0.82,
-		RepoSizeBucket:           *repoSize,
-		ConfigProfileID:          "baseline",
-		TaskTypeDistribution:     map[string]float64{*task: 1},
-		RepoExplorationIntensity: 0.71,
-		ShellHeavy:               true,
-		WorkloadTags:             []string{*task, "local-cli"},
-		AcceptanceProxy:          0.74,
-		EventSummaries:           []string{"collector: session summary placeholder", "research_agent_input: metrics only"},
-		Timestamp:                time.Now().UTC(),
+		Tool:     *tool,
+		TokenIn:  18000,
+		TokenOut: 6400,
+		RawQueries: []string{
+			"Inspect the repo layout before proposing a patch.",
+			"Find the files related to the failing analytics route and summarize the likely cause.",
+			"After the edit, list the exact verification steps needed for the changed files.",
+		},
+		Timestamp: time.Now().UTC(),
 	}
 	if *filePath != "" {
 		if err := loadJSONFile(*filePath, &req); err != nil {
@@ -379,9 +361,6 @@ func runSession(args []string) error {
 	req.ProjectID = st.ProjectID
 	if req.Tool == "" {
 		req.Tool = *tool
-	}
-	if req.TaskType == "" {
-		req.TaskType = *task
 	}
 	if req.Timestamp.IsZero() {
 		req.Timestamp = time.Now().UTC()

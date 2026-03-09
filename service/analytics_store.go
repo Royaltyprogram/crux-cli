@@ -114,6 +114,7 @@ type SessionSummary struct {
 	RetryCount               int
 	TokenIn                  int
 	TokenOut                 int
+	RawQueries               []string
 	EstimatedCost            float64
 	TaskType                 string
 	RepoSizeBucket           string

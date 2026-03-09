@@ -253,6 +253,7 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		RetryCount:               req.RetryCount,
 		TokenIn:                  req.TokenIn,
 		TokenOut:                 req.TokenOut,
+		RawQueries:               cloneStringSlice(req.RawQueries),
 		EstimatedCost:            req.EstimatedCost,
 		TaskType:                 req.TaskType,
 		RepoSizeBucket:           req.RepoSizeBucket,
@@ -326,6 +327,7 @@ func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *reques
 			RetryCount:               session.RetryCount,
 			TokenIn:                  session.TokenIn,
 			TokenOut:                 session.TokenOut,
+			RawQueries:               cloneStringSlice(session.RawQueries),
 			EstimatedCost:            session.EstimatedCost,
 			TaskType:                 session.TaskType,
 			RepoSizeBucket:           session.RepoSizeBucket,
@@ -423,7 +425,7 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 			totalSessions++
 			totalCost += session.EstimatedCost
 			totalTokens += session.TokenIn + session.TokenOut
-			totalQueries += maxInt(session.TotalPromptsCount, 1)
+			totalQueries += queryCountForSession(session)
 			totalToolCalls += session.TotalToolCalls
 			totalRejects += session.PermissionRejectCount
 			totalRetries += session.RetryCount
@@ -1154,6 +1156,16 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func queryCountForSession(session *SessionSummary) int {
+	if session == nil {
+		return 1
+	}
+	if len(session.RawQueries) > 0 {
+		return len(session.RawQueries)
+	}
+	return maxInt(session.TotalPromptsCount, 1)
+}
+
 func splitSessionsByApplyTime(sessions []*SessionSummary, appliedAt time.Time) ([]*SessionSummary, []*SessionSummary) {
 	before := make([]*SessionSummary, 0)
 	after := make([]*SessionSummary, 0)
@@ -1179,7 +1191,7 @@ func summarizeSessions(sessions []*SessionSummary) (float64, float64, float64) {
 	)
 	for _, session := range sessions {
 		totalCost += session.EstimatedCost
-		totalRetry += safeDiv(float64(session.RetryCount), float64(maxInt(session.TotalPromptsCount, 1)))
+		totalRetry += safeDiv(float64(session.RetryCount), float64(queryCountForSession(session)))
 		totalReject += safeDiv(float64(session.PermissionRejectCount), float64(maxInt(session.TotalToolCalls, 1)))
 	}
 
