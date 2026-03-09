@@ -18,6 +18,7 @@ async function main() {
     additionalDirectories: request.additional_directories ?? [],
     sandboxMode: request.sandbox_mode ?? "workspace-write",
     approvalPolicy: request.approval_policy ?? "never",
+    modelReasoningEffort: request.model_reasoning_effort || undefined,
     skipGitRepoCheck: request.skip_git_repo_check !== false,
     networkAccessEnabled: request.network_access_enabled === true,
   });

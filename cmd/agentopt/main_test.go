@@ -144,6 +144,47 @@ func TestCodexApplyTimeoutRejectsNonPositiveValue(t *testing.T) {
 	require.Contains(t, err.Error(), "greater than zero")
 }
 
+func TestParseCodexReasoningEffortAllowsKnownValues(t *testing.T) {
+	value, err := parseCodexReasoningEffort(" LOW ")
+	require.NoError(t, err)
+	require.Equal(t, "low", value)
+
+	value, err = parseCodexReasoningEffort("")
+	require.NoError(t, err)
+	require.Empty(t, value)
+}
+
+func TestParseCodexReasoningEffortRejectsUnknownValues(t *testing.T) {
+	_, err := parseCodexReasoningEffort("turbo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid Codex reasoning effort")
+}
+
+func TestNewCodexApplyRequestIncludesReasoningEffort(t *testing.T) {
+	root := t.TempDir()
+	originalWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(root))
+	t.Cleanup(func() {
+		_ = os.Chdir(originalWD)
+	})
+
+	req, err := newCodexApplyRequest("apply-reasoning", preflightResult{
+		ApplyID: "apply-reasoning",
+		Allowed: true,
+		Steps: []preflightStep{{
+			TargetFile: filepath.Join(root, "AGENTS.md"),
+			Allowed:    true,
+		}},
+	}, []response.PatchPreviewItem{{
+		FilePath:       "AGENTS.md",
+		Operation:      "append_block",
+		ContentPreview: "\n## AgentOpt\n",
+	}}, "low")
+	require.NoError(t, err)
+	require.Equal(t, "low", req.ModelReasoningEffort)
+}
+
 func TestApplyBackupRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
@@ -541,7 +582,7 @@ func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 				"shell_profile": "safe",
 			},
 		},
-	}, "")
+	}, "", "")
 	require.NoError(t, err)
 	require.Equal(t, target, result.FilePath)
 
@@ -572,7 +613,7 @@ func TestExecuteLocalApplyAppendsTextFile(t *testing.T) {
 			Operation:      "append_block",
 			ContentPreview: "\n## AgentOpt\n- safe rollout\n",
 		},
-	}, target)
+	}, target, "")
 	require.NoError(t, err)
 	require.Equal(t, target, result.FilePath)
 	require.Contains(t, result.AppliedText, "AgentOpt")
@@ -651,7 +692,7 @@ func TestExecuteLocalApplySupportsMultipleSteps(t *testing.T) {
 			Operation:      "append_block",
 			ContentPreview: "\n## AgentOpt\n- rollout\n",
 		},
-	}, configTarget+","+textTarget)
+	}, configTarget+","+textTarget, "")
 	require.NoError(t, err)
 	require.Len(t, result.FilePaths, 2)
 	require.Contains(t, result.FilePath, configTarget)
@@ -808,7 +849,7 @@ func TestRunSyncOnceAppliesPendingPlansAndReportsSuccess(t *testing.T) {
 		ProjectID: "project-1",
 	}
 
-	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync"), configTarget+","+textTarget)
+	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync"), configTarget+","+textTarget, "")
 	require.NoError(t, err)
 
 	configData, err := os.ReadFile(configTarget)
@@ -899,7 +940,7 @@ func TestRunSyncOnceReportsFailuresAndContinues(t *testing.T) {
 		ProjectID: "project-1",
 	}
 
-	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync-fail"), "")
+	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync-fail"), "", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "apply-sync-fail")
 

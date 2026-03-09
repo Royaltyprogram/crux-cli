@@ -47,6 +47,7 @@ type codexApplyRequest struct {
 	WorkingDirectory      string           `json:"working_directory"`
 	AdditionalDirectories []string         `json:"additional_directories"`
 	AllowedFiles          []string         `json:"allowed_files"`
+	ModelReasoningEffort  string           `json:"model_reasoning_effort,omitempty"`
 	SandboxMode           string           `json:"sandbox_mode"`
 	ApprovalPolicy        string           `json:"approval_policy"`
 	SkipGitRepoCheck      bool             `json:"skip_git_repo_check"`
@@ -93,7 +94,7 @@ type preflightStep struct {
 	Allowed      bool   `json:"allowed"`
 }
 
-func executeLocalApply(st state, applyID string, previews []response.PatchPreviewItem, targetOverride string) (localApplyResult, error) {
+func executeLocalApply(st state, applyID string, previews []response.PatchPreviewItem, targetOverride, reasoningEffort string) (localApplyResult, error) {
 	preflight, err := preflightLocalApply(st, applyID, previews, targetOverride)
 	if err != nil {
 		return localApplyResult{}, err
@@ -107,7 +108,7 @@ func executeLocalApply(st state, applyID string, previews []response.PatchPrevie
 		return localApplyResult{}, err
 	}
 
-	req, err := newCodexApplyRequest(applyID, preflight, previews)
+	req, err := newCodexApplyRequest(applyID, preflight, previews, reasoningEffort)
 	if err != nil {
 		return localApplyResult{}, err
 	}
@@ -200,7 +201,7 @@ func snapshotApplyTarget(filePath string, preview response.PatchPreviewItem) (ap
 	}, nil
 }
 
-func newCodexApplyRequest(applyID string, preflight preflightResult, previews []response.PatchPreviewItem) (codexApplyRequest, error) {
+func newCodexApplyRequest(applyID string, preflight preflightResult, previews []response.PatchPreviewItem, reasoningEffort string) (codexApplyRequest, error) {
 	workingDirectory, additionalDirectories, err := chooseApplyWorkspace(preflight.Steps)
 	if err != nil {
 		return codexApplyRequest{}, err
@@ -223,6 +224,7 @@ func newCodexApplyRequest(applyID string, preflight preflightResult, previews []
 		WorkingDirectory:      workingDirectory,
 		AdditionalDirectories: additionalDirectories,
 		AllowedFiles:          allowedFiles,
+		ModelReasoningEffort:  reasoningEffort,
 		SandboxMode:           "workspace-write",
 		ApprovalPolicy:        "never",
 		SkipGitRepoCheck:      true,

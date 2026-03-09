@@ -538,9 +538,14 @@ func runAudit(args []string) error {
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	targetConfig := fs.String("target-config", "", "override local config path for pending apply jobs")
+	reasoningEffort := fs.String("codex-reasoning-effort", os.Getenv("AGENTOPT_CODEX_REASONING_EFFORT"), "Codex reasoning effort for local apply (minimal, low, medium, high, xhigh)")
 	watch := fs.Bool("watch", false, "poll for pending apply jobs until interrupted")
 	interval := fs.Duration("interval", 15*time.Second, "poll interval in watch mode")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedReasoningEffort, err := parseCodexReasoningEffort(*reasoningEffort)
+	if err != nil {
 		return err
 	}
 
@@ -551,7 +556,7 @@ func runSync(args []string) error {
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	if !*watch {
-		return runSyncOnce(st, client, *targetConfig)
+		return runSyncOnce(st, client, *targetConfig, resolvedReasoningEffort)
 	}
 	if *interval <= 0 {
 		return errors.New("sync --interval must be greater than zero")
@@ -563,7 +568,7 @@ func runSync(args []string) error {
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
 
-	if err := runSyncOnce(st, client, *targetConfig); err != nil {
+	if err := runSyncOnce(st, client, *targetConfig, resolvedReasoningEffort); err != nil {
 		return err
 	}
 
@@ -573,14 +578,14 @@ func runSync(args []string) error {
 			fmt.Println(`{"watch":"stopped"}`)
 			return nil
 		case <-ticker.C:
-			if err := runSyncOnce(st, client, *targetConfig); err != nil {
+			if err := runSyncOnce(st, client, *targetConfig, resolvedReasoningEffort); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func runSyncOnce(st state, client *apiClient, targetConfig string) error {
+func runSyncOnce(st state, client *apiClient, targetConfig, reasoningEffort string) error {
 	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.ProjectID), url.QueryEscape(st.UserID))
 	var pending response.PendingApplyResp
 	if err := client.doJSON(http.MethodGet, path, nil, &pending); err != nil {
@@ -590,7 +595,7 @@ func runSyncOnce(st state, client *apiClient, targetConfig string) error {
 	results := make([]response.ApplyResultResp, 0, len(pending.Items))
 	failedApplyIDs := make([]string, 0)
 	for _, item := range pending.Items {
-		localResult, err := executeLocalApply(st, item.ApplyID, item.PatchPreview, targetConfig)
+		localResult, err := executeLocalApply(st, item.ApplyID, item.PatchPreview, targetConfig, reasoningEffort)
 		if err != nil {
 			result, reportErr := reportApplyResult(client, request.ApplyResultReq{
 				ApplyID: item.ApplyID,
@@ -638,10 +643,15 @@ func runApply(args []string) error {
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	recommendationID := fs.String("recommendation-id", "", "recommendation id")
 	targetConfig := fs.String("target-config", "", "local config path override")
+	reasoningEffort := fs.String("codex-reasoning-effort", os.Getenv("AGENTOPT_CODEX_REASONING_EFFORT"), "Codex reasoning effort for local apply (minimal, low, medium, high, xhigh)")
 	yes := fs.Bool("yes", false, "apply immediately after preview")
 	scope := fs.String("scope", "user", "apply scope")
 	note := fs.String("note", "applied by agentopt CLI", "apply result note")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedReasoningEffort, err := parseCodexReasoningEffort(*reasoningEffort)
+	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(*recommendationID) == "" {
@@ -676,7 +686,7 @@ func runApply(args []string) error {
 		}
 	}
 
-	localResult, err := executeLocalApply(st, plan.ApplyID, plan.PatchPreview, *targetConfig)
+	localResult, err := executeLocalApply(st, plan.ApplyID, plan.PatchPreview, *targetConfig, resolvedReasoningEffort)
 	if err != nil {
 		if _, reportErr := reportApplyResult(client, request.ApplyResultReq{
 			ApplyID: plan.ApplyID,
@@ -758,6 +768,19 @@ func runPreflight(args []string) error {
 		return err
 	}
 	return prettyPrint(result)
+}
+
+func parseCodexReasoningEffort(raw string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return "", nil
+	}
+	switch value {
+	case "minimal", "low", "medium", "high", "xhigh":
+		return value, nil
+	default:
+		return "", fmt.Errorf("invalid Codex reasoning effort %q: want minimal, low, medium, high, or xhigh", raw)
+	}
 }
 
 func runRollback(args []string) error {
