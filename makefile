@@ -25,6 +25,9 @@ mock-e2e:
 closed-beta-smoke:
 	./scripts/closed_beta_smoke.sh
 
+closed-beta-prod-smoke: build
+	./scripts/closed_beta_prod_smoke.sh
+
 ci-beta:
 	go test ./...
 	$(MAKE) build

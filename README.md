@@ -140,6 +140,12 @@ For repeatable closed beta verification in CI:
 make ci-beta
 ```
 
+To exercise the real `APP_MODE=prod` path locally with file-based secrets and a temp SQLite database:
+
+```bash
+make closed-beta-prod-smoke
+```
+
 To build the CLI artifact you hand to beta users:
 
 ```bash

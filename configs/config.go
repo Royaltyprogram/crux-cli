@@ -119,10 +119,8 @@ func InitConfig() (*Config, error) {
 	}
 
 	err = k.Load(env.Provider("_", env.Opt{
-		Prefix: "",
-		TransformFunc: func(k, v string) (string, any) {
-			return k, v
-		},
+		Prefix:        "",
+		TransformFunc: configEnvTransform,
 	}), nil)
 	if err != nil {
 		return nil, fmt.Errorf("error loading env config: %v", err)
@@ -298,6 +296,13 @@ func lookupEnv(key string) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+func configEnvTransform(key, value string) (string, any) {
+	if strings.HasSuffix(key, "_FILE") {
+		return "", nil
+	}
+	return key, value
 }
 
 func splitCSV(raw string) []string {

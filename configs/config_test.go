@@ -109,6 +109,16 @@ func TestLookupEnvTrimsWhitespace(t *testing.T) {
 	require.Equal(t, "value", value)
 }
 
+func TestConfigEnvTransformIgnoresFileOverrides(t *testing.T) {
+	key, value := configEnvTransform("JWT_SECRET_FILE", "/run/secrets/jwt")
+	require.Empty(t, key)
+	require.Nil(t, value)
+
+	key, value = configEnvTransform("JWT_SECRET", "secret")
+	require.Equal(t, "JWT_SECRET", key)
+	require.Equal(t, "secret", value)
+}
+
 func TestConfigValidateRejectsInvalidReleaseSecurityConfig(t *testing.T) {
 	cfg := &Config{
 		App: App{
