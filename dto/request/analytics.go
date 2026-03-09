@@ -33,6 +33,10 @@ type ConfigSnapshotReq struct {
 	CapturedAt time.Time      `json:"captured_at"`
 }
 
+type ConfigSnapshotListReq struct {
+	ProjectID string `query:"project_id" validate:"required"`
+}
+
 type SessionSummaryReq struct {
 	ProjectID             string             `json:"project_id" validate:"required"`
 	SessionID             string             `json:"session_id"`
@@ -55,6 +59,11 @@ type SessionSummaryReq struct {
 	RepoSizeBucket        string             `json:"repo_size_bucket"`
 	ConfigProfileID       string             `json:"config_profile_id"`
 	Timestamp             time.Time          `json:"timestamp"`
+}
+
+type SessionSummaryListReq struct {
+	ProjectID string `query:"project_id" validate:"required"`
+	Limit     int    `query:"limit"`
 }
 
 type RecommendationListReq struct {

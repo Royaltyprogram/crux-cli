@@ -158,6 +158,37 @@ func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *reques
 	}, nil
 }
 
+func (s *AnalyticsService) ListConfigSnapshots(ctx context.Context, req *request.ConfigSnapshotListReq) (*response.ConfigSnapshotListResp, error) {
+	_ = ctx
+
+	s.AnalyticsStore.mu.RLock()
+	defer s.AnalyticsStore.mu.RUnlock()
+
+	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+
+	items := make([]response.ConfigSnapshotItem, 0, len(s.AnalyticsStore.configSnapshots[req.ProjectID]))
+	for _, snapshot := range s.AnalyticsStore.configSnapshots[req.ProjectID] {
+		items = append(items, response.ConfigSnapshotItem{
+			ID:         snapshot.ID,
+			ProjectID:  snapshot.ProjectID,
+			Tool:       snapshot.Tool,
+			ProfileID:  snapshot.ProfileID,
+			Settings:   cloneAnyMap(snapshot.Settings),
+			CapturedAt: snapshot.CapturedAt,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CapturedAt.Equal(items[j].CapturedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CapturedAt.After(items[j].CapturedAt)
+	})
+
+	return &response.ConfigSnapshotListResp{Items: items}, nil
+}
+
 func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *request.SessionSummaryReq) (*response.SessionIngestResp, error) {
 	_ = ctx
 
@@ -226,6 +257,60 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		LatestRecommendationIDs: ids,
 		RecordedAt:              recordedAt,
 	}, nil
+}
+
+func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *request.SessionSummaryListReq) (*response.SessionSummaryListResp, error) {
+	_ = ctx
+
+	s.AnalyticsStore.mu.RLock()
+	defer s.AnalyticsStore.mu.RUnlock()
+
+	if _, ok := s.AnalyticsStore.projects[req.ProjectID]; !ok {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown project_id"))
+	}
+
+	limit := req.Limit
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+
+	items := make([]response.SessionSummaryItem, 0, len(s.AnalyticsStore.sessionSummaries[req.ProjectID]))
+	for _, session := range s.AnalyticsStore.sessionSummaries[req.ProjectID] {
+		items = append(items, response.SessionSummaryItem{
+			ID:                    session.ID,
+			ProjectID:             session.ProjectID,
+			Tool:                  session.Tool,
+			ProjectHash:           session.ProjectHash,
+			LanguageMix:           cloneFloatMap(session.LanguageMix),
+			TotalPromptsCount:     session.TotalPromptsCount,
+			TotalToolCalls:        session.TotalToolCalls,
+			BashCallsCount:        session.BashCallsCount,
+			ReadOps:               session.ReadOps,
+			EditOps:               session.EditOps,
+			WriteOps:              session.WriteOps,
+			MCPUsageCount:         session.MCPUsageCount,
+			PermissionRejectCount: session.PermissionRejectCount,
+			RetryCount:            session.RetryCount,
+			TokenIn:               session.TokenIn,
+			TokenOut:              session.TokenOut,
+			EstimatedCost:         session.EstimatedCost,
+			TaskType:              session.TaskType,
+			RepoSizeBucket:        session.RepoSizeBucket,
+			ConfigProfileID:       session.ConfigProfileID,
+			Timestamp:             session.Timestamp,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Timestamp.Equal(items[j].Timestamp) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].Timestamp.After(items[j].Timestamp)
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	return &response.SessionSummaryListResp{Items: items}, nil
 }
 
 func (s *AnalyticsService) ListRecommendations(ctx context.Context, req *request.RecommendationListReq) (*response.RecommendationListResp, error) {

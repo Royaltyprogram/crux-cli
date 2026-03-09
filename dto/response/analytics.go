@@ -23,12 +23,53 @@ type ConfigSnapshotResp struct {
 	CapturedAt time.Time `json:"captured_at"`
 }
 
+type ConfigSnapshotItem struct {
+	ID         string         `json:"id"`
+	ProjectID  string         `json:"project_id"`
+	Tool       string         `json:"tool"`
+	ProfileID  string         `json:"profile_id"`
+	Settings   map[string]any `json:"settings"`
+	CapturedAt time.Time      `json:"captured_at"`
+}
+
+type ConfigSnapshotListResp struct {
+	Items []ConfigSnapshotItem `json:"items"`
+}
+
 type SessionIngestResp struct {
 	SessionID               string    `json:"session_id"`
 	ProjectID               string    `json:"project_id"`
 	RecommendationCount     int       `json:"recommendation_count"`
 	LatestRecommendationIDs []string  `json:"latest_recommendation_ids"`
 	RecordedAt              time.Time `json:"recorded_at"`
+}
+
+type SessionSummaryItem struct {
+	ID                    string             `json:"id"`
+	ProjectID             string             `json:"project_id"`
+	Tool                  string             `json:"tool"`
+	ProjectHash           string             `json:"project_hash"`
+	LanguageMix           map[string]float64 `json:"language_mix"`
+	TotalPromptsCount     int                `json:"total_prompts_count"`
+	TotalToolCalls        int                `json:"total_tool_calls"`
+	BashCallsCount        int                `json:"bash_calls_count"`
+	ReadOps               int                `json:"read_ops"`
+	EditOps               int                `json:"edit_ops"`
+	WriteOps              int                `json:"write_ops"`
+	MCPUsageCount         int                `json:"mcp_usage_count"`
+	PermissionRejectCount int                `json:"permission_reject_count"`
+	RetryCount            int                `json:"retry_count"`
+	TokenIn               int                `json:"token_in"`
+	TokenOut              int                `json:"token_out"`
+	EstimatedCost         float64            `json:"estimated_cost"`
+	TaskType              string             `json:"task_type"`
+	RepoSizeBucket        string             `json:"repo_size_bucket"`
+	ConfigProfileID       string             `json:"config_profile_id"`
+	Timestamp             time.Time          `json:"timestamp"`
+}
+
+type SessionSummaryListResp struct {
+	Items []SessionSummaryItem `json:"items"`
 }
 
 type RecommendationResp struct {

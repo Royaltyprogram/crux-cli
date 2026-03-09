@@ -79,6 +79,15 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	_, err = svc.UploadConfigSnapshot(ctx, &request.ConfigSnapshotReq{
+		ProjectID:  "project-z",
+		Tool:       "codex",
+		ProfileID:  "baseline",
+		Settings:   map[string]any{"instructions_pack": "baseline"},
+		CapturedAt: now.Add(-90 * time.Minute),
+	})
+	require.NoError(t, err)
+
 	projects, err := svc.ListProjects(ctx, &request.ProjectListReq{OrgID: "org-1"})
 	require.NoError(t, err)
 	require.Len(t, projects.Items, 2)
@@ -148,6 +157,16 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Len(t, history.Items, 2)
 	require.Equal(t, planNew.ApplyID, history.Items[0].ApplyID)
 	require.Equal(t, planOld.ApplyID, history.Items[1].ApplyID)
+
+	snapshots, err := svc.ListConfigSnapshots(ctx, &request.ConfigSnapshotListReq{ProjectID: "project-z"})
+	require.NoError(t, err)
+	require.Len(t, snapshots.Items, 1)
+	require.Equal(t, "baseline", snapshots.Items[0].ProfileID)
+
+	sessions, err := svc.ListSessionSummaries(ctx, &request.SessionSummaryListReq{ProjectID: "project-z", Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, sessions.Items, 1)
+	require.Equal(t, "session-after", sessions.Items[0].ID)
 
 	impact, err := svc.ImpactSummary(ctx, &request.ImpactSummaryReq{ProjectID: "project-z"})
 	require.NoError(t, err)

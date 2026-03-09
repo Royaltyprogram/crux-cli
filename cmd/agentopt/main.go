@@ -72,6 +72,10 @@ func run(args []string) error {
 		return runSnapshot(args[1:])
 	case "session":
 		return runSession(args[1:])
+	case "snapshots":
+		return runSnapshots(args[1:])
+	case "sessions":
+		return runSessions(args[1:])
 	case "recommendations":
 		return runRecommendations(args[1:])
 	case "status":
@@ -102,6 +106,8 @@ func printUsage() {
   connect           connect a project to the current org/agent
   snapshot          upload a config snapshot from a JSON file
   session           upload a session summary from a JSON file or defaults
+  snapshots         list config snapshots for the current project
+  sessions          list recent session summaries for the current project
   recommendations   list active recommendations for the current project
   status            print org overview and project recommendations
   projects          list projects under the current org
@@ -317,6 +323,46 @@ func runSession(args []string) error {
 	client := newAPIClient(st.ServerURL, st.APIToken)
 	var resp response.SessionIngestResp
 	if err := client.doJSON(http.MethodPost, "/api/v1/session-summaries", req, &resp); err != nil {
+		return err
+	}
+	return prettyPrint(resp)
+}
+
+func runSnapshots(args []string) error {
+	fs := flag.NewFlagSet("snapshots", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := loadProjectState()
+	if err != nil {
+		return err
+	}
+	client := newAPIClient(st.ServerURL, st.APIToken)
+
+	var resp response.ConfigSnapshotListResp
+	if err := client.doJSON(http.MethodGet, "/api/v1/config-snapshots?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
+		return err
+	}
+	return prettyPrint(resp)
+}
+
+func runSessions(args []string) error {
+	fs := flag.NewFlagSet("sessions", flag.ContinueOnError)
+	limit := fs.Int("limit", 5, "max number of recent sessions")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := loadProjectState()
+	if err != nil {
+		return err
+	}
+	client := newAPIClient(st.ServerURL, st.APIToken)
+
+	var resp response.SessionSummaryListResp
+	path := fmt.Sprintf("/api/v1/session-summaries?project_id=%s&limit=%d", url.QueryEscape(st.ProjectID), *limit)
+	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
 	return prettyPrint(resp)

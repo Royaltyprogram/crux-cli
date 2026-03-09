@@ -62,6 +62,14 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	})
 	require.Equal(t, "connected", projectResp.Status)
 
+	snapshotResp := postJSON[response.ConfigSnapshotResp](t, echo, http.MethodPost, "/api/v1/config-snapshots", request.ConfigSnapshotReq{
+		ProjectID: projectResp.ProjectID,
+		Tool:      "codex",
+		ProfileID: "baseline",
+		Settings:  map[string]any{"instructions_pack": "baseline"},
+	})
+	require.Equal(t, "baseline", snapshotResp.ProfileID)
+
 	ingestResp := postJSON[response.SessionIngestResp](t, echo, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID:             projectResp.ProjectID,
 		Tool:                  "codex",
@@ -84,6 +92,17 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		ConfigProfileID:       "baseline",
 	})
 	require.NotEmpty(t, ingestResp.LatestRecommendationIDs)
+
+	snapshotList := getJSON[response.ConfigSnapshotListResp](t, echo, "/api/v1/config-snapshots", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.NotEmpty(t, snapshotList.Items)
+
+	sessionList := getJSON[response.SessionSummaryListResp](t, echo, "/api/v1/session-summaries", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+		"limit":      []string{"5"},
+	})
+	require.NotEmpty(t, sessionList.Items)
 
 	recResp := getJSON[response.RecommendationListResp](t, echo, "/api/v1/recommendations", url.Values{
 		"project_id": []string{projectResp.ProjectID},

@@ -251,6 +251,16 @@
     </section>
     <section class="section" style="margin-top: 16px;">
       <article class="panel">
+        <h2>Current Config</h2>
+        <div class="list" id="configSnapshotList"></div>
+      </article>
+      <article class="panel">
+        <h2>Recent Sessions</h2>
+        <div class="list" id="sessionSummaryList"></div>
+      </article>
+    </section>
+    <section class="section" style="margin-top: 16px;">
+      <article class="panel">
         <h2>Projects</h2>
         <div class="list" id="projectList"></div>
       </article>
@@ -326,6 +336,41 @@
           <div class="meta">${item.summary}</div>
           <div class="meta" style="margin-top: 8px;">Target: <code>${item.target_file_hint}</code></div>
           <div class="meta" style="margin-top: 8px;">Reason: ${item.reason}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderConfigSnapshots(items) {
+      if (!items.length) {
+        $("configSnapshotList").innerHTML = `<div class="item"><strong>No config snapshots.</strong><div class="meta">Upload a config snapshot from the CLI first.</div></div>`;
+        return;
+      }
+      $("configSnapshotList").innerHTML = items.slice(0, 3).map((item) => `
+        <div class="item">
+          <div class="item-top">
+            <strong>${item.profile_id || "baseline"}</strong>
+            <span class="pill">${item.tool}</span>
+          </div>
+          <div class="meta">Captured: ${item.captured_at}</div>
+          <div class="meta"><code>${JSON.stringify(item.settings)}</code></div>
+        </div>
+      `).join("");
+    }
+
+    function renderSessionSummaries(items) {
+      if (!items.length) {
+        $("sessionSummaryList").innerHTML = `<div class="item"><strong>No recent sessions.</strong><div class="meta">Upload session summaries from the CLI first.</div></div>`;
+        return;
+      }
+      $("sessionSummaryList").innerHTML = items.map((item) => `
+        <div class="item">
+          <div class="item-top">
+            <strong>${item.task_type}</strong>
+            <span class="pill">$${Number(item.estimated_cost).toFixed(2)}</span>
+          </div>
+          <div class="meta">Tool: ${item.tool} | Prompts: ${item.total_prompts_count} | Calls: ${item.total_tool_calls}</div>
+          <div class="meta">Rejects: ${item.permission_reject_count} | Retries: ${item.retry_count} | Profile: ${item.config_profile_id || "n/a"}</div>
+          <div class="meta">Recorded: ${item.timestamp}</div>
         </div>
       `).join("");
     }
@@ -446,17 +491,23 @@
         let applyHistory = [];
         let impacts = [];
         let audits = [];
+        let snapshots = [];
+        let sessions = [];
         if (projectId) {
-          const [recResp, applyResp, impactResp, auditResp] = await Promise.all([
+          const [recResp, applyResp, impactResp, auditResp, snapshotResp, sessionResp] = await Promise.all([
             fetch(`/api/v1/recommendations?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
             fetch(`/api/v1/applies?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
             fetch(`/api/v1/impact?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
-            fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}&project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() })
+            fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}&project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
+            fetch(`/api/v1/config-snapshots?project_id=${encodeURIComponent(projectId)}`, { headers: authHeaders() }),
+            fetch(`/api/v1/session-summaries?project_id=${encodeURIComponent(projectId)}&limit=5`, { headers: authHeaders() })
           ]);
           const recEnv = await recResp.json();
           const applyEnv = await applyResp.json();
           const impactEnv = await impactResp.json();
           const auditEnv = await auditResp.json();
+          const snapshotEnv = await snapshotResp.json();
+          const sessionEnv = await sessionResp.json();
           if (recEnv.code !== 0) {
             throw new Error(recEnv.msg || "recommendation request failed");
           }
@@ -469,10 +520,18 @@
           if (auditEnv.code !== 0) {
             throw new Error(auditEnv.msg || "audit request failed");
           }
+          if (snapshotEnv.code !== 0) {
+            throw new Error(snapshotEnv.msg || "snapshot request failed");
+          }
+          if (sessionEnv.code !== 0) {
+            throw new Error(sessionEnv.msg || "session request failed");
+          }
           recommendations = recEnv.data.items || [];
           applyHistory = applyEnv.data.items || [];
           impacts = impactEnv.data.items || [];
           audits = auditEnv.data.items || [];
+          snapshots = snapshotEnv.data.items || [];
+          sessions = sessionEnv.data.items || [];
         } else {
           const auditResp = await fetch(`/api/v1/audits?org_id=${encodeURIComponent(orgId)}`, { headers: authHeaders() });
           const auditEnv = await auditResp.json();
@@ -489,6 +548,8 @@
 
         renderSignals(overview);
         renderRecommendations(recommendations);
+        renderConfigSnapshots(snapshots);
+        renderSessionSummaries(sessions);
         renderApplyHistory(applyHistory);
         renderImpact(impacts);
         renderAudits(audits);

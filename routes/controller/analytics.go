@@ -20,7 +20,9 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.POST("/agents/register", r.registerAgent)
 	api.POST("/projects/register", r.registerProject)
 	api.POST("/config-snapshots", r.uploadConfigSnapshot)
+	api.GET("/config-snapshots", r.listConfigSnapshots)
 	api.POST("/session-summaries", r.uploadSessionSummary)
+	api.GET("/session-summaries", r.listSessionSummaries)
 	api.GET("/projects", r.listProjects)
 	api.GET("/recommendations", r.listRecommendations)
 	api.GET("/impact", r.impactSummary)
@@ -55,12 +57,28 @@ func (r *AnalyticsRoute) uploadConfigSnapshot(c *echo.Context) error {
 	return common.WrapResp(c)(r.AnalyticsService.UploadConfigSnapshot(c.Request().Context(), &req))
 }
 
+func (r *AnalyticsRoute) listConfigSnapshots(c *echo.Context) error {
+	var req request.ConfigSnapshotListReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.ListConfigSnapshots(c.Request().Context(), &req))
+}
+
 func (r *AnalyticsRoute) uploadSessionSummary(c *echo.Context) error {
 	var req request.SessionSummaryReq
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.UploadSessionSummary(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) listSessionSummaries(c *echo.Context) error {
+	var req request.SessionSummaryListReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.ListSessionSummaries(c.Request().Context(), &req))
 }
 
 func (r *AnalyticsRoute) listRecommendations(c *echo.Context) error {

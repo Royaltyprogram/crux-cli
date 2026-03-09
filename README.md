@@ -24,6 +24,8 @@ go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token agentopt-dev-
 go run ./cmd/agentopt connect --project demo-repo --repo-path .
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session --file examples/session-summary.json
+go run ./cmd/agentopt snapshots
+go run ./cmd/agentopt sessions --limit 5
 go run ./cmd/agentopt status
 go run ./cmd/agentopt projects
 go run ./cmd/agentopt recommendations
