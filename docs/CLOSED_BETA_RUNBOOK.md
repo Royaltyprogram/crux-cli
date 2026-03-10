@@ -33,6 +33,9 @@ go run ./cmd/agentopt connect --repo-path .
 go run ./cmd/agentopt workspace
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
+go run ./cmd/agentopt collect
+go run ./cmd/agentopt autoupload enable --interval 30m
+go run ./cmd/agentopt autoupload status
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt impact
 ```
@@ -41,7 +44,23 @@ Notes:
 
 - In the MVP, every connected repository rolls into one shared workspace per organization.
 - `agentopt connect` updates that shared workspace.
+- `agentopt collect` uploads recent session data immediately and skips unchanged snapshots by default.
+- `agentopt autoupload enable` installs a background collector on macOS via `launchd`.
 - `pending`, `history`, `sync`, and `impact` all read from the same rollout stream.
+
+If you want a beta machine to keep uploading usage data without manual CLI runs, install background uploads once:
+
+```bash
+./agentopt autoupload enable --interval 30m
+./agentopt autoupload status
+./agentopt autoupload disable
+```
+
+Notes:
+
+- The current background installer targets macOS `launchd`.
+- Prefer the bundled `./agentopt` binary for `autoupload`; do not rely on `go run` for long-lived beta machine setup.
+- The background job runs `agentopt collect` on each interval.
 
 ## 2. Local Verification
 
@@ -216,4 +235,5 @@ Run this before handing the build to beta users:
 7. Runtime secrets are mounted from files, not hardcoded.
 8. `GET /healthz` and `GET /readyz` respond successfully in the target environment.
 9. A seeded beta user can log in on the dashboard and issue a CLI token.
-10. A beta machine can complete `agentopt login` and `agentopt connect`.
+10. A beta machine can complete `agentopt login`, `agentopt connect`, and `agentopt collect`.
+11. If background uploads are part of the beta flow, `agentopt autoupload enable --interval 30m` and `agentopt autoupload status` both succeed on the target macOS machine.

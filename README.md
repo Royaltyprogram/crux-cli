@@ -34,6 +34,8 @@ Detailed codebase documentation:
 - Session summaries now focus on token usage and raw query history for MVP research analysis
 - `agentopt session` auto-collects the latest local Codex session from `~/.codex/sessions` when `--file` is omitted
 - `agentopt session --recent N` uploads the most recent `N` local Codex sessions in chronological order
+- `agentopt collect` uploads session data now and can skip unchanged snapshots by default
+- `agentopt autoupload enable --interval 30m` installs a macOS launchd job for background uploads
 - Local apply supports both `JSON merge patches` and safe `text append` patches such as `AGENTS.md`
 - Local apply is executed through a `Codex SDK` runner while preflight, allowlist checks, backup, and rollback stay in the Go CLI
 
@@ -58,6 +60,8 @@ go run ./cmd/agentopt workspace
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
 go run ./cmd/agentopt session --recent 5
+go run ./cmd/agentopt collect --codex-home ~/.codex
+go run ./cmd/agentopt autoupload enable --interval 30m
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID>
 go run ./cmd/agentopt preflight --apply-id <CHANGE_PLAN_ID>
@@ -115,6 +119,16 @@ If you want to force a lower Codex reasoning effort for local apply, pass it thr
 go run ./cmd/agentopt sync --codex-reasoning-effort low
 AGENTOPT_CODEX_REASONING_EFFORT=low go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID> --yes
 ```
+
+To keep local usage uploads running in the background on macOS, install the launchd job once:
+
+```bash
+go run ./cmd/agentopt autoupload enable --interval 30m
+go run ./cmd/agentopt autoupload status
+go run ./cmd/agentopt autoupload disable
+```
+
+`autoupload enable` runs `agentopt collect` on each interval. `collect` uploads recent session summaries every run and skips snapshot uploads unless the fingerprint changed, so the background job can poll without forcing duplicate manual commands.
 
 To rerun the mock dashboard approve -> local agent sync -> rollback flow without touching your real workspace:
 

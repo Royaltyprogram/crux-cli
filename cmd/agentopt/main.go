@@ -93,6 +93,8 @@ func run(args []string) error {
 		return runSnapshot(args[1:])
 	case "session":
 		return runSession(args[1:])
+	case "collect":
+		return runCollect(args[1:])
 	case "snapshots":
 		return runSnapshots(args[1:])
 	case "sessions":
@@ -113,6 +115,8 @@ func run(args []string) error {
 		return runAudit(args[1:])
 	case "sync":
 		return runSync(args[1:])
+	case "autoupload":
+		return runAutoupload(args[1:])
 	case "rollback":
 		return runRollback(args[1:])
 	case "apply":
@@ -140,6 +144,7 @@ func printUsage() {
   connect           connect a local repo to the shared workspace for the current org
   snapshot          upload a config snapshot from a JSON file
   session           upload one or more session summaries from a JSON file or local Codex session files
+  collect           upload local usage data now and optionally keep collecting on an interval
   snapshots         list config snapshots for the shared workspace
   sessions          list recent session summaries for the shared workspace
   recommendations   list active recommendations for the shared workspace
@@ -150,6 +155,7 @@ func printUsage() {
   impact            list recommendation impact summaries for the shared workspace
   audit             list recent audit events for the current org and shared workspace
   sync              pull approved change plans and execute them locally
+  autoupload        install or inspect background local usage uploads
   rollback          restore the local config backup for a previous apply
   apply             request a change plan and optionally approve/apply it locally
   review            approve or reject a requested change plan

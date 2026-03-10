@@ -77,6 +77,7 @@ MVP에서는 여러 프로젝트를 나눠 관리하지 않는다. 연결된 모
 ```bash
 go run ./cmd/agentopt snapshot
 go run ./cmd/agentopt session --recent 1
+go run ./cmd/agentopt collect
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt status
 ```
@@ -140,7 +141,19 @@ go run ./cmd/agentopt impact
 go run ./cmd/agentopt audit
 ```
 
-## 8-1. 모의 approve -> local sync -> rollback 자동 테스트
+## 8-1. 백그라운드 업로드 설정
+
+macOS에서는 launchd로 세션 업로드를 자동화할 수 있다.
+
+```bash
+go run ./cmd/agentopt autoupload enable --interval 30m
+go run ./cmd/agentopt autoupload status
+go run ./cmd/agentopt autoupload disable
+```
+
+내부적으로는 `agentopt collect`를 주기 실행한다. 이 명령은 최근 세션 업로드를 수행하고, 스냅샷은 fingerprint가 바뀐 경우에만 다시 올린다.
+
+## 8-2. 모의 approve -> local sync -> rollback 자동 테스트
 
 실제 temp 서버와 temp workspace를 띄워서 아래 흐름을 자동으로 검증한다.
 
