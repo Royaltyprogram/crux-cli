@@ -191,8 +191,8 @@ func TestApplyBackupRoundTrip(t *testing.T) {
 	t.Setenv("AGENTOPT_HOME", root)
 
 	backup := applyBackup{
-		ApplyID:   "apply-1",
-		ProjectID: "project-1",
+		ApplyID:     "apply-1",
+		WorkspaceID: "workspace-1",
 		Files: []applyFileBackup{{
 			FilePath:       "/tmp/config.json",
 			FileKind:       "json_merge",
@@ -208,6 +208,7 @@ func TestApplyBackupRoundTrip(t *testing.T) {
 	loaded, err := loadApplyBackup("apply-1")
 	require.NoError(t, err)
 	require.Equal(t, backup.ApplyID, loaded.ApplyID)
+	require.Equal(t, backup.WorkspaceID, loaded.WorkspaceID)
 	require.Len(t, loaded.Files, 1)
 	require.Equal(t, backup.Files[0].FilePath, loaded.Files[0].FilePath)
 	require.Equal(t, backup.Files[0].OriginalJSON["baseline"], loaded.Files[0].OriginalJSON["baseline"])
@@ -220,6 +221,53 @@ func TestApplyBackupRoundTrip(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(root, "applies", "apply-1.json"))
 	require.Error(t, statErr)
 	require.True(t, os.IsNotExist(statErr))
+}
+
+func TestLoadStateAcceptsLegacyProjectID(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "state.json"), []byte(`{
+  "server_url": "http://127.0.0.1:8082",
+  "api_token": "token-1",
+  "org_id": "org-1",
+  "user_id": "user-1",
+  "agent_id": "agent-1",
+  "workspace_id": "",
+  "project_id": "legacy-project-1"
+}
+`), 0o644))
+
+	st, err := loadState()
+	require.NoError(t, err)
+	require.Equal(t, "legacy-project-1", st.WorkspaceID)
+}
+
+func TestLoadApplyBackupAcceptsLegacyProjectID(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "applies"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "applies", "apply-legacy.json"), []byte(`{
+  "apply_id": "apply-legacy",
+  "project_id": "legacy-project-1",
+  "files": [
+    {
+      "file_path": "/tmp/config.json",
+      "file_kind": "json_merge",
+      "original_exists": true,
+      "original_json": {
+        "baseline": true
+      }
+    }
+  ]
+}
+`), 0o644))
+
+	backup, err := loadApplyBackup("apply-legacy")
+	require.NoError(t, err)
+	require.Equal(t, "legacy-project-1", backup.WorkspaceID)
+	require.Len(t, backup.Files, 1)
 }
 
 func TestAPIClientAddsTokenHeader(t *testing.T) {
@@ -341,7 +389,7 @@ func TestRunLoginUsesBuildVersionByDefault(t *testing.T) {
 	require.Equal(t, "1.2.3-beta.2", uploaded.CLIVersion)
 }
 
-func TestRunProjectsShowsSharedWorkspace(t *testing.T) {
+func TestRunWorkspaceShowsSharedWorkspace(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 
@@ -361,15 +409,15 @@ func TestRunProjectsShowsSharedWorkspace(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-projects",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-projects",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	output := captureStdout(t, func() {
-		require.NoError(t, runProjects(nil))
+		require.NoError(t, runWorkspace(nil))
 	})
 
 	var payload response.ProjectListResp
@@ -379,7 +427,7 @@ func TestRunProjectsShowsSharedWorkspace(t *testing.T) {
 	require.Equal(t, "Shared workspace", payload.Items[0].Name)
 }
 
-func TestRunPendingIncludesProjectContext(t *testing.T) {
+func TestRunPendingIncludesWorkspaceContext(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 
@@ -402,11 +450,11 @@ func TestRunPendingIncludesProjectContext(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-projects",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-projects",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	output := captureStdout(t, func() {
@@ -414,15 +462,15 @@ func TestRunPendingIncludesProjectContext(t *testing.T) {
 	})
 
 	var payload struct {
-		ProjectID   string `json:"project_id"`
-		ProjectName string `json:"project_name"`
-		Items       []struct {
+		WorkspaceID   string `json:"workspace_id"`
+		WorkspaceName string `json:"workspace_name"`
+		Items         []struct {
 			ApplyID string `json:"apply_id"`
 		} `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(output), &payload))
-	require.Equal(t, "project-1", payload.ProjectID)
-	require.Equal(t, "Shared workspace", payload.ProjectName)
+	require.Equal(t, "project-1", payload.WorkspaceID)
+	require.Equal(t, "Shared workspace", payload.WorkspaceName)
 	require.Len(t, payload.Items, 1)
 	require.Equal(t, "apply-1", payload.Items[0].ApplyID)
 }
@@ -443,11 +491,11 @@ func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, saveState(state{
-		ServerURL: "http://127.0.0.1:8082",
-		APIToken:  "token-session",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   "http://127.0.0.1:8082",
+		APIToken:    "token-session",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	var uploaded request.SessionSummaryReq
@@ -469,11 +517,11 @@ func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-session",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-session",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	err = runSession([]string{"--file", sessionFile, "--tool", "codex"})
@@ -529,11 +577,11 @@ func TestRunSessionCollectsLatestCodexSessionFromLocalFiles(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-session",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-session",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	err := runSession([]string{"--tool", "codex", "--codex-home", codexHome})
@@ -608,11 +656,11 @@ func TestRunSessionUploadsRecentLocalCodexSessions(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-session",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-session",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	err := runSession([]string{"--tool", "codex", "--codex-home", codexHome, "--recent", "2"})
@@ -638,7 +686,7 @@ func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 	err := os.WriteFile(target, []byte("{\"baseline\":true}\n"), 0o644)
 	require.NoError(t, err)
 
-	result, err := executeLocalApply(state{ProjectID: "project-1"}, "apply-1", []response.PatchPreviewItem{
+	result, err := executeLocalApply(state{WorkspaceID: "project-1"}, "apply-1", []response.PatchPreviewItem{
 		{
 			FilePath: target,
 			SettingsUpdates: map[string]any{
@@ -670,7 +718,7 @@ func TestExecuteLocalApplyAppendsTextFile(t *testing.T) {
 	err := os.WriteFile(target, []byte("# Existing\n"), 0o644)
 	require.NoError(t, err)
 
-	result, err := executeLocalApply(state{ProjectID: "project-1"}, "apply-text", []response.PatchPreviewItem{
+	result, err := executeLocalApply(state{WorkspaceID: "project-1"}, "apply-text", []response.PatchPreviewItem{
 		{
 			FilePath:       "AGENTS.md",
 			Operation:      "append_block",
@@ -691,7 +739,7 @@ func TestPreflightLocalApplyRejectsUnsafeTarget(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 
-	result, err := preflightLocalApply(state{ProjectID: "project-1"}, "apply-unsafe", []response.PatchPreviewItem{
+	result, err := preflightLocalApply(state{WorkspaceID: "project-1"}, "apply-unsafe", []response.PatchPreviewItem{
 		{
 			FilePath:        ".ssh/config",
 			Operation:       "merge_patch",
@@ -708,7 +756,7 @@ func TestPreflightLocalApplyAllowsMultipleDistinctSteps(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 
-	result, err := preflightLocalApply(state{ProjectID: "project-1"}, "apply-multi", []response.PatchPreviewItem{
+	result, err := preflightLocalApply(state{WorkspaceID: "project-1"}, "apply-multi", []response.PatchPreviewItem{
 		{FilePath: ".codex/config.json", Operation: "merge_patch"},
 		{FilePath: "AGENTS.md", Operation: "append_block"},
 	}, filepath.Join(root, "config.json")+","+filepath.Join(root, "AGENTS.md"))
@@ -723,7 +771,7 @@ func TestPreflightLocalApplyRejectsDuplicateTargets(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 
-	result, err := preflightLocalApply(state{ProjectID: "project-1"}, "apply-dup", []response.PatchPreviewItem{
+	result, err := preflightLocalApply(state{WorkspaceID: "project-1"}, "apply-dup", []response.PatchPreviewItem{
 		{FilePath: ".codex/config.json", Operation: "merge_patch"},
 		{FilePath: ".codex/config.json", Operation: "merge_patch"},
 	}, "")
@@ -742,7 +790,7 @@ func TestExecuteLocalApplySupportsMultipleSteps(t *testing.T) {
 	err := os.WriteFile(configTarget, []byte("{\"baseline\":true}\n"), 0o644)
 	require.NoError(t, err)
 
-	result, err := executeLocalApply(state{ProjectID: "project-1"}, "apply-multi", []response.PatchPreviewItem{
+	result, err := executeLocalApply(state{WorkspaceID: "project-1"}, "apply-multi", []response.PatchPreviewItem{
 		{
 			FilePath:  ".codex/config.json",
 			Operation: "merge_patch",
@@ -836,11 +884,11 @@ func TestRunSyncRejectsInvalidIntervalInWatchMode(t *testing.T) {
 	t.Setenv("AGENTOPT_HOME", root)
 
 	err := saveState(state{
-		ServerURL: "http://127.0.0.1:8082",
-		APIToken:  "token",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   "http://127.0.0.1:8082",
+		APIToken:    "token",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	})
 	require.NoError(t, err)
 
@@ -906,10 +954,10 @@ func TestRunSyncOnceAppliesPendingPlansAndReportsSuccess(t *testing.T) {
 	defer server.Close()
 
 	st := state{
-		ServerURL: server.URL,
-		APIToken:  "token-sync",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-sync",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}
 
 	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync"), configTarget+","+textTarget, "")
@@ -997,10 +1045,10 @@ func TestRunSyncOnceReportsFailuresAndContinues(t *testing.T) {
 	defer server.Close()
 
 	st := state{
-		ServerURL: server.URL,
-		APIToken:  "token-sync-fail",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-sync-fail",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}
 
 	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync-fail"), "", "")
@@ -1045,11 +1093,11 @@ func TestRunRollbackRestoresFilesDeletesCreatedOnesAndReportsResult(t *testing.T
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-1",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-1",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	configTarget := filepath.Join(root, "config.json")
@@ -1061,8 +1109,8 @@ func TestRunRollbackRestoresFilesDeletesCreatedOnesAndReportsResult(t *testing.T
 	require.NoError(t, os.WriteFile(createdTarget, []byte("{\"new\":true}\n"), 0o644))
 
 	require.NoError(t, saveApplyBackup(applyBackup{
-		ApplyID:   "apply-rollback",
-		ProjectID: "project-1",
+		ApplyID:     "apply-rollback",
+		WorkspaceID: "project-1",
 		Files: []applyFileBackup{
 			{
 				FilePath:       configTarget,
@@ -1185,11 +1233,11 @@ func TestRunApplyYesReviewsPlanBeforeLocalApply(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-apply",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-apply",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	err := runApply([]string{"--recommendation-id", "rec-1", "--yes", "--target-config", configTarget})
@@ -1260,11 +1308,11 @@ func TestRunApplyYesSkipsReviewForAutoApprovedPlan(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-auto",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-auto",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	err := runApply([]string{"--recommendation-id", "rec-auto", "--yes", "--target-config", configTarget})
@@ -1325,11 +1373,11 @@ func TestRunApplyYesReportsFailureWhenLocalApplyFails(t *testing.T) {
 	defer server.Close()
 
 	require.NoError(t, saveState(state{
-		ServerURL: server.URL,
-		APIToken:  "token-fail",
-		OrgID:     "org-1",
-		UserID:    "user-1",
-		ProjectID: "project-1",
+		ServerURL:   server.URL,
+		APIToken:    "token-fail",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
 	}))
 
 	err := runApply([]string{"--recommendation-id", "rec-fail", "--yes"})

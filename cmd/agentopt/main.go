@@ -27,14 +27,26 @@ import (
 )
 
 type state struct {
-	ServerURL  string `json:"server_url"`
-	APIToken   string `json:"api_token"`
-	OrgID      string `json:"org_id"`
-	UserID     string `json:"user_id"`
-	AgentID    string `json:"agent_id"`
-	DeviceName string `json:"device_name"`
-	Hostname   string `json:"hostname"`
-	ProjectID  string `json:"project_id"`
+	ServerURL   string `json:"server_url"`
+	APIToken    string `json:"api_token"`
+	OrgID       string `json:"org_id"`
+	UserID      string `json:"user_id"`
+	AgentID     string `json:"agent_id"`
+	DeviceName  string `json:"device_name"`
+	Hostname    string `json:"hostname"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+type stateDisk struct {
+	ServerURL       string `json:"server_url"`
+	APIToken        string `json:"api_token"`
+	OrgID           string `json:"org_id"`
+	UserID          string `json:"user_id"`
+	AgentID         string `json:"agent_id"`
+	DeviceName      string `json:"device_name"`
+	Hostname        string `json:"hostname"`
+	WorkspaceID     string `json:"workspace_id,omitempty"`
+	LegacyProjectID string `json:"project_id,omitempty"`
 }
 
 const sharedWorkspaceName = "Shared workspace"
@@ -89,8 +101,8 @@ func run(args []string) error {
 		return runRecommendations(args[1:])
 	case "status":
 		return runStatus(args[1:])
-	case "projects":
-		return runProjects(args[1:])
+	case "workspace":
+		return runWorkspace(args[1:])
 	case "history":
 		return runHistory(args[1:])
 	case "pending":
@@ -132,7 +144,7 @@ func printUsage() {
   sessions          list recent session summaries for the shared workspace
   recommendations   list active recommendations for the shared workspace
   status            print org overview and shared workspace recommendations
-  projects          show the shared workspace connected to the current org
+  workspace         show the shared workspace connected to the current org
   history           list apply history for the shared workspace
   pending           list pending apply jobs visible to the current user and shared workspace
   impact            list recommendation impact summaries for the shared workspace
@@ -224,16 +236,12 @@ func runLogin(args []string) error {
 
 func runConnect(args []string) error {
 	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
-	projectName := fs.String("project", "", "project name")
 	repoHash := fs.String("repo-hash", "", "stable repo hash")
 	repoPath := fs.String("repo-path", ".", "repo path")
 	tool := fs.String("tool", "codex", "default tool")
 	languageMix := fs.String("languages", "go=1.0", "comma separated language shares")
 	if err := fs.Parse(args); err != nil {
 		return err
-	}
-	if strings.TrimSpace(*projectName) == "" {
-		return errors.New("connect requires --project")
 	}
 
 	st, err := loadState()
@@ -249,13 +257,13 @@ func runConnect(args []string) error {
 
 	hash := strings.TrimSpace(*repoHash)
 	if hash == "" {
-		hash = sanitizeID(*projectName + "-" + repoRoot)
+		hash = sanitizeID(repoRoot)
 	}
 
 	req := request.RegisterProjectReq{
 		OrgID:       st.OrgID,
 		AgentID:     st.AgentID,
-		Name:        *projectName,
+		Name:        sharedWorkspaceName,
 		RepoHash:    hash,
 		RepoPath:    repoRoot,
 		LanguageMix: parseLanguageMix(*languageMix),
@@ -266,7 +274,7 @@ func runConnect(args []string) error {
 		return err
 	}
 
-	st.ProjectID = resp.ProjectID
+	st.setWorkspaceID(resp.ProjectID)
 	if err := saveState(st); err != nil {
 		return err
 	}
@@ -282,7 +290,7 @@ func runSnapshot(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
@@ -298,14 +306,14 @@ func runSnapshot(args []string) error {
 	}
 
 	req := request.ConfigSnapshotReq{
-		ProjectID:           st.ProjectID,
+		ProjectID:           st.workspaceID(),
 		Tool:                *tool,
 		ProfileID:           *profileID,
 		Settings:            settings,
 		EnabledMCPCount:     inferEnabledMCPCount(settings),
 		HooksEnabled:        inferHooksEnabled(settings),
 		InstructionFiles:    inferInstructionFiles(settings),
-		ConfigFingerprint:   sanitizeID(fmt.Sprintf("%s-%s-%d", st.ProjectID, *profileID, len(settings))),
+		ConfigFingerprint:   sanitizeID(fmt.Sprintf("%s-%s-%d", st.workspaceID(), *profileID, len(settings))),
 		RecentConfigChanges: []string{"snapshot_collected_by_cli"},
 		CapturedAt:          time.Now().UTC(),
 	}
@@ -333,7 +341,7 @@ func runSession(args []string) error {
 		return errors.New("--recent can only be used when --file is omitted")
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
@@ -346,7 +354,7 @@ func runSession(args []string) error {
 
 	items := make([]response.SessionIngestResp, 0, len(reqs))
 	for _, req := range reqs {
-		req.ProjectID = st.ProjectID
+		req.ProjectID = st.workspaceID()
 		if req.Tool == "" {
 			req.Tool = *tool
 		}
@@ -376,17 +384,17 @@ func runSnapshots(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ConfigSnapshotListResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/config-snapshots?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/config-snapshots?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(projectScopedItems(st, resp.Items))
+	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
 func runSessions(args []string) error {
@@ -396,18 +404,18 @@ func runSessions(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.SessionSummaryListResp
-	path := fmt.Sprintf("/api/v1/session-summaries?project_id=%s&limit=%d", url.QueryEscape(st.ProjectID), *limit)
+	path := fmt.Sprintf("/api/v1/session-summaries?project_id=%s&limit=%d", url.QueryEscape(st.workspaceID()), *limit)
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(projectScopedItems(st, resp.Items))
+	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
 func runRecommendations(args []string) error {
@@ -416,17 +424,17 @@ func runRecommendations(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
-	path := "/api/v1/recommendations?project_id=" + url.QueryEscape(st.ProjectID)
+	path := "/api/v1/recommendations?project_id=" + url.QueryEscape(st.workspaceID())
 	var resp response.RecommendationListResp
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(projectScopedItems(st, resp.Items))
+	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
 func runStatus(args []string) error {
@@ -435,7 +443,7 @@ func runStatus(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
@@ -446,21 +454,21 @@ func runStatus(args []string) error {
 		return err
 	}
 	var recs response.RecommendationListResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/recommendations?project_id="+url.QueryEscape(st.ProjectID), nil, &recs); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/recommendations?project_id="+url.QueryEscape(st.workspaceID()), nil, &recs); err != nil {
 		return err
 	}
 
 	payload := map[string]any{
-		"project_id":      st.ProjectID,
-		"project_name":    sharedWorkspaceName,
+		"workspace_id":    st.workspaceID(),
+		"workspace_name":  sharedWorkspaceName,
 		"overview":        overview,
 		"recommendations": recs.Items,
 	}
 	return prettyPrint(payload)
 }
 
-func runProjects(args []string) error {
-	fs := flag.NewFlagSet("projects", flag.ContinueOnError)
+func runWorkspace(args []string) error {
+	fs := flag.NewFlagSet("workspace", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -484,17 +492,17 @@ func runHistory(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ApplyHistoryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(projectScopedItems(st, resp.Items))
+	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
 func runPending(args []string) error {
@@ -503,18 +511,18 @@ func runPending(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.PendingApplyResp
-	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.ProjectID), url.QueryEscape(st.UserID))
+	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.workspaceID()), url.QueryEscape(st.UserID))
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(projectScopedItems(st, resp.Items))
+	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
 func runImpact(args []string) error {
@@ -523,17 +531,17 @@ func runImpact(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
 
 	var resp response.ImpactSummaryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/impact?project_id="+url.QueryEscape(st.ProjectID), nil, &resp); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/impact?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
 		return err
 	}
-	return prettyPrint(projectScopedItems(st, resp.Items))
+	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
 func runAudit(args []string) error {
@@ -570,7 +578,7 @@ func runSync(args []string) error {
 		return err
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
@@ -607,7 +615,7 @@ func runSync(args []string) error {
 }
 
 func runSyncOnce(st state, client *apiClient, targetConfig, reasoningEffort string) error {
-	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.ProjectID), url.QueryEscape(st.UserID))
+	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.workspaceID()), url.QueryEscape(st.UserID))
 	var pending response.PendingApplyResp
 	if err := client.doJSON(http.MethodGet, path, nil, &pending); err != nil {
 		return err
@@ -646,11 +654,11 @@ func runSyncOnce(st state, client *apiClient, targetConfig, reasoningEffort stri
 	}
 
 	if err := prettyPrint(map[string]any{
-		"project_id":    st.ProjectID,
-		"project_name":  sharedWorkspaceName,
-		"pending_count": len(pending.Items),
-		"failed_count":  len(failedApplyIDs),
-		"results":       results,
+		"workspace_id":   st.workspaceID(),
+		"workspace_name": sharedWorkspaceName,
+		"pending_count":  len(pending.Items),
+		"failed_count":   len(failedApplyIDs),
+		"results":        results,
 	}); err != nil {
 		return err
 	}
@@ -679,7 +687,7 @@ func runApply(args []string) error {
 		return errors.New("apply requires --recommendation-id")
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
@@ -774,12 +782,12 @@ func runPreflight(args []string) error {
 		return errors.New("preflight requires --apply-id")
 	}
 
-	st, err := loadProjectState()
+	st, err := loadWorkspaceState()
 	if err != nil {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
-	item, err := fetchApplyHistoryItem(client, st.ProjectID, *applyID)
+	item, err := fetchApplyHistoryItem(client, st.workspaceID(), *applyID)
 	if err != nil {
 		return err
 	}
@@ -1023,19 +1031,28 @@ func loadState() (state, error) {
 		}
 		return state{}, err
 	}
-	var st state
-	if err := json.Unmarshal(data, &st); err != nil {
+	var disk stateDisk
+	if err := json.Unmarshal(data, &disk); err != nil {
 		return state{}, err
 	}
-	return st, nil
+	return state{
+		ServerURL:   disk.ServerURL,
+		APIToken:    disk.APIToken,
+		OrgID:       disk.OrgID,
+		UserID:      disk.UserID,
+		AgentID:     disk.AgentID,
+		DeviceName:  disk.DeviceName,
+		Hostname:    disk.Hostname,
+		WorkspaceID: firstNonEmpty(disk.WorkspaceID, disk.LegacyProjectID),
+	}, nil
 }
 
-func loadProjectState() (state, error) {
+func loadWorkspaceState() (state, error) {
 	st, err := loadState()
 	if err != nil {
 		return state{}, err
 	}
-	if st.ProjectID == "" {
+	if st.workspaceID() == "" {
 		return state{}, errors.New("shared workspace is not connected; run `agentopt connect` first")
 	}
 	return st, nil
@@ -1049,7 +1066,17 @@ func saveState(st state) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(st, "", "  ")
+	payload := stateDisk{
+		ServerURL:   st.ServerURL,
+		APIToken:    st.APIToken,
+		OrgID:       st.OrgID,
+		UserID:      st.UserID,
+		AgentID:     st.AgentID,
+		DeviceName:  st.DeviceName,
+		Hostname:    st.Hostname,
+		WorkspaceID: st.workspaceID(),
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -1080,12 +1107,20 @@ func normalizeRepoPath(path string) (string, error) {
 	return absolute, nil
 }
 
-func projectScopedItems(st state, items any) map[string]any {
+func workspaceScopedItems(st state, items any) map[string]any {
 	return map[string]any{
-		"project_id":   st.ProjectID,
-		"project_name": sharedWorkspaceName,
-		"items":        items,
+		"workspace_id":   st.workspaceID(),
+		"workspace_name": sharedWorkspaceName,
+		"items":          items,
 	}
+}
+
+func (s state) workspaceID() string {
+	return strings.TrimSpace(s.WorkspaceID)
+}
+
+func (s *state) setWorkspaceID(id string) {
+	s.WorkspaceID = strings.TrimSpace(id)
 }
 
 func prettyPrint(v any) error {
@@ -1241,9 +1276,9 @@ func reviewChangePlan(client *apiClient, applyID, decision, reviewedBy, note str
 	return resp, err
 }
 
-func fetchApplyHistoryItem(client *apiClient, projectID, applyID string) (response.ApplyHistoryItem, error) {
+func fetchApplyHistoryItem(client *apiClient, workspaceID, applyID string) (response.ApplyHistoryItem, error) {
 	var resp response.ApplyHistoryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(projectID), nil, &resp); err != nil {
+	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(workspaceID), nil, &resp); err != nil {
 		return response.ApplyHistoryItem{}, err
 	}
 	for _, item := range resp.Items {
@@ -1251,7 +1286,7 @@ func fetchApplyHistoryItem(client *apiClient, projectID, applyID string) (respon
 			return item, nil
 		}
 	}
-	return response.ApplyHistoryItem{}, fmt.Errorf("apply %s not found in project history", applyID)
+	return response.ApplyHistoryItem{}, fmt.Errorf("apply %s not found in workspace history", applyID)
 }
 
 func defaultString(value, fallback string) string {

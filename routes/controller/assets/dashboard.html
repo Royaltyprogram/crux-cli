@@ -85,13 +85,15 @@
     .hero,
     .summary-grid,
     .content-grid,
-    .subgrid {
+    .subgrid,
+    .utility-grid,
+    .setup-grid {
       display: grid;
       gap: 16px;
     }
 
     .hero {
-      grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.95fr);
+      grid-template-columns: minmax(0, 1.38fr) minmax(320px, 0.86fr);
       align-items: stretch;
     }
 
@@ -123,28 +125,28 @@
     }
 
     .hero-copy {
-      padding: 34px;
+      padding: 30px;
       display: grid;
       align-content: start;
-      gap: 18px;
-      min-height: 292px;
+      gap: 20px;
       background:
-        radial-gradient(circle at top right, rgba(255, 255, 255, 0.82), transparent 42%),
-        linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(247, 242, 234, 0.94));
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.76), transparent 40%),
+        linear-gradient(155deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 244, 0.94));
     }
 
     .hero-copy::after {
       content: "";
       position: absolute;
-      right: -42px;
-      bottom: -58px;
-      width: 190px;
-      height: 190px;
+      right: -34px;
+      bottom: -42px;
+      width: 158px;
+      height: 158px;
       border-radius: 50%;
       background: linear-gradient(135deg, rgba(167, 82, 49, 0.18), rgba(30, 104, 112, 0.06));
     }
 
     .hero h1,
+    .access-panel h2,
     .panel h2,
     .subpanel h3 {
       font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
@@ -152,16 +154,16 @@
     }
 
     .hero h1 {
-      max-width: 11ch;
-      font-size: clamp(36px, 5vw, 60px);
-      line-height: 1.02;
+      max-width: 14ch;
+      font-size: clamp(32px, 4vw, 48px);
+      line-height: 1.06;
     }
 
     .hero p {
-      max-width: 60ch;
+      max-width: 68ch;
       color: var(--muted);
-      font-size: 16px;
-      line-height: 1.7;
+      font-size: 15px;
+      line-height: 1.65;
     }
 
     .hero-note-row {
@@ -185,11 +187,27 @@
     }
 
     .access-panel {
-      padding: 24px;
+      padding: 22px;
       display: grid;
-      gap: 16px;
+      gap: 14px;
       align-content: start;
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(242, 247, 244, 0.96));
+    }
+
+    .access-panel h2 {
+      margin-top: 4px;
+      font-size: 29px;
+      line-height: 1.08;
+    }
+
+    .hero-copy .summary-grid {
+      margin-top: 2px;
+    }
+
+    .hero-copy .summary-card,
+    .hero-copy .context-bar {
+      box-shadow: none;
+      background: rgba(255, 255, 255, 0.72);
     }
 
     .field-grid {
@@ -343,13 +361,14 @@
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      justify-content: flex-end;
+      justify-content: flex-start;
       align-items: center;
     }
 
     .dashboard-actions button {
       width: auto;
-      min-width: 180px;
+      min-width: 0;
+      flex: 1 1 0;
     }
 
     .secondary-link {
@@ -376,22 +395,50 @@
 
     .context-list {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
     }
 
     .context-card {
-      padding: 14px 16px;
+      padding: 15px 16px;
       border: 1px solid var(--line);
       border-radius: var(--radius-md);
-      background: rgba(255, 255, 255, 0.82);
+      background: rgba(255, 255, 255, 0.86);
     }
 
     .context-card strong {
       display: block;
       margin-top: 6px;
-      font-size: 16px;
+      font-size: 15px;
       line-height: 1.4;
+    }
+
+    .access-subcard {
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.84);
+    }
+
+    .command-row-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .command-row-head button {
+      width: auto;
+      min-width: 0;
+      padding: 9px 12px;
+      font-size: 13px;
+      box-shadow: none;
+    }
+
+    .access-subcard .command-shell {
+      min-height: 72px;
     }
 
     .command-grid {
@@ -439,6 +486,15 @@
 
     .summary-grid {
       grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .utility-grid {
+      grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
+      align-items: stretch;
+    }
+
+    .setup-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .dashboard-nav {
@@ -739,6 +795,22 @@
       line-height: 1.15;
     }
 
+    .command-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .command-stack .command-shell {
+      min-height: 0;
+    }
+
+    .token-list-panel .list {
+      align-content: start;
+      max-height: 640px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
     .empty {
       background: rgba(249, 250, 249, 0.94);
     }
@@ -770,7 +842,9 @@
       .focus-grid,
       .detail-grid,
       .subgrid,
-      .command-grid {
+      .command-grid,
+      .utility-grid,
+      .setup-grid {
         grid-template-columns: 1fr;
       }
 
@@ -811,7 +885,8 @@
       .field-grid,
       .fact-grid,
       .summary-grid,
-      .command-grid {
+      .command-grid,
+      .setup-grid {
         grid-template-columns: 1fr;
       }
 
@@ -853,20 +928,54 @@
   <main class="page-shell">
     <section class="hero">
       <article class="hero-copy">
-        <div class="eyebrow">Workspace Dashboard</div>
-        <h1 id="sessionHeading">Review changes, approve safely, and connect each CLI with its own token.</h1>
-        <p id="sessionSummary">The dashboard now starts from a signed-in web session. Use it to issue CLI tokens, approve rollout plans, and keep local execution separated from browser access.</p>
+        <div class="eyebrow">Workspace overview</div>
+        <h1 id="sessionHeading">Approve changes, monitor rollout, and provision CLI access for your workspace.</h1>
+        <p id="sessionSummary">The web dashboard is the shared decision surface. Review recommendations here, monitor rollout state, and create CLI access only when a local machine needs to connect.</p>
         <div class="hero-note-row">
-          <span class="hero-note">Signed-in org context</span>
-          <span class="hero-note">CLI token issued from web</span>
-          <span class="hero-note">Local apply only after approval</span>
+          <span class="hero-note">Shared rollout queue</span>
+          <span class="hero-note">Browser and CLI stay separate</span>
+          <span class="hero-note">Local apply follows approval</span>
         </div>
+        <section class="summary-grid">
+          <article class="summary-card">
+            <div class="summary-label">Connected Workspaces</div>
+            <div class="summary-value" id="totalProjects">0</div>
+            <div class="summary-caption">All connected repositories now share one rollout and recommendation stream.</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Needs Review</div>
+            <div class="summary-value" id="pendingReviewCount">0</div>
+            <div class="summary-caption">Suggested changes still waiting for approval.</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Ready To Sync</div>
+            <div class="summary-value" id="approvedQueueCount">0</div>
+            <div class="summary-caption">Approved plans that the CLI can apply on its next sync.</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Avg Input / Query</div>
+            <div class="summary-value" id="avgInputTokensPerQuery">0</div>
+            <div class="summary-caption">Prompt-side token usage captured from local CLI sessions.</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Avg Output / Query</div>
+            <div class="summary-value" id="avgOutputTokensPerQuery">0</div>
+            <div class="summary-caption">Response-side token usage captured from local CLI sessions.</div>
+          </article>
+        </section>
+
+        <section class="context-bar" id="overviewNarrative">
+          Recommendations will sharpen after a few more sessions and setup snapshots.
+        </section>
       </article>
 
       <aside class="access-panel">
-        <div>
-          <div class="section-kicker">Signed-in session</div>
-          <p class="section-copy">Your browser session drives the dashboard. The CLI uses a separate token that you can issue below and paste into `agentopt login`.</p>
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Signed-in workspace</div>
+            <h2>Session and access</h2>
+          </div>
+          <div class="section-copy">Keep browser access lightweight. Create a CLI token only when a local machine needs to authenticate.</div>
         </div>
 
         <div class="context-list">
@@ -897,120 +1006,22 @@
         </label>
 
         <div class="dashboard-actions">
-          <button id="issueTokenBtn" class="primary-button" type="button" data-action="issue-cli-token">Issue CLI token</button>
+          <button id="issueTokenBtn" class="primary-button" type="button" data-action="issue-cli-token">Create CLI token</button>
           <button id="loadBtn" class="secondary-button" type="button" data-action="refresh-dashboard">Refresh dashboard</button>
-          <button id="signOutBtn" class="secondary-button" type="button" data-action="sign-out">Sign out</button>
+        </div>
+
+        <div class="access-subcard">
+          <div class="command-row-head">
+            <span class="field-label">Latest CLI token</span>
+            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="issuedCliToken" data-copy-label="CLI token">Copy</button>
+          </div>
+          <div class="command-shell token-output" id="issuedCliToken">Issue a CLI token from this dashboard.</div>
+          <div class="form-note" id="cliTokenMeta">CLI tokens are shown once, scoped to your account, and expire after 30 days.</div>
         </div>
 
         <div class="status" id="status" data-tone="info" aria-live="polite">Loading workspace signals...</div>
+        <button id="signOutBtn" class="ghost-button" type="button" data-action="sign-out">Sign out</button>
       </aside>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">CLI onboarding</div>
-          <h2>Install and connect the CLI</h2>
-        </div>
-        <div class="section-copy">Ask the operator for the closed beta CLI bundle, unpack it, then run the bundled commands from that directory. The bundle includes the local apply runner assets.</div>
-      </div>
-
-      <div class="command-grid">
-        <article class="command-card">
-          <span class="field-label">1. Unpack beta bundle</span>
-          <div class="command-shell" id="installCommand">tar -xzf agentopt-&lt;version&gt;-&lt;os&gt;-&lt;arch&gt;.tar.gz && cd agentopt-&lt;version&gt;-&lt;os&gt;-&lt;arch&gt;</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="installCommand" data-copy-label="install command">Copy</button>
-          </div>
-        </article>
-        <article class="command-card">
-          <span class="field-label">2. Authenticate</span>
-          <div class="command-shell" id="loginCommand">./agentopt login --server http://127.0.0.1:8082</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="loginCommand" data-copy-label="login command">Copy</button>
-          </div>
-        </article>
-        <article class="command-card">
-          <span class="field-label">3. Connect workspace</span>
-          <div class="command-shell" id="connectCommand">./agentopt connect --project demo-repo --repo-path .</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="connectCommand" data-copy-label="connect command">Copy</button>
-          </div>
-        </article>
-        <article class="command-card">
-          <span class="field-label">4. Upload latest signals</span>
-          <div class="command-shell" id="uploadCommand">./agentopt snapshot && ./agentopt session --recent 1</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="uploadCommand" data-copy-label="upload command">Copy</button>
-          </div>
-        </article>
-        <article class="command-card">
-          <span class="field-label">5. Check queue</span>
-          <div class="command-shell" id="pendingCommand">./agentopt pending</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="pendingCommand" data-copy-label="pending command">Copy</button>
-          </div>
-        </article>
-        <article class="command-card">
-          <span class="field-label">6. Apply approved plan</span>
-          <div class="command-shell" id="syncCommand">./agentopt sync</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="syncCommand" data-copy-label="sync command">Copy</button>
-          </div>
-        </article>
-        <article class="command-card">
-          <span class="field-label">7. Latest CLI token</span>
-          <div class="command-shell token-output" id="issuedCliToken">Issue a CLI token from this dashboard.</div>
-          <div class="command-actions">
-            <button class="secondary-button" type="button" data-action="copy-command" data-copy-target="issuedCliToken" data-copy-label="CLI token">Copy</button>
-          </div>
-        </article>
-      </div>
-
-      <div class="form-note" id="cliTokenMeta">CLI tokens are shown once, scoped to your account, and expire after 30 days. Run the bundled `./agentopt` binary from the unpacked beta directory so local apply can find `tools/codex-runner`.</div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <div>
-          <div class="section-kicker">CLI tokens</div>
-          <h2>Manage issued CLI access</h2>
-        </div>
-        <div class="section-copy">Active CLI tokens stay separate from your browser session. Revoke any token that should no longer authenticate local devices.</div>
-      </div>
-      <div class="list" id="cliTokenList"></div>
-    </section>
-
-    <section class="summary-grid">
-      <article class="summary-card">
-        <div class="summary-label">Shared Workspace</div>
-        <div class="summary-value" id="totalProjects">0</div>
-        <div class="summary-caption">All connected repositories now share one rollout and recommendation stream.</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">Needs Your Decision</div>
-        <div class="summary-value" id="pendingReviewCount">0</div>
-        <div class="summary-caption">Suggested changes still waiting for approval.</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">Ready On Your Devices</div>
-        <div class="summary-value" id="approvedQueueCount">0</div>
-        <div class="summary-caption">Approved plans that the CLI can apply on its next sync.</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">Avg Input Tokens / Query</div>
-        <div class="summary-value" id="avgInputTokensPerQuery">0</div>
-        <div class="summary-caption">Prompt-side token usage captured from local CLI sessions.</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">Avg Output Tokens / Query</div>
-        <div class="summary-value" id="avgOutputTokensPerQuery">0</div>
-        <div class="summary-caption">Response-side token usage captured from local CLI sessions.</div>
-      </article>
-    </section>
-
-    <section class="context-bar" id="overviewNarrative">
-      Recommendations will sharpen after a few more sessions and setup snapshots.
     </section>
 
     <nav class="dashboard-nav" aria-label="Dashboard views">
@@ -1339,7 +1350,7 @@
       const origin = window.location.origin || "http://127.0.0.1:8082";
       $("installCommand").textContent = "tar -xzf agentopt-<version>-<os>-<arch>.tar.gz && cd agentopt-<version>-<os>-<arch>";
       $("loginCommand").textContent = `./agentopt login --server ${origin}`;
-      $("connectCommand").textContent = "./agentopt connect --project demo-repo --repo-path .";
+      $("connectCommand").textContent = "./agentopt connect --repo-path .";
       $("uploadCommand").textContent = "./agentopt snapshot && ./agentopt session --recent 1";
       $("pendingCommand").textContent = "./agentopt pending";
       $("syncCommand").textContent = "./agentopt sync";
@@ -1831,7 +1842,7 @@
       if (!workspace) {
         $("workspaceSummary").innerHTML = emptyState(
           "No workspace connected",
-          "Run `agentopt connect --project <repo-name> --repo-path .` once from the CLI to start the shared workspace."
+          "Run `agentopt connect --repo-path .` once from the CLI to start the shared workspace."
         );
         return;
       }

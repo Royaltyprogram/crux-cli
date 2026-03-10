@@ -63,11 +63,11 @@ go run ./cmd/agentopt login --server http://127.0.0.1:8082
 
 closed beta 배포에서는 위 demo 계정을 쓰지 않고, 서버 기동 시 `AUTH_BOOTSTRAP_USERS_JSON`으로 베타 사용자 계정을 주입해야 한다.
 
-## 4. 프로젝트 연결
+## 4. 워크스페이스 연결
 
 ```bash
-go run ./cmd/agentopt connect --project demo-repo --repo-path .
-go run ./cmd/agentopt projects
+go run ./cmd/agentopt connect --repo-path .
+go run ./cmd/agentopt workspace
 ```
 
 MVP에서는 여러 프로젝트를 나눠 관리하지 않는다. 연결된 모든 저장소는 같은 shared workspace로 합쳐진다.
@@ -131,7 +131,7 @@ go run ./cmd/agentopt impact
 ## 8. 자주 쓰는 점검 커맨드
 
 ```bash
-go run ./cmd/agentopt projects
+go run ./cmd/agentopt workspace
 go run ./cmd/agentopt status
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt pending
@@ -166,13 +166,13 @@ make mock-e2e
 
 ```bash
 cat $AGENTOPT_HOME/state.json
-go run ./cmd/agentopt projects
+go run ./cmd/agentopt workspace
 ```
 
 문제가 있으면 다시 connect해서 shared workspace 상태를 새로 고정:
 
 ```bash
-go run ./cmd/agentopt connect --project demo-repo --repo-path .
+go run ./cmd/agentopt connect --repo-path .
 go run ./cmd/agentopt pending
 go run ./cmd/agentopt sync
 ```

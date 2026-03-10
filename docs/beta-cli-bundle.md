@@ -17,7 +17,7 @@ Run the bundled CLI from this directory so the local apply runner stays adjacent
 ```bash
 ./agentopt version
 ./agentopt login --server http://127.0.0.1:8082
-./agentopt connect --project demo-repo --repo-path .
+./agentopt connect --repo-path .
 ./agentopt snapshot
 ./agentopt session --recent 1
 ./agentopt pending

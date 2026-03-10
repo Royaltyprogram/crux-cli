@@ -61,7 +61,6 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 	captureStdout(t, func() {
 		require.NoError(t, run([]string{
 			"connect",
-			"--project", "mock-e2e",
 			"--repo-path", workspace,
 		}))
 	})
@@ -86,11 +85,12 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 
 	st, err := loadState()
 	require.NoError(t, err)
-	require.NotEmpty(t, st.ProjectID)
+	require.NotEmpty(t, st.WorkspaceID)
 	require.Equal(t, "demo-user", st.UserID)
+	workspaceID := st.workspaceID()
 
 	recommendations := dashboardGetJSON[response.RecommendationListResp](t, dashboardClient, serverURL, "/api/v1/recommendations", url.Values{
-		"project_id": []string{st.ProjectID},
+		"project_id": []string{workspaceID},
 	})
 	require.NotEmpty(t, recommendations.Items)
 	require.Equal(t, "AGENTS.md", recommendations.Items[0].ChangePlan[0].TargetFile)
@@ -111,7 +111,7 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 	require.Equal(t, "approved_for_local_apply", reviewResp.Status)
 
 	pendingBeforeSync := dashboardGetJSON[response.PendingApplyResp](t, dashboardClient, serverURL, "/api/v1/applies/pending", url.Values{
-		"project_id": []string{st.ProjectID},
+		"project_id": []string{workspaceID},
 		"user_id":    []string{st.UserID},
 	})
 	require.Len(t, pendingBeforeSync.Items, 1)
@@ -146,14 +146,14 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 	require.Contains(t, string(agentsAfterSync), "## AgentOpt Personal Instruction Pack")
 
 	historyAfterSync := dashboardGetJSON[response.ApplyHistoryResp](t, dashboardClient, serverURL, "/api/v1/applies", url.Values{
-		"project_id": []string{st.ProjectID},
+		"project_id": []string{workspaceID},
 	})
 	require.NotEmpty(t, historyAfterSync.Items)
 	require.Equal(t, "applied", historyAfterSync.Items[0].Status)
 	require.Equal(t, canonicalTestPath(t, agentsPath), canonicalTestPath(t, historyAfterSync.Items[0].AppliedFile))
 
 	pendingAfterSync := dashboardGetJSON[response.PendingApplyResp](t, dashboardClient, serverURL, "/api/v1/applies/pending", url.Values{
-		"project_id": []string{st.ProjectID},
+		"project_id": []string{workspaceID},
 		"user_id":    []string{st.UserID},
 	})
 	require.Empty(t, pendingAfterSync.Items)
@@ -171,7 +171,7 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 	require.Equal(t, originalAgents, string(agentsAfterRollback))
 
 	historyAfterRollback := dashboardGetJSON[response.ApplyHistoryResp](t, dashboardClient, serverURL, "/api/v1/applies", url.Values{
-		"project_id": []string{st.ProjectID},
+		"project_id": []string{workspaceID},
 	})
 	require.NotEmpty(t, historyAfterRollback.Items)
 	require.Equal(t, "rollback_confirmed", historyAfterRollback.Items[0].Status)

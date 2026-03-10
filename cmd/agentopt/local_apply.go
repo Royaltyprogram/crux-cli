@@ -18,13 +18,25 @@ import (
 
 type applyBackup struct {
 	ApplyID        string            `json:"apply_id"`
-	ProjectID      string            `json:"project_id"`
+	WorkspaceID    string            `json:"workspace_id,omitempty"`
 	Files          []applyFileBackup `json:"files"`
 	FilePath       string            `json:"file_path"`
 	FileKind       string            `json:"file_kind"`
 	OriginalExists bool              `json:"original_exists"`
 	OriginalJSON   map[string]any    `json:"original_json"`
 	OriginalText   string            `json:"original_text"`
+}
+
+type applyBackupDisk struct {
+	ApplyID         string            `json:"apply_id"`
+	WorkspaceID     string            `json:"workspace_id,omitempty"`
+	LegacyProjectID string            `json:"project_id,omitempty"`
+	Files           []applyFileBackup `json:"files"`
+	FilePath        string            `json:"file_path"`
+	FileKind        string            `json:"file_kind"`
+	OriginalExists  bool              `json:"original_exists"`
+	OriginalJSON    map[string]any    `json:"original_json"`
+	OriginalText    string            `json:"original_text"`
 }
 
 type applyFileBackup struct {
@@ -129,9 +141,9 @@ func executeLocalApply(st state, applyID string, previews []response.PatchPrevie
 	}
 
 	if err := saveApplyBackup(applyBackup{
-		ApplyID:   applyID,
-		ProjectID: st.ProjectID,
-		Files:     backups,
+		ApplyID:     applyID,
+		WorkspaceID: st.workspaceID(),
+		Files:       backups,
 	}); err != nil {
 		restoreErr := rollbackAppliedSteps(backups)
 		if restoreErr != nil {
@@ -636,7 +648,16 @@ func saveApplyBackup(backup applyBackup) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(backup, "", "  ")
+	data, err := json.MarshalIndent(applyBackupDisk{
+		ApplyID:        backup.ApplyID,
+		WorkspaceID:    backup.WorkspaceID,
+		Files:          backup.Files,
+		FilePath:       backup.FilePath,
+		FileKind:       backup.FileKind,
+		OriginalExists: backup.OriginalExists,
+		OriginalJSON:   backup.OriginalJSON,
+		OriginalText:   backup.OriginalText,
+	}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -656,9 +677,19 @@ func loadApplyBackup(applyID string) (applyBackup, error) {
 		}
 		return applyBackup{}, err
 	}
-	var backup applyBackup
-	if err := json.Unmarshal(data, &backup); err != nil {
+	var disk applyBackupDisk
+	if err := json.Unmarshal(data, &disk); err != nil {
 		return applyBackup{}, err
+	}
+	backup := applyBackup{
+		ApplyID:        disk.ApplyID,
+		WorkspaceID:    firstNonEmpty(disk.WorkspaceID, disk.LegacyProjectID),
+		Files:          disk.Files,
+		FilePath:       disk.FilePath,
+		FileKind:       disk.FileKind,
+		OriginalExists: disk.OriginalExists,
+		OriginalJSON:   disk.OriginalJSON,
+		OriginalText:   disk.OriginalText,
 	}
 	backup.Files = normalizeApplyBackupFiles(backup)
 	return backup, nil

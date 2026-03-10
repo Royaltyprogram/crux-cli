@@ -29,8 +29,8 @@ From another shell, run the CLI against the local server:
 
 ```bash
 go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_DASHBOARD>
-go run ./cmd/agentopt connect --project demo-repo --repo-path .
-go run ./cmd/agentopt projects
+go run ./cmd/agentopt connect --repo-path .
+go run ./cmd/agentopt workspace
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
 go run ./cmd/agentopt recommendations
