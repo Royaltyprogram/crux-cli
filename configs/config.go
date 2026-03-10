@@ -17,13 +17,14 @@ import (
 )
 
 type Config struct {
-	App   App          `koanf:"App"`
-	DB    DB           `koanf:"DB"`
-	Redis Redis        `koanf:"Redis"`
-	Log   xslog.Config `koanf:"Log"`
-	Jwt   Jwt          `koanf:"Jwt"`
-	Auth  Auth         `koanf:"Auth"`
-	HTTP  HTTP         `koanf:"HTTP"`
+	App    App          `koanf:"App"`
+	DB     DB           `koanf:"DB"`
+	Redis  Redis        `koanf:"Redis"`
+	Log    xslog.Config `koanf:"Log"`
+	Jwt    Jwt          `koanf:"Jwt"`
+	Auth   Auth         `koanf:"Auth"`
+	HTTP   HTTP         `koanf:"HTTP"`
+	OpenAI OpenAI       `koanf:"OpenAI"`
 }
 
 type App struct {
@@ -74,6 +75,12 @@ type HTTP struct {
 	TrustedProxyCIDRs  []string `koanf:"TrustedProxyCIDRs"`
 	RateLimitPerMinute int      `koanf:"RateLimitPerMinute"`
 	LogToStdout        bool     `koanf:"LogToStdout"`
+}
+
+type OpenAI struct {
+	APIKey         string `koanf:"APIKey"`
+	BaseURL        string `koanf:"BaseURL"`
+	ResponsesModel string `koanf:"ResponsesModel"`
 }
 
 func (c *Config) IsDebugMode() bool {
@@ -282,6 +289,22 @@ func applyEnvOverrides(cfg *Config) error {
 			return fmt.Errorf("invalid HTTP_LOG_TO_STDOUT: %w", err)
 		}
 		cfg.HTTP.LogToStdout = parsed
+	}
+	if value, ok := lookupEnv("OPENAI_API_KEY"); ok {
+		cfg.OpenAI.APIKey = value
+	}
+	if value, ok := lookupEnv("OPENAI_API_KEY_FILE"); ok {
+		secret, err := readSecretFile(value)
+		if err != nil {
+			return fmt.Errorf("invalid OPENAI_API_KEY_FILE: %w", err)
+		}
+		cfg.OpenAI.APIKey = secret
+	}
+	if value, ok := lookupEnv("OPENAI_BASE_URL"); ok {
+		cfg.OpenAI.BaseURL = value
+	}
+	if value, ok := lookupEnv("OPENAI_RESPONSES_MODEL"); ok {
+		cfg.OpenAI.ResponsesModel = value
 	}
 	return nil
 }

@@ -57,23 +57,32 @@ func TestApplyEnvOverridesLoadsSecretsFromFiles(t *testing.T) {
 	apiTokenFile := filepath.Join(root, "api-token")
 	dbDSNFile := filepath.Join(root, "db-dsn")
 	jwtSecretFile := filepath.Join(root, "jwt-secret")
+	openAIAPIKeyFile := filepath.Join(root, "openai-api-key")
 
 	require.NoError(t, os.WriteFile(apiTokenFile, []byte("beta-static-token\n"), 0o644))
 	require.NoError(t, os.WriteFile(dbDSNFile, []byte("file:agentopt.db?_fk=1\n"), 0o644))
 	require.NoError(t, os.WriteFile(jwtSecretFile, []byte("super-secret\n"), 0o644))
+	require.NoError(t, os.WriteFile(openAIAPIKeyFile, []byte("openai-secret\n"), 0o644))
 
 	t.Setenv("APP_API_TOKEN", "env-token")
 	t.Setenv("DB_DSN", "env-dsn")
 	t.Setenv("JWT_SECRET", "env-secret")
+	t.Setenv("OPENAI_API_KEY", "env-openai-key")
 	t.Setenv("APP_API_TOKEN_FILE", apiTokenFile)
 	t.Setenv("DB_DSN_FILE", dbDSNFile)
 	t.Setenv("JWT_SECRET_FILE", jwtSecretFile)
+	t.Setenv("OPENAI_API_KEY_FILE", openAIAPIKeyFile)
+	t.Setenv("OPENAI_BASE_URL", "https://example-proxy.invalid/v1")
+	t.Setenv("OPENAI_RESPONSES_MODEL", "gpt-5.4")
 
 	cfg := &Config{}
 	require.NoError(t, applyEnvOverrides(cfg))
 	require.Equal(t, "beta-static-token", cfg.App.APIToken)
 	require.Equal(t, "file:agentopt.db?_fk=1", cfg.DB.DSN)
 	require.Equal(t, "super-secret", cfg.Jwt.Secret)
+	require.Equal(t, "openai-secret", cfg.OpenAI.APIKey)
+	require.Equal(t, "https://example-proxy.invalid/v1", cfg.OpenAI.BaseURL)
+	require.Equal(t, "gpt-5.4", cfg.OpenAI.ResponsesModel)
 }
 
 func TestApplyEnvOverridesRejectsInvalidBootstrapUsersFile(t *testing.T) {

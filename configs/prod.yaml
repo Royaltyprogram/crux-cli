@@ -42,3 +42,8 @@ HTTP:
   TrustedProxyCIDRs: []
   RateLimitPerMinute: 60
   LogToStdout: true
+
+OpenAI:
+  APIKey: ""
+  BaseURL: ""
+  ResponsesModel: "gpt-5.4"

@@ -49,3 +49,8 @@ HTTP:
     - 10.0.0.0/8
   RateLimitPerMinute: 60
   LogToStdout: true
+
+OpenAI:
+  APIKey: ""
+  BaseURL: ""
+  ResponsesModel: "gpt-5.4"
