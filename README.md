@@ -180,6 +180,7 @@ And you can validate the latest bundle locally with:
 
 ```bash
 make verify-beta-bundle
+make verify-install-script
 ```
 
 To build a consolidated release index for the latest version across the manifests currently in `output/release`:
@@ -187,6 +188,18 @@ To build a consolidated release index for the latest version across the manifest
 ```bash
 make build-release-index
 ```
+
+To publish the built assets to GitHub Releases with the `gh` CLI:
+
+```bash
+VERSION_LABEL=0.1.0-beta.1 make publish-github-release
+```
+
+`publish-github-release` uploads the versioned bundle archives, checksums, per-platform manifests, and the consolidated release-index file.
+
+The GitHub Actions workflow can also publish automatically when you push a tag such as `0.1.0-beta.1`.
+
+If you use `workflow_dispatch` in GitHub Actions, you can now pass `version`, `draft`, `prerelease`, and `latest` inputs and reuse the same publish path without creating the tag first.
 
 To export or restore the live runtime store against the same `APP_MODE` / `DB_*` / secret-file env that the server uses:
 
@@ -204,6 +217,15 @@ The bundle itself contains:
 - the pinned Node dependencies required for local apply
 
 The bundled CLI also answers `./agentopt version`, and `make build` now embeds git version metadata into `output/agentopt`.
+
+For a one-command install from GitHub Releases:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+AGENTOPT_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+```
+
+The installer downloads the matching release bundle for the current platform, installs it under `~/.local/share/agentopt/<version>`, and writes `~/.local/bin/agentopt`.
 
 ## Container Deploy
 

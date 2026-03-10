@@ -12,6 +12,15 @@ This bundle includes:
 - `tools/codex-runner/run.mjs`
 - the pinned Node dependencies required for local apply
 
+One-command install is available for GitHub Releases:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+AGENTOPT_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+```
+
+The installer downloads the matching release bundle for the current OS and architecture, installs it under `~/.local/share/agentopt/<version>`, and writes a wrapper to `~/.local/bin/agentopt`.
+
 Run the bundled CLI from this directory so the local apply runner stays adjacent to the binary:
 
 ```bash

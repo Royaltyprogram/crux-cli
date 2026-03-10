@@ -4,7 +4,33 @@ on:
   push:
     branches:
       - main
+    tags:
+      - '*'
   pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag or version label to build and publish
+        required: false
+        type: string
+      draft:
+        description: Publish as a draft release
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: Publish as a prerelease
+        required: false
+        default: true
+        type: boolean
+      latest:
+        description: Mark the release as latest
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
 
 jobs:
   verify:
@@ -142,6 +168,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION_LABEL: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.event.inputs.version || '' }}
         run: make beta-cli-bundle
 
       - name: Verify beta bundle
@@ -174,6 +201,8 @@ jobs:
           merge-multiple: true
 
       - name: Build release index
+        env:
+          VERSION_LABEL: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.event.inputs.version || '' }}
         run: make build-release-index
 
       - name: Upload release index artifact
@@ -184,3 +213,36 @@ jobs:
             output/release/*.release-index.json
             output/release/*.release-index.json.sha256
           if-no-files-found: error
+
+  publish-release:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    needs: release-index
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download beta bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: output/release
+          pattern: agentopt-beta-bundle-*-${{ github.sha }}
+          merge-multiple: true
+
+      - name: Download release index artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: output/release
+          pattern: agentopt-beta-release-index-${{ github.sha }}
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_LABEL: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.event.inputs.version || '' }}
+          DRAFT: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.draft == 'true' && '1' || '0') || '' }}
+          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.prerelease == 'true' && '1' || '0') || '' }}
+          LATEST_MODE: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.latest == 'true' && 'true' || 'false') || '' }}
+        run: make publish-github-release

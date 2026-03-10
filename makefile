@@ -34,6 +34,7 @@ ci-beta:
 	$(MAKE) build
 	$(MAKE) beta-cli-bundle
 	$(MAKE) verify-beta-bundle
+	$(MAKE) verify-install-script
 
 beta-cli-bundle:
 	./scripts/build_beta_bundle.sh
@@ -41,8 +42,14 @@ beta-cli-bundle:
 verify-beta-bundle:
 	./scripts/verify_beta_bundle.sh "$(BUNDLE)"
 
+verify-install-script:
+	./scripts/verify_install_script.sh "$(BUNDLE)"
+
 build-release-index:
 	./scripts/build_release_index.sh "$(RELEASE_DIR)" "$(VERSION_LABEL)"
+
+publish-github-release:
+	./scripts/publish_github_release.sh
 
 store-export: build
 	./output/agentopt store-export --output "$(OUTPUT)"

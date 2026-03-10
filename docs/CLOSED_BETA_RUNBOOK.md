@@ -62,6 +62,15 @@ Notes:
 - Prefer the bundled `./agentopt` binary for `autoupload`; do not rely on `go run` for long-lived beta machine setup.
 - The background job runs `agentopt collect` on each interval.
 
+For beta users who should install from GitHub Releases instead of an unpacked bundle:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+AGENTOPT_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+```
+
+The installer downloads the matching release bundle, installs it under `~/.local/share/agentopt/<version>`, and writes a wrapper to `~/.local/bin/agentopt`.
+
 ## 2. Local Verification
 
 Run the fast confidence checks:
@@ -183,7 +192,9 @@ If your working tree is clean, build the release artifacts directly:
 ```bash
 make beta-cli-bundle
 make verify-beta-bundle
+make verify-install-script
 make build-release-index
+VERSION_LABEL=0.1.0-beta.1 make publish-github-release
 ```
 
 Output:
@@ -193,6 +204,12 @@ Output:
 - `output/release/agentopt-<version>-<os>-<arch>.json`
 - `output/release/agentopt-<version>.release-index.json`
 - `output/release/agentopt-<version>.release-index.json.sha256`
+
+`publish-github-release` expects the `gh` CLI to be authenticated and uploads those assets to the matching GitHub Release tag.
+
+The GitHub Actions beta workflow is also wired to publish the release automatically on tag pushes.
+
+For manual GitHub Actions runs, `workflow_dispatch` now accepts `version`, `draft`, `prerelease`, and `latest` inputs so you can build and publish the same release flow without pushing the tag first.
 
 If your working tree is dirty but you want a clean release candidate from `HEAD`, use a temporary worktree:
 
@@ -230,7 +247,7 @@ Run this before handing the build to beta users:
 2. `go test ./...` passes.
 3. `make mock-e2e` passes.
 4. `make closed-beta-prod-smoke` passes.
-5. `make beta-cli-bundle` and `make verify-beta-bundle` pass.
+5. `make beta-cli-bundle`, `make verify-beta-bundle`, and `make verify-install-script` pass.
 6. The release bundle contains `agentopt` and `tools/codex-runner`.
 7. Runtime secrets are mounted from files, not hardcoded.
 8. `GET /healthz` and `GET /readyz` respond successfully in the target environment.
