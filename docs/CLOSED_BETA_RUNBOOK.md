@@ -94,6 +94,16 @@ Run the real `APP_MODE=prod` smoke locally:
 make closed-beta-prod-smoke
 ```
 
+Run the same smoke against the ignored local secret files under `secrets/` and require the research agent to use the live OpenAI path:
+
+```bash
+JWT_SECRET_FILE_OVERRIDE=secrets/agentopt-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/agentopt-beta-users.json \
+OPENAI_API_KEY_FILE_OVERRIDE=secrets/agentopt-openai-api-key \
+EXPECT_RESEARCH_MODE=openai_responses_api \
+make closed-beta-prod-smoke
+```
+
 Run the full beta CI-equivalent path locally:
 
 ```bash
@@ -109,12 +119,14 @@ Preferred runtime secret inputs:
 - `JWT_SECRET_FILE`
 - `AUTH_BOOTSTRAP_USERS_FILE`
 - `DB_DSN_FILE` if using MySQL
+- `OPENAI_API_KEY` or `OPENAI_API_KEY_FILE` for the cloud research agent
 - `HTTP_ALLOWED_CIDRS`
 - `HTTP_TRUSTED_PROXY_CIDRS`
 
 Supported file-based secret envs:
 
 - `JWT_SECRET_FILE`
+- `OPENAI_API_KEY_FILE`
 - `DB_DSN_FILE`
 - `APP_API_TOKEN_FILE`
 - `AUTH_BOOTSTRAP_USERS_FILE`
@@ -132,6 +144,7 @@ Run the server in `prod` mode with secret files:
 APP_MODE=prod \
 JWT_SECRET_FILE=/run/secrets/agentopt-jwt-secret \
 AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/agentopt-beta-users.json \
+OPENAI_API_KEY_FILE=/run/secrets/agentopt-openai-api-key \
 go run .
 ```
 

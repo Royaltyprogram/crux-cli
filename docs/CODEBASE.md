@@ -14,9 +14,9 @@ It has four runtime surfaces:
 
 2. `Cloud Research Agent`
    - lives in the server process for now
-   - analyzes token usage, raw query history, and config snapshots
+   - samples uploaded raw query history and synthesizes instructions with the OpenAI Responses API
    - emits ranked instruction recommendations with structured change plans
-   - is currently a local personal-usage MVP, not a live API integration
+   - falls back to a local heuristic generator when the OpenAI API is not configured
 
 3. `AIops Server`
    - exposes auth, ingestion, review, execution, dashboard, and audit APIs
@@ -105,7 +105,7 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`.
 - [analytics_store.go](/Users/doyechan/Desktop/codes/aiops/service/analytics_store.go)
 - [research_agent.go](/Users/doyechan/Desktop/codes/aiops/service/research_agent.go)
 
-`AnalyticsService` owns the main product flow. `CloudResearchAgent` is a local MVP analyzer that currently derives instruction recommendations from uploaded usage history.
+`AnalyticsService` owns the main product flow. `CloudResearchAgent` samples uploaded raw queries, asks the OpenAI Responses API for a reusable instruction pack, and falls back to a local heuristic when the API is unavailable.
 
 ### DTOs
 

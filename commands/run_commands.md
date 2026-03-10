@@ -22,6 +22,17 @@ demo@example.com
 demo1234
 ```
 
+prod-like secret-file 실행:
+
+```bash
+cd /Users/doyechan/Desktop/codes/aiops
+APP_MODE=prod \
+JWT_SECRET_FILE=secrets/agentopt-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE=secrets/agentopt-beta-users.json \
+OPENAI_API_KEY_FILE=secrets/agentopt-openai-api-key \
+go run main.go wire_gen.go
+```
+
 ## 2. CLI 상태를 테스트용으로 분리
 
 ```bash
@@ -172,6 +183,19 @@ make mock-e2e
 ```
 
 이 테스트는 real Codex API 대신 stub runner를 써서 백엔드-로컬 에이전트 연계만 검증한다.
+
+## 8-3. prod secret-file E2E smoke
+
+ignored local secret files를 사용해서 closed beta prod 경로를 실제로 태운다.
+
+```bash
+cd /Users/doyechan/Desktop/codes/aiops
+JWT_SECRET_FILE_OVERRIDE=secrets/agentopt-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/agentopt-beta-users.json \
+OPENAI_API_KEY_FILE_OVERRIDE=secrets/agentopt-openai-api-key \
+EXPECT_RESEARCH_MODE=openai_responses_api \
+make closed-beta-prod-smoke
+```
 
 ## 9. 문제 생겼을 때 복구
 

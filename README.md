@@ -98,10 +98,12 @@ If you would rather mount a secret file than inline JSON in env, you can use:
 APP_MODE=prod \
 JWT_SECRET_FILE=/run/secrets/agentopt-jwt-secret \
 AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/agentopt-beta-users.json \
+OPENAI_API_KEY_FILE=/run/secrets/agentopt-openai-api-key \
 go run .
 ```
 
 Supported secret file envs now include `JWT_SECRET_FILE`, `DB_DSN_FILE`, `APP_API_TOKEN_FILE`, and `AUTH_BOOTSTRAP_USERS_FILE`. File-based values override the plain env form when both are set.
+`OPENAI_API_KEY_FILE` is also supported for the cloud research agent.
 
 Bootstrap users are now treated as managed closed beta identities: removing a user from the bootstrap file revokes their existing tokens, and rotating a bootstrap password revokes prior sessions so the new credential takes effect immediately.
 
@@ -160,6 +162,16 @@ make ci-beta
 To exercise the real `APP_MODE=prod` path locally with file-based secrets and a temp SQLite database:
 
 ```bash
+make closed-beta-prod-smoke
+```
+
+To force that smoke test to use the ignored local secret files in `secrets/` and verify live OpenAI-backed recommendation generation:
+
+```bash
+JWT_SECRET_FILE_OVERRIDE=secrets/agentopt-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/agentopt-beta-users.json \
+OPENAI_API_KEY_FILE_OVERRIDE=secrets/agentopt-openai-api-key \
+EXPECT_RESEARCH_MODE=openai_responses_api \
 make closed-beta-prod-smoke
 ```
 
@@ -283,10 +295,10 @@ If `HTTP_TRUSTED_PROXY_CIDRS` is empty, AgentOpt only trusts the direct socket r
 
 The cloud research agent is intentionally narrow in this MVP:
 
-- provider metadata is surfaced as `local`
-- no live OpenAI API call or web search is made yet
-- recommendation generation only looks at uploaded token usage and raw query history
-- recommendation output is limited to instruction/custom-rule suggestions for now
+- recommendation generation samples up to 10 uploaded raw queries and sends them to the OpenAI Responses API
+- recommendation output is still limited to instruction/custom-rule suggestions for now
 - the local executor now enforces a strict file allowlist before any approved plan is applied
 - the local executor can now apply and roll back multi-step plans across allowlisted files
 - the actual local file edit step is delegated to `Codex SDK`, but the CLI still owns preflight, backup, result reporting, and rollback
+
+Set `OPENAI_API_KEY` on the server process to enable live recommendation generation. The config loader maps `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_RESPONSES_MODEL` into the `OpenAI` config section, and `OPENAI_API_KEY_FILE` is also supported for file-based secrets.
