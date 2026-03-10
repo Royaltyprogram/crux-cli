@@ -78,7 +78,6 @@ export AGENTOPT_HOME="$AGENTOPT_HOME_DIR"
   --platform "smoke/test" >/dev/null
 
 "$CLI_BIN" connect \
-  --project "closed-beta-smoke" \
   --repo-path "$WORKSPACE_DIR" >/dev/null
 
 "$CLI_BIN" snapshot >/dev/null
