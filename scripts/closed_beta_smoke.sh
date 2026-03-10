@@ -7,6 +7,7 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8082}"
 EMAIL="${BETA_SMOKE_EMAIL:-}"
 PASSWORD="${BETA_SMOKE_PASSWORD:-}"
 CLI_BIN="${CLI_BIN:-$ROOT_DIR/output/agentopt}"
+EXPECT_RESEARCH_MODE="${EXPECT_RESEARCH_MODE:-}"
 COOKIE_JAR="$(mktemp)"
 AGENTOPT_HOME_DIR="$(mktemp -d)"
 WORKSPACE_DIR="$(mktemp -d)"
@@ -82,6 +83,29 @@ export AGENTOPT_HOME="$AGENTOPT_HOME_DIR"
 
 "$CLI_BIN" snapshot >/dev/null
 "$CLI_BIN" session --file "$ROOT_DIR/examples/session-summary.json" >/dev/null
-"$CLI_BIN" recommendations >/dev/null
+recommendations_output="$("$CLI_BIN" recommendations)"
+
+if [[ -n "$EXPECT_RESEARCH_MODE" ]]; then
+  python3 - <<'PY' "$recommendations_output" "$EXPECT_RESEARCH_MODE"
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+expected = sys.argv[2]
+if isinstance(payload, dict) and "code" in payload:
+    if payload.get("code") != 0:
+        raise SystemExit(f"recommendations failed: {payload}")
+    data = payload.get("data") or {}
+else:
+    data = payload
+items = (data or {}).get("items") or []
+if not items:
+    raise SystemExit(f"recommendations missing items: {payload}")
+evidence = items[0].get("evidence") or []
+needle = f"generation_mode={expected}"
+if needle not in evidence:
+    raise SystemExit(f"expected {needle} in evidence, got {evidence}")
+PY
+fi
 
 echo "closed beta smoke passed"
