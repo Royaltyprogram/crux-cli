@@ -10,7 +10,7 @@ import (
 	"github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
 
-	"github.com/liushuangls/go-server-template/pkg/ecode"
+	"github.com/Royaltyprogram/aiops/pkg/ecode"
 )
 
 type Client struct {

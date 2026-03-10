@@ -13,11 +13,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/dto/request"
-	"github.com/liushuangls/go-server-template/dto/response"
-	"github.com/liushuangls/go-server-template/routes/controller"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/dto/request"
+	"github.com/Royaltyprogram/aiops/dto/response"
+	"github.com/Royaltyprogram/aiops/routes/controller"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 type testEnvelope struct {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/liushuangls/go-server-template/configs"
+	"github.com/Royaltyprogram/aiops/configs"
 )
 
 func TestDefaultAnalyticsStoreDSNUsesSQLiteFallback(t *testing.T) {

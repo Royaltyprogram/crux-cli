@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liushuangls/go-server-template/dto/request"
+	"github.com/Royaltyprogram/aiops/dto/request"
 )
 
 type codexSessionLine struct {

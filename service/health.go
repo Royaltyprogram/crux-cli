@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/liushuangls/go-server-template/dto/request"
-	"github.com/liushuangls/go-server-template/dto/response"
-	"github.com/liushuangls/go-server-template/pkg/buildinfo"
+	"github.com/Royaltyprogram/aiops/dto/request"
+	"github.com/Royaltyprogram/aiops/dto/response"
+	"github.com/Royaltyprogram/aiops/pkg/buildinfo"
 )
 
 type HealthService struct {

@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/dto/request"
-	"github.com/liushuangls/go-server-template/dto/response"
-	"github.com/liushuangls/go-server-template/pkg/buildinfo"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/dto/request"
+	"github.com/Royaltyprogram/aiops/dto/response"
+	"github.com/Royaltyprogram/aiops/pkg/buildinfo"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 type state struct {

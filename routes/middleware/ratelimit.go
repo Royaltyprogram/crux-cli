@@ -6,7 +6,7 @@ import (
 	"github.com/go-redis/redis_rate/v10"
 	"github.com/labstack/echo/v5"
 
-	"github.com/liushuangls/go-server-template/pkg/ecode"
+	"github.com/Royaltyprogram/aiops/pkg/ecode"
 )
 
 func RateLimitWithIP(limiter *redis_rate.Limiter, limit redis_rate.Limit, prefix string) echo.MiddlewareFunc {

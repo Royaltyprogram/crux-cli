@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-AGENTOPT_LDFLAGS = -X 'github.com/liushuangls/go-server-template/pkg/buildinfo.Version=$(VERSION)' -X 'github.com/liushuangls/go-server-template/pkg/buildinfo.Commit=$(GIT_COMMIT)' -X 'github.com/liushuangls/go-server-template/pkg/buildinfo.Date=$(BUILD_DATE)'
+AGENTOPT_LDFLAGS = -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Version=$(VERSION)' -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Commit=$(GIT_COMMIT)' -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Date=$(BUILD_DATE)'
 
 run:
 	APP_MODE=local go run main.go wire_gen.go
@@ -29,6 +29,7 @@ closed-beta-prod-smoke: build
 	./scripts/closed_beta_prod_smoke.sh
 
 ci-beta:
+	$(MAKE) generate
 	go test ./...
 	$(MAKE) build
 	$(MAKE) beta-cli-bundle

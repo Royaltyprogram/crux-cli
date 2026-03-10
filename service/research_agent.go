@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/liushuangls/go-server-template/configs"
+	"github.com/Royaltyprogram/aiops/configs"
 )
 
 type CloudResearchAgent struct {

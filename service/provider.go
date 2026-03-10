@@ -3,7 +3,7 @@ package service
 import (
 	"github.com/google/wire"
 
-	"github.com/liushuangls/go-server-template/configs"
+	"github.com/Royaltyprogram/aiops/configs"
 )
 
 var ProviderSet = wire.NewSet(

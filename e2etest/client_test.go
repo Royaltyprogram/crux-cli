@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/liushuangls/go-server-template/dto/response"
+	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
 type Envelope struct {

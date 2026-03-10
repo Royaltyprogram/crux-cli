@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liushuangls/go-server-template/pkg/buildinfo"
+	"github.com/Royaltyprogram/aiops/pkg/buildinfo"
 	"github.com/sourcegraph/conc"
 	"golang.org/x/sync/errgroup"
 )

@@ -12,8 +12,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/liushuangls/go-server-template/dto/request"
-	"github.com/liushuangls/go-server-template/dto/response"
+	"github.com/Royaltyprogram/aiops/dto/request"
+	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
 func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {

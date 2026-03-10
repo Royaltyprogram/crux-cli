@@ -72,7 +72,7 @@ jobs:
           path: |
             output/server
             output/agentopt
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Stop local server
         if: always()

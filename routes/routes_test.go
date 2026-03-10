@@ -12,12 +12,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/dto/request"
-	dtoresponse "github.com/liushuangls/go-server-template/dto/response"
-	"github.com/liushuangls/go-server-template/pkg/buildinfo"
-	"github.com/liushuangls/go-server-template/routes/controller"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/dto/request"
+	dtoresponse "github.com/Royaltyprogram/aiops/dto/response"
+	"github.com/Royaltyprogram/aiops/pkg/buildinfo"
+	"github.com/Royaltyprogram/aiops/routes/controller"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 func TestHealthzAndReadyzEndpoints(t *testing.T) {

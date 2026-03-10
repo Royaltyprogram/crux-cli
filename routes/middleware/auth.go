@@ -5,8 +5,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/liushuangls/go-server-template/pkg/ecode"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/pkg/ecode"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 const APIAuthHeader = "X-AgentOpt-Token"

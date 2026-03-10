@@ -25,7 +25,7 @@ if [[ ! -d "$RUNNER_DIR/node_modules" ]]; then
 fi
 
 (cd "$ROOT_DIR" && GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" go build \
-  -ldflags "-X github.com/liushuangls/go-server-template/pkg/buildinfo.Version=$VERSION_LABEL -X github.com/liushuangls/go-server-template/pkg/buildinfo.Commit=$GIT_COMMIT -X github.com/liushuangls/go-server-template/pkg/buildinfo.Date=$BUILD_DATE" \
+  -ldflags "-X github.com/Royaltyprogram/aiops/pkg/buildinfo.Version=$VERSION_LABEL -X github.com/Royaltyprogram/aiops/pkg/buildinfo.Commit=$GIT_COMMIT -X github.com/Royaltyprogram/aiops/pkg/buildinfo.Date=$BUILD_DATE" \
   -o "$STAGE_DIR/agentopt" ./cmd/agentopt)
 
 cp "$RUNNER_DIR/run.mjs" "$STAGE_DIR/tools/codex-runner/"

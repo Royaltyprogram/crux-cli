@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/liushuangls/go-server-template/configs"
+	"github.com/Royaltyprogram/aiops/configs"
 )
 
 func configureIPExtractor(e *echo.Echo, conf *configs.Config) error {

@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/pkg/xslog"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/pkg/xslog"
 )
 
 func NewDefaultSlog(conf *configs.Config) *slog.Logger {

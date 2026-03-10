@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liushuangls/go-server-template/dto/response"
+	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
 type applyBackup struct {

@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/dto/request"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/dto/request"
 )
 
 func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {

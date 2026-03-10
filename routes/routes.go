@@ -14,10 +14,10 @@ import (
 	echoMiddleware "github.com/labstack/echo/v5/middleware"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/routes/common"
-	"github.com/liushuangls/go-server-template/routes/middleware"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/routes/common"
+	"github.com/Royaltyprogram/aiops/routes/middleware"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 func NewEcho(conf *configs.Config, logger *slog.Logger, store *service.AnalyticsStore) (*echo.Echo, error) {

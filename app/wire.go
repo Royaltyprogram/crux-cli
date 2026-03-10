@@ -3,10 +3,10 @@ package cmd
 import (
 	"github.com/google/wire"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/crontab"
-	"github.com/liushuangls/go-server-template/routes"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/crontab"
+	"github.com/Royaltyprogram/aiops/routes"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 var ProviderSet = wire.NewSet(

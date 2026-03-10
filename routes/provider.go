@@ -6,8 +6,8 @@ import (
 	"github.com/google/wire"
 	"github.com/labstack/echo/v5"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/routes/controller"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/routes/controller"
 )
 
 var ProviderSet = wire.NewSet(

@@ -5,7 +5,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 
-	"github.com/liushuangls/go-server-template/pkg/entutil"
+	"github.com/Royaltyprogram/aiops/pkg/entutil"
 )
 
 // User holds the schema definition for the User entity.

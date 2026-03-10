@@ -8,10 +8,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/routes"
-	"github.com/liushuangls/go-server-template/routes/controller"
-	"github.com/liushuangls/go-server-template/service"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/routes"
+	"github.com/Royaltyprogram/aiops/routes/controller"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 func TestLandingRouteServesLandingPage(t *testing.T) {

@@ -1,4 +1,4 @@
-module github.com/liushuangls/go-server-template
+module github.com/Royaltyprogram/aiops
 
 go 1.25.0
 

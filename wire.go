@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/wire"
 
-	cmd2 "github.com/liushuangls/go-server-template/app"
-	"github.com/liushuangls/go-server-template/configs"
-	"github.com/liushuangls/go-server-template/crontab"
-	"github.com/liushuangls/go-server-template/routes"
-	"github.com/liushuangls/go-server-template/service"
+	cmd2 "github.com/Royaltyprogram/aiops/app"
+	"github.com/Royaltyprogram/aiops/configs"
+	"github.com/Royaltyprogram/aiops/crontab"
+	"github.com/Royaltyprogram/aiops/routes"
+	"github.com/Royaltyprogram/aiops/service"
 )
 
 func app(ctx context.Context) (*cmd2.App, func(), error) {

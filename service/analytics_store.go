@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liushuangls/go-server-template/configs"
+	"github.com/Royaltyprogram/aiops/configs"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/mattn/go-sqlite3"

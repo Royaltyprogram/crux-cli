@@ -13,7 +13,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 
-	"github.com/liushuangls/go-server-template/pkg/xslog"
+	"github.com/Royaltyprogram/aiops/pkg/xslog"
 )
 
 type Config struct {

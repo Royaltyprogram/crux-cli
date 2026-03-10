@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/liushuangls/go-server-template/pkg/ecode"
+	"github.com/Royaltyprogram/aiops/pkg/ecode"
 )
 
 type Resp struct {
