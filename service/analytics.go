@@ -613,13 +613,26 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 	}
 
 	summary := &SessionSummary{
-		ID:         sessionID,
-		ProjectID:  req.ProjectID,
-		Tool:       req.Tool,
-		TokenIn:    req.TokenIn,
-		TokenOut:   req.TokenOut,
-		RawQueries: cloneStringSlice(req.RawQueries),
-		Timestamp:  recordedAt,
+		ID:                     sessionID,
+		ProjectID:              req.ProjectID,
+		Tool:                   req.Tool,
+		TokenIn:                maxInt(req.TokenIn, 0),
+		TokenOut:               maxInt(req.TokenOut, 0),
+		CachedInputTokens:      maxInt(req.CachedInputTokens, 0),
+		ReasoningOutputTokens:  maxInt(req.ReasoningOutputTokens, 0),
+		FunctionCallCount:      maxInt(req.FunctionCallCount, 0),
+		ToolErrorCount:         maxInt(req.ToolErrorCount, 0),
+		SessionDurationMS:      maxInt(req.SessionDurationMS, 0),
+		ToolWallTimeMS:         maxInt(req.ToolWallTimeMS, 0),
+		ToolCalls:              cloneIntMap(req.ToolCalls),
+		ToolErrors:             cloneIntMap(req.ToolErrors),
+		ToolWallTimesMS:        cloneIntMap(req.ToolWallTimesMS),
+		RawQueries:             cloneStringSlice(req.RawQueries),
+		Models:                 cloneStringSlice(req.Models),
+		ModelProvider:          strings.TrimSpace(req.ModelProvider),
+		FirstResponseLatencyMS: maxInt(req.FirstResponseLatencyMS, 0),
+		AssistantResponses:     cloneStringSlice(req.AssistantResponses),
+		Timestamp:              recordedAt,
 	}
 
 	existingIndex := -1
@@ -679,13 +692,26 @@ func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *reques
 	items := make([]response.SessionSummaryItem, 0, len(s.AnalyticsStore.sessionSummaries[req.ProjectID]))
 	for _, session := range s.AnalyticsStore.sessionSummaries[req.ProjectID] {
 		items = append(items, response.SessionSummaryItem{
-			ID:         session.ID,
-			ProjectID:  session.ProjectID,
-			Tool:       session.Tool,
-			TokenIn:    session.TokenIn,
-			TokenOut:   session.TokenOut,
-			RawQueries: cloneStringSlice(session.RawQueries),
-			Timestamp:  session.Timestamp,
+			ID:                     session.ID,
+			ProjectID:              session.ProjectID,
+			Tool:                   session.Tool,
+			TokenIn:                session.TokenIn,
+			TokenOut:               session.TokenOut,
+			CachedInputTokens:      session.CachedInputTokens,
+			ReasoningOutputTokens:  session.ReasoningOutputTokens,
+			FunctionCallCount:      session.FunctionCallCount,
+			ToolErrorCount:         session.ToolErrorCount,
+			SessionDurationMS:      session.SessionDurationMS,
+			ToolWallTimeMS:         session.ToolWallTimeMS,
+			ToolCalls:              cloneIntMap(session.ToolCalls),
+			ToolErrors:             cloneIntMap(session.ToolErrors),
+			ToolWallTimesMS:        cloneIntMap(session.ToolWallTimesMS),
+			RawQueries:             cloneStringSlice(session.RawQueries),
+			Models:                 cloneStringSlice(session.Models),
+			ModelProvider:          session.ModelProvider,
+			FirstResponseLatencyMS: session.FirstResponseLatencyMS,
+			AssistantResponses:     cloneStringSlice(session.AssistantResponses),
+			Timestamp:              session.Timestamp,
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -840,6 +866,279 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		ResearchProvider:          s.researchAgent.Provider,
 		ResearchMode:              s.researchAgent.Mode,
 		LastIngestedAt:            lastIngestedAt,
+	}, nil
+}
+
+func (s *AnalyticsService) DashboardProjectInsights(ctx context.Context, req *request.DashboardProjectInsightsReq) (*response.DashboardProjectInsightsResp, error) {
+	s.AnalyticsStore.mu.RLock()
+	defer s.AnalyticsStore.mu.RUnlock()
+
+	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
+	req.ProjectID = project.ID
+
+	type projectInsightDayAccumulator struct {
+		point           *response.DashboardProjectInsightDayResp
+		latencyTotalMS  int
+		durationTotalMS int
+	}
+
+	pointsByDay := make(map[string]*projectInsightDayAccumulator)
+	modelCounts := make(map[string]int)
+	providerCounts := make(map[string]int)
+	toolCallCounts := make(map[string]int)
+	toolErrorCounts := make(map[string]int)
+	toolWallTimeMS := make(map[string]int)
+	toolSessionCounts := make(map[string]int)
+	knownModelSessions := 0
+	unknownModelSessions := 0
+	knownProviderSessions := 0
+	unknownProviderSessions := 0
+	knownLatencySessions := 0
+	unknownLatencySessions := 0
+	knownDurationSessions := 0
+	unknownDurationSessions := 0
+	totalLatencyMS := 0
+	totalDurationMS := 0
+	totalCachedInputTokens := 0
+	totalReasoningOutputTokens := 0
+	totalFunctionCalls := 0
+	totalToolErrors := 0
+	totalToolWallTimeMS := 0
+	sessionsWithFunctionCalls := 0
+	sessionsWithToolErrors := 0
+	totalSessions := len(s.AnalyticsStore.sessionSummaries[req.ProjectID])
+
+	ensureDay := func(day string) *projectInsightDayAccumulator {
+		if point, ok := pointsByDay[day]; ok {
+			return point
+		}
+		point := &projectInsightDayAccumulator{
+			point: &response.DashboardProjectInsightDayResp{Day: day},
+		}
+		pointsByDay[day] = point
+		return point
+	}
+
+	for _, session := range s.AnalyticsStore.sessionSummaries[req.ProjectID] {
+		day := session.Timestamp.UTC().Format("2006-01-02")
+		point := ensureDay(day)
+		point.point.SessionCount++
+		point.point.QueryCount += queryCountForSession(session)
+		point.point.InputTokens += session.TokenIn
+		point.point.OutputTokens += session.TokenOut
+		point.point.TotalTokens += session.TokenIn + session.TokenOut
+		point.point.CachedInputTokens += session.CachedInputTokens
+		point.point.ReasoningOutputTokens += session.ReasoningOutputTokens
+		point.point.FunctionCallCount += session.FunctionCallCount
+		point.point.ToolErrorCount += session.ToolErrorCount
+		point.point.ToolWallTimeMS += session.ToolWallTimeMS
+		totalCachedInputTokens += session.CachedInputTokens
+		totalReasoningOutputTokens += session.ReasoningOutputTokens
+		totalFunctionCalls += session.FunctionCallCount
+		totalToolErrors += session.ToolErrorCount
+		totalToolWallTimeMS += session.ToolWallTimeMS
+		if session.FunctionCallCount > 0 {
+			sessionsWithFunctionCalls++
+		}
+		if session.ToolErrorCount > 0 {
+			sessionsWithToolErrors++
+		}
+		seenToolsInSession := make(map[string]struct{})
+		for toolName, count := range session.ToolCalls {
+			toolName = strings.TrimSpace(toolName)
+			if toolName == "" || count <= 0 {
+				continue
+			}
+			toolCallCounts[toolName] += count
+			if _, ok := seenToolsInSession[toolName]; ok {
+				continue
+			}
+			seenToolsInSession[toolName] = struct{}{}
+			toolSessionCounts[toolName]++
+		}
+		for toolName, count := range session.ToolErrors {
+			toolName = strings.TrimSpace(toolName)
+			if toolName == "" || count <= 0 {
+				continue
+			}
+			toolErrorCounts[toolName] += count
+		}
+		for toolName, wallTimeMS := range session.ToolWallTimesMS {
+			toolName = strings.TrimSpace(toolName)
+			if toolName == "" || wallTimeMS <= 0 {
+				continue
+			}
+			toolWallTimeMS[toolName] += wallTimeMS
+		}
+
+		if session.FirstResponseLatencyMS > 0 {
+			knownLatencySessions++
+			totalLatencyMS += session.FirstResponseLatencyMS
+			point.point.LatencySessionCount++
+			point.latencyTotalMS += session.FirstResponseLatencyMS
+		} else {
+			unknownLatencySessions++
+		}
+		if session.SessionDurationMS > 0 {
+			knownDurationSessions++
+			totalDurationMS += session.SessionDurationMS
+			point.point.DurationSessionCount++
+			point.durationTotalMS += session.SessionDurationMS
+		} else {
+			unknownDurationSessions++
+		}
+
+		if provider := strings.TrimSpace(session.ModelProvider); provider != "" {
+			knownProviderSessions++
+			providerCounts[provider]++
+		} else {
+			unknownProviderSessions++
+		}
+
+		sessionModels := make(map[string]struct{})
+		for _, model := range session.Models {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+			sessionModels[model] = struct{}{}
+		}
+		if len(sessionModels) == 0 {
+			unknownModelSessions++
+			continue
+		}
+		knownModelSessions++
+		for model := range sessionModels {
+			modelCounts[model]++
+		}
+	}
+
+	for _, snapshot := range s.AnalyticsStore.configSnapshots[req.ProjectID] {
+		day := snapshot.CapturedAt.UTC().Format("2006-01-02")
+		ensureDay(day).point.SnapshotCount++
+	}
+
+	for _, audit := range s.AnalyticsStore.audits {
+		if audit == nil || audit.ProjectID != req.ProjectID {
+			continue
+		}
+		day := audit.CreatedAt.UTC().Format("2006-01-02")
+		point := ensureDay(day)
+		switch audit.Type {
+		case "change_plan.approved", "change_plan.auto_approved":
+			point.point.ApprovalCount++
+		case "execution.result":
+			switch strings.TrimSpace(audit.Message) {
+			case "rollback_confirmed":
+				point.point.RollbackCount++
+			case "applied":
+				point.point.AppliedCount++
+			}
+		}
+	}
+
+	days := make([]response.DashboardProjectInsightDayResp, 0, len(pointsByDay))
+	for _, point := range pointsByDay {
+		if point.point.LatencySessionCount > 0 {
+			point.point.AvgFirstResponseLatencyMS = int(math.Round(float64(point.latencyTotalMS) / float64(point.point.LatencySessionCount)))
+		}
+		if point.point.DurationSessionCount > 0 {
+			point.point.AvgSessionDurationMS = int(math.Round(float64(point.durationTotalMS) / float64(point.point.DurationSessionCount)))
+		}
+		days = append(days, *point.point)
+	}
+	sort.Slice(days, func(i, j int) bool {
+		return days[i].Day < days[j].Day
+	})
+
+	models := make([]response.DashboardProjectInsightModelResp, 0, len(modelCounts))
+	for model, count := range modelCounts {
+		models = append(models, response.DashboardProjectInsightModelResp{
+			Model:        model,
+			SessionCount: count,
+			Share:        safeDiv(float64(count), float64(maxInt(totalSessions, 1))),
+		})
+	}
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].SessionCount == models[j].SessionCount {
+			return models[i].Model < models[j].Model
+		}
+		return models[i].SessionCount > models[j].SessionCount
+	})
+
+	providers := make([]response.DashboardProjectInsightProviderResp, 0, len(providerCounts))
+	for provider, count := range providerCounts {
+		providers = append(providers, response.DashboardProjectInsightProviderResp{
+			Provider:     provider,
+			SessionCount: count,
+			Share:        safeDiv(float64(count), float64(maxInt(totalSessions, 1))),
+		})
+	}
+	sort.Slice(providers, func(i, j int) bool {
+		if providers[i].SessionCount == providers[j].SessionCount {
+			return providers[i].Provider < providers[j].Provider
+		}
+		return providers[i].SessionCount > providers[j].SessionCount
+	})
+
+	toolKeys := make(map[string]struct{}, len(toolCallCounts)+len(toolErrorCounts))
+	for toolName := range toolCallCounts {
+		toolKeys[toolName] = struct{}{}
+	}
+	for toolName := range toolErrorCounts {
+		toolKeys[toolName] = struct{}{}
+	}
+	tools := make([]response.DashboardProjectInsightToolResp, 0, len(toolKeys))
+	for toolName := range toolKeys {
+		count := toolCallCounts[toolName]
+		tools = append(tools, response.DashboardProjectInsightToolResp{
+			Tool:          toolName,
+			CallCount:     count,
+			ErrorCount:    toolErrorCounts[toolName],
+			ErrorRate:     safeDiv(float64(toolErrorCounts[toolName]), float64(maxInt(count, 1))),
+			WallTimeMS:    toolWallTimeMS[toolName],
+			AvgWallTimeMS: int(math.Round(safeDiv(float64(toolWallTimeMS[toolName]), float64(maxInt(count, 1))))),
+			SessionCount:  toolSessionCounts[toolName],
+			Share:         safeDiv(float64(count), float64(maxInt(totalFunctionCalls, 1))),
+		})
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		if tools[i].CallCount == tools[j].CallCount {
+			return tools[i].Tool < tools[j].Tool
+		}
+		return tools[i].CallCount > tools[j].CallCount
+	})
+
+	return &response.DashboardProjectInsightsResp{
+		ProjectID:                  req.ProjectID,
+		Days:                       days,
+		Models:                     models,
+		Providers:                  providers,
+		Tools:                      tools,
+		KnownModelSessions:         knownModelSessions,
+		UnknownModelSessions:       unknownModelSessions,
+		KnownProviderSessions:      knownProviderSessions,
+		UnknownProviderSessions:    unknownProviderSessions,
+		KnownLatencySessions:       knownLatencySessions,
+		UnknownLatencySessions:     unknownLatencySessions,
+		KnownDurationSessions:      knownDurationSessions,
+		UnknownDurationSessions:    unknownDurationSessions,
+		AvgFirstResponseLatencyMS:  int(math.Round(safeDiv(float64(totalLatencyMS), float64(maxInt(knownLatencySessions, 1))))),
+		AvgSessionDurationMS:       int(math.Round(safeDiv(float64(totalDurationMS), float64(maxInt(knownDurationSessions, 1))))),
+		TotalCachedInputTokens:     totalCachedInputTokens,
+		TotalReasoningOutputTokens: totalReasoningOutputTokens,
+		TotalFunctionCalls:         totalFunctionCalls,
+		TotalToolErrors:            totalToolErrors,
+		TotalToolWallTimeMS:        totalToolWallTimeMS,
+		AvgToolWallTimeMS:          int(math.Round(safeDiv(float64(totalToolWallTimeMS), float64(maxInt(totalFunctionCalls, 1))))),
+		SessionsWithFunctionCalls:  sessionsWithFunctionCalls,
+		SessionsWithToolErrors:     sessionsWithToolErrors,
 	}, nil
 }
 

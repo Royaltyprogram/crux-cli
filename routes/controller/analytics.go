@@ -46,6 +46,7 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.GET("/applies", r.applyHistory)
 	api.POST("/applies/result", r.reportApplyResult)
 	api.GET("/dashboard/overview", r.dashboardOverview)
+	api.GET("/dashboard/project-insights", r.dashboardProjectInsights)
 }
 
 func (r *AnalyticsRoute) login(c *echo.Context) error {
@@ -239,6 +240,14 @@ func (r *AnalyticsRoute) dashboardOverview(c *echo.Context) error {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.DashboardOverview(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) dashboardProjectInsights(c *echo.Context) error {
+	var req request.DashboardProjectInsightsReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.DashboardProjectInsights(c.Request().Context(), &req))
 }
 
 func buildSessionCookie(c *echo.Context, token string, expiresAt *time.Time) *http.Cookie {

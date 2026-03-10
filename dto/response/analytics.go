@@ -124,13 +124,26 @@ type SessionIngestResp struct {
 }
 
 type SessionSummaryItem struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"project_id"`
-	Tool       string    `json:"tool"`
-	TokenIn    int       `json:"token_in"`
-	TokenOut   int       `json:"token_out"`
-	RawQueries []string  `json:"raw_queries"`
-	Timestamp  time.Time `json:"timestamp"`
+	ID                     string         `json:"id"`
+	ProjectID              string         `json:"project_id"`
+	Tool                   string         `json:"tool"`
+	TokenIn                int            `json:"token_in"`
+	TokenOut               int            `json:"token_out"`
+	CachedInputTokens      int            `json:"cached_input_tokens"`
+	ReasoningOutputTokens  int            `json:"reasoning_output_tokens"`
+	FunctionCallCount      int            `json:"function_call_count"`
+	ToolErrorCount         int            `json:"tool_error_count"`
+	SessionDurationMS      int            `json:"session_duration_ms"`
+	ToolWallTimeMS         int            `json:"tool_wall_time_ms"`
+	ToolCalls              map[string]int `json:"tool_calls"`
+	ToolErrors             map[string]int `json:"tool_errors"`
+	ToolWallTimesMS        map[string]int `json:"tool_wall_times_ms"`
+	RawQueries             []string       `json:"raw_queries"`
+	Models                 []string       `json:"models"`
+	ModelProvider          string         `json:"model_provider"`
+	FirstResponseLatencyMS int            `json:"first_response_latency_ms"`
+	AssistantResponses     []string       `json:"assistant_responses"`
+	Timestamp              time.Time      `json:"timestamp"`
 }
 
 type SessionSummaryListResp struct {
@@ -347,4 +360,75 @@ type DashboardOverviewResp struct {
 	ResearchProvider          string     `json:"research_provider"`
 	ResearchMode              string     `json:"research_mode"`
 	LastIngestedAt            *time.Time `json:"last_ingested_at"`
+}
+
+type DashboardProjectInsightDayResp struct {
+	Day                       string `json:"day"`
+	SessionCount              int    `json:"session_count"`
+	QueryCount                int    `json:"query_count"`
+	InputTokens               int    `json:"input_tokens"`
+	OutputTokens              int    `json:"output_tokens"`
+	TotalTokens               int    `json:"total_tokens"`
+	CachedInputTokens         int    `json:"cached_input_tokens"`
+	ReasoningOutputTokens     int    `json:"reasoning_output_tokens"`
+	FunctionCallCount         int    `json:"function_call_count"`
+	ToolErrorCount            int    `json:"tool_error_count"`
+	ToolWallTimeMS            int    `json:"tool_wall_time_ms"`
+	ApprovalCount             int    `json:"approval_count"`
+	AppliedCount              int    `json:"applied_count"`
+	RollbackCount             int    `json:"rollback_count"`
+	SnapshotCount             int    `json:"snapshot_count"`
+	LatencySessionCount       int    `json:"latency_session_count"`
+	AvgFirstResponseLatencyMS int    `json:"avg_first_response_latency_ms"`
+	DurationSessionCount      int    `json:"duration_session_count"`
+	AvgSessionDurationMS      int    `json:"avg_session_duration_ms"`
+}
+
+type DashboardProjectInsightModelResp struct {
+	Model        string  `json:"model"`
+	SessionCount int     `json:"session_count"`
+	Share        float64 `json:"share"`
+}
+
+type DashboardProjectInsightProviderResp struct {
+	Provider     string  `json:"provider"`
+	SessionCount int     `json:"session_count"`
+	Share        float64 `json:"share"`
+}
+
+type DashboardProjectInsightToolResp struct {
+	Tool          string  `json:"tool"`
+	CallCount     int     `json:"call_count"`
+	ErrorCount    int     `json:"error_count"`
+	ErrorRate     float64 `json:"error_rate"`
+	WallTimeMS    int     `json:"wall_time_ms"`
+	AvgWallTimeMS int     `json:"avg_wall_time_ms"`
+	SessionCount  int     `json:"session_count"`
+	Share         float64 `json:"share"`
+}
+
+type DashboardProjectInsightsResp struct {
+	ProjectID                  string                                `json:"project_id"`
+	Days                       []DashboardProjectInsightDayResp      `json:"days"`
+	Models                     []DashboardProjectInsightModelResp    `json:"models"`
+	Providers                  []DashboardProjectInsightProviderResp `json:"providers"`
+	Tools                      []DashboardProjectInsightToolResp     `json:"tools"`
+	KnownModelSessions         int                                   `json:"known_model_sessions"`
+	UnknownModelSessions       int                                   `json:"unknown_model_sessions"`
+	KnownProviderSessions      int                                   `json:"known_provider_sessions"`
+	UnknownProviderSessions    int                                   `json:"unknown_provider_sessions"`
+	KnownLatencySessions       int                                   `json:"known_latency_sessions"`
+	UnknownLatencySessions     int                                   `json:"unknown_latency_sessions"`
+	KnownDurationSessions      int                                   `json:"known_duration_sessions"`
+	UnknownDurationSessions    int                                   `json:"unknown_duration_sessions"`
+	AvgFirstResponseLatencyMS  int                                   `json:"avg_first_response_latency_ms"`
+	AvgSessionDurationMS       int                                   `json:"avg_session_duration_ms"`
+	TotalCachedInputTokens     int                                   `json:"total_cached_input_tokens"`
+	TotalReasoningOutputTokens int                                   `json:"total_reasoning_output_tokens"`
+	TotalFunctionCalls         int                                   `json:"total_function_calls"`
+	TotalToolErrors            int                                   `json:"total_tool_errors"`
+	TotalToolWallTimeMS        int                                   `json:"total_tool_wall_time_ms"`
+	AvgToolWallTimeMS          int                                   `json:"avg_tool_wall_time_ms"`
+	SessionsWithFunctionCalls  int                                   `json:"sessions_with_function_calls"`
+	SessionsWithToolErrors     int                                   `json:"sessions_with_tool_errors"`
 }

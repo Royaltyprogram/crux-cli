@@ -51,17 +51,29 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	require.Equal(s.T(), "baseline", snapshotResp.ProfileID)
 
 	sessionResp := postAPIJSON[response.SessionIngestResp](s.T(), s, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
-		ProjectID: projectResp.ProjectID,
-		SessionID: "session-before-" + suffix,
-		Tool:      "codex",
-		TokenIn:   1000,
-		TokenOut:  240,
+		ProjectID:             projectResp.ProjectID,
+		SessionID:             "session-before-" + suffix,
+		Tool:                  "codex",
+		TokenIn:               1000,
+		TokenOut:              240,
+		CachedInputTokens:     280,
+		ReasoningOutputTokens: 60,
+		FunctionCallCount:     3,
+		ToolErrorCount:        1,
+		SessionDurationMS:     110000,
+		ToolWallTimeMS:        1600,
+		ToolCalls:             map[string]int{"shell": 2, "read_file": 1},
+		ToolErrors:            map[string]int{"shell": 1},
+		ToolWallTimesMS:       map[string]int{"shell": 1300, "read_file": 300},
 		RawQueries: []string{
 			"Inspect the route handler and summarize the current control flow.",
 			"Find the smallest patch that fixes the failing analytics path.",
 			"List the exact tests to run after the patch.",
 		},
-		Timestamp: now.Add(-2 * time.Hour),
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 2500,
+		Timestamp:              now.Add(-2 * time.Hour),
 	})
 	require.NotEmpty(s.T(), sessionResp.LatestRecommendationIDs)
 
@@ -114,16 +126,27 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	require.Equal(s.T(), "applied", historyAfterApply.Items[0].Status)
 
 	postAPIJSON[response.SessionIngestResp](s.T(), s, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
-		ProjectID: projectResp.ProjectID,
-		SessionID: "session-after-" + suffix,
-		Tool:      "codex",
-		TokenIn:   700,
-		TokenOut:  180,
+		ProjectID:             projectResp.ProjectID,
+		SessionID:             "session-after-" + suffix,
+		Tool:                  "codex",
+		TokenIn:               700,
+		TokenOut:              180,
+		CachedInputTokens:     120,
+		ReasoningOutputTokens: 30,
+		FunctionCallCount:     1,
+		SessionDurationMS:     50000,
+		ToolWallTimeMS:        180,
+		ToolCalls:             map[string]int{"shell": 1},
+		ToolErrors:            map[string]int{},
+		ToolWallTimesMS:       map[string]int{"shell": 180},
 		RawQueries: []string{
 			"Compare the analytics and health controllers before editing the shared response contract.",
 			"Keep the patch minimal and list the targeted verification steps.",
 		},
-		Timestamp: now.Add(2 * time.Hour),
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 900,
+		Timestamp:              now.Add(2 * time.Hour),
 	})
 
 	impactResp := getAPIJSON[response.ImpactSummaryResp](s.T(), s, "/api/v1/impact", url.Values{
@@ -142,6 +165,48 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	require.Equal(s.T(), 0, overviewAfterApply.FailedExecutionCount)
 	require.NotEmpty(s.T(), overviewAfterApply.ActionSummary)
 	require.NotEmpty(s.T(), overviewAfterApply.OutcomeSummary)
+
+	insightsAfterApply := getAPIJSON[response.DashboardProjectInsightsResp](s.T(), s, "/api/v1/dashboard/project-insights", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.NotEmpty(s.T(), insightsAfterApply.Days)
+	require.Equal(s.T(), projectResp.ProjectID, insightsAfterApply.ProjectID)
+	require.Equal(s.T(), 2, insightsAfterApply.KnownModelSessions)
+	require.Equal(s.T(), 2, insightsAfterApply.KnownProviderSessions)
+	require.Equal(s.T(), 2, insightsAfterApply.KnownLatencySessions)
+	require.Equal(s.T(), 2, insightsAfterApply.KnownDurationSessions)
+	require.Equal(s.T(), 1700, insightsAfterApply.AvgFirstResponseLatencyMS)
+	require.Equal(s.T(), 80000, insightsAfterApply.AvgSessionDurationMS)
+	require.Equal(s.T(), 400, insightsAfterApply.TotalCachedInputTokens)
+	require.Equal(s.T(), 90, insightsAfterApply.TotalReasoningOutputTokens)
+	require.Equal(s.T(), 4, insightsAfterApply.TotalFunctionCalls)
+	require.Equal(s.T(), 1, insightsAfterApply.TotalToolErrors)
+	require.Equal(s.T(), 1780, insightsAfterApply.TotalToolWallTimeMS)
+	require.Equal(s.T(), 445, insightsAfterApply.AvgToolWallTimeMS)
+	require.Equal(s.T(), 2, insightsAfterApply.SessionsWithFunctionCalls)
+	require.Equal(s.T(), 1, insightsAfterApply.SessionsWithToolErrors)
+	require.NotEmpty(s.T(), insightsAfterApply.Tools)
+	require.Equal(s.T(), "shell", insightsAfterApply.Tools[0].Tool)
+	require.Equal(s.T(), 3, insightsAfterApply.Tools[0].CallCount)
+	require.Equal(s.T(), 1, insightsAfterApply.Tools[0].ErrorCount)
+	require.Equal(s.T(), 1480, insightsAfterApply.Tools[0].WallTimeMS)
+	require.Equal(s.T(), 493, insightsAfterApply.Tools[0].AvgWallTimeMS)
+	sumDayCalls := 0
+	sumDayErrors := 0
+	sumDayToolWallTime := 0
+	sumDayDurations := 0
+	for _, day := range insightsAfterApply.Days {
+		sumDayCalls += day.FunctionCallCount
+		sumDayErrors += day.ToolErrorCount
+		sumDayToolWallTime += day.ToolWallTimeMS
+		sumDayDurations += day.DurationSessionCount
+	}
+	require.Equal(s.T(), insightsAfterApply.TotalFunctionCalls, sumDayCalls)
+	require.Equal(s.T(), insightsAfterApply.TotalToolErrors, sumDayErrors)
+	require.Equal(s.T(), insightsAfterApply.TotalToolWallTimeMS, sumDayToolWallTime)
+	require.Equal(s.T(), insightsAfterApply.KnownDurationSessions, sumDayDurations)
+	require.NotEmpty(s.T(), insightsAfterApply.Providers)
+	require.Equal(s.T(), "openai", insightsAfterApply.Providers[0].Provider)
 
 	rollbackResp := postAPIJSON[response.ApplyResultResp](s.T(), s, http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
 		ApplyID:     applyResp.ApplyID,

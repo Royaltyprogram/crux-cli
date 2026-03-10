@@ -55,15 +55,30 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 
 	now := time.Now().UTC()
 	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
-		ProjectID: "project-z",
-		SessionID: "session-before",
-		Tool:      "codex",
-		TokenIn:   1000,
-		TokenOut:  400,
+		ProjectID:             "project-z",
+		SessionID:             "session-before",
+		Tool:                  "codex",
+		TokenIn:               1000,
+		TokenOut:              400,
+		CachedInputTokens:     320,
+		ReasoningOutputTokens: 90,
+		FunctionCallCount:     3,
+		ToolErrorCount:        1,
+		SessionDurationMS:     96000,
+		ToolWallTimeMS:        1500,
+		ToolCalls:             map[string]int{"shell": 2, "read_file": 1},
+		ToolErrors:            map[string]int{"shell": 1},
+		ToolWallTimesMS:       map[string]int{"shell": 1200, "read_file": 300},
 		RawQueries: []string{
 			"Inspect the route handler and summarize the current control flow.",
 			"Find the smallest patch that fixes the failing analytics request path.",
 			"List the exact tests to run after the patch.",
+		},
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 2400,
+		AssistantResponses: []string{
+			"The analytics route wires session upload, recommendation refresh, and dashboard summaries together.",
 		},
 		Timestamp: now.Add(-2 * time.Hour),
 	})
@@ -156,16 +171,27 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	store.mu.Unlock()
 
 	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
-		ProjectID: "project-z",
-		SessionID: "session-after",
-		Tool:      "codex",
-		TokenIn:   800,
-		TokenOut:  300,
+		ProjectID:             "project-z",
+		SessionID:             "session-after",
+		Tool:                  "codex",
+		TokenIn:               800,
+		TokenOut:              300,
+		CachedInputTokens:     100,
+		ReasoningOutputTokens: 20,
+		FunctionCallCount:     1,
+		SessionDurationMS:     45000,
+		ToolWallTimeMS:        150,
+		ToolCalls:             map[string]int{"shell": 1},
+		ToolErrors:            map[string]int{},
+		ToolWallTimesMS:       map[string]int{"shell": 150},
 		RawQueries: []string{
 			"Compare the analytics and health controllers before changing the shared response contract.",
 			"Keep the patch minimal and list targeted verification steps.",
 		},
-		Timestamp: now.Add(-5 * time.Minute),
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 1200,
+		Timestamp:              now.Add(-5 * time.Minute),
 	})
 	require.NoError(t, err)
 
@@ -186,6 +212,17 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Len(t, sessions.Items, 1)
 	require.Equal(t, "session-after", sessions.Items[0].ID)
 	require.NotEmpty(t, sessions.Items[0].RawQueries)
+	require.Equal(t, "openai", sessions.Items[0].ModelProvider)
+	require.Equal(t, 1200, sessions.Items[0].FirstResponseLatencyMS)
+	require.Equal(t, 100, sessions.Items[0].CachedInputTokens)
+	require.Equal(t, 20, sessions.Items[0].ReasoningOutputTokens)
+	require.Equal(t, 1, sessions.Items[0].FunctionCallCount)
+	require.Zero(t, sessions.Items[0].ToolErrorCount)
+	require.Equal(t, 45000, sessions.Items[0].SessionDurationMS)
+	require.Equal(t, 150, sessions.Items[0].ToolWallTimeMS)
+	require.Equal(t, map[string]int{"shell": 1}, sessions.Items[0].ToolCalls)
+	require.Equal(t, map[string]int{}, sessions.Items[0].ToolErrors)
+	require.Equal(t, map[string]int{"shell": 150}, sessions.Items[0].ToolWallTimesMS)
 
 	impact, err := svc.ImpactSummary(ctx, &request.ImpactSummaryReq{ProjectID: "project-z"})
 	require.NoError(t, err)
@@ -210,6 +247,54 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Equal(t, 2, overview.SuccessfulRolloutCount)
 	require.NotEmpty(t, overview.ActionSummary)
 	require.NotEmpty(t, overview.OutcomeSummary)
+
+	insights, err := svc.DashboardProjectInsights(ctx, &request.DashboardProjectInsightsReq{ProjectID: "project-z"})
+	require.NoError(t, err)
+	require.NotEmpty(t, insights.Days)
+	require.Equal(t, 2, insights.KnownModelSessions)
+	require.Equal(t, 2, insights.KnownProviderSessions)
+	require.Equal(t, 2, insights.KnownLatencySessions)
+	require.Equal(t, 2, insights.KnownDurationSessions)
+	require.Equal(t, 1800, insights.AvgFirstResponseLatencyMS)
+	require.Equal(t, 70500, insights.AvgSessionDurationMS)
+	require.Equal(t, 420, insights.TotalCachedInputTokens)
+	require.Equal(t, 110, insights.TotalReasoningOutputTokens)
+	require.Equal(t, 4, insights.TotalFunctionCalls)
+	require.Equal(t, 1, insights.TotalToolErrors)
+	require.Equal(t, 1650, insights.TotalToolWallTimeMS)
+	require.Equal(t, 413, insights.AvgToolWallTimeMS)
+	require.Equal(t, 2, insights.SessionsWithFunctionCalls)
+	require.Equal(t, 1, insights.SessionsWithToolErrors)
+	require.NotEmpty(t, insights.Tools)
+	require.Equal(t, "shell", insights.Tools[0].Tool)
+	require.Equal(t, 3, insights.Tools[0].CallCount)
+	require.Equal(t, 1, insights.Tools[0].ErrorCount)
+	require.Equal(t, 0.33, insights.Tools[0].ErrorRate)
+	require.Equal(t, 1350, insights.Tools[0].WallTimeMS)
+	require.Equal(t, 450, insights.Tools[0].AvgWallTimeMS)
+	require.Equal(t, 2, insights.Tools[0].SessionCount)
+	sumDayCachedInput := 0
+	sumDayReasoning := 0
+	sumDayCalls := 0
+	sumDayErrors := 0
+	sumDayToolWallTime := 0
+	sumDayDurationSessions := 0
+	for _, day := range insights.Days {
+		sumDayCachedInput += day.CachedInputTokens
+		sumDayReasoning += day.ReasoningOutputTokens
+		sumDayCalls += day.FunctionCallCount
+		sumDayErrors += day.ToolErrorCount
+		sumDayToolWallTime += day.ToolWallTimeMS
+		sumDayDurationSessions += day.DurationSessionCount
+	}
+	require.Equal(t, insights.TotalCachedInputTokens, sumDayCachedInput)
+	require.Equal(t, insights.TotalReasoningOutputTokens, sumDayReasoning)
+	require.Equal(t, insights.TotalFunctionCalls, sumDayCalls)
+	require.Equal(t, insights.TotalToolErrors, sumDayErrors)
+	require.Equal(t, insights.TotalToolWallTimeMS, sumDayToolWallTime)
+	require.Equal(t, insights.KnownDurationSessions, sumDayDurationSessions)
+	require.NotEmpty(t, insights.Providers)
+	require.Equal(t, "openai", insights.Providers[0].Provider)
 
 	audits, err := svc.AuditList(ctx, &request.AuditListReq{OrgID: "org-1", ProjectID: "project-z"})
 	require.NoError(t, err)
@@ -539,6 +624,12 @@ func TestUploadSessionSummaryReplacesExistingSessionByID(t *testing.T) {
 		RawQueries: []string{
 			"Inspect the analytics route before editing.",
 		},
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 2100,
+		AssistantResponses: []string{
+			"I inspected the analytics route before editing.",
+		},
 		Timestamp: firstTimestamp,
 	})
 	require.NoError(t, err)
@@ -552,6 +643,12 @@ func TestUploadSessionSummaryReplacesExistingSessionByID(t *testing.T) {
 		RawQueries: []string{
 			"Inspect the analytics route before editing.",
 			"List the exact tests to run after the patch.",
+		},
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 1100,
+		AssistantResponses: []string{
+			"The analytics route registers auth, ingestion, and dashboard handlers in one place.",
 		},
 		Timestamp: secondTimestamp,
 	})
@@ -567,6 +664,10 @@ func TestUploadSessionSummaryReplacesExistingSessionByID(t *testing.T) {
 		"Inspect the analytics route before editing.",
 		"List the exact tests to run after the patch.",
 	}, sessions.Items[0].RawQueries)
+	require.Equal(t, []string{"gpt-5.4"}, sessions.Items[0].Models)
+	require.Equal(t, "openai", sessions.Items[0].ModelProvider)
+	require.Equal(t, 1100, sessions.Items[0].FirstResponseLatencyMS)
+	require.Equal(t, []string{"The analytics route registers auth, ingestion, and dashboard handlers in one place."}, sessions.Items[0].AssistantResponses)
 	require.Equal(t, secondTimestamp, sessions.Items[0].Timestamp)
 }
 

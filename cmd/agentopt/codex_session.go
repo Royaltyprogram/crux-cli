@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,14 +23,21 @@ type codexSessionLine struct {
 }
 
 type codexSessionMetaPayload struct {
-	ID        string `json:"id"`
-	Timestamp string `json:"timestamp"`
+	ID            string `json:"id"`
+	Timestamp     string `json:"timestamp"`
+	ModelProvider string `json:"model_provider"`
+}
+
+type codexTurnContextPayload struct {
+	Model string `json:"model"`
 }
 
 type codexTokenUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens           int `json:"input_tokens"`
+	CachedInputTokens     int `json:"cached_input_tokens"`
+	OutputTokens          int `json:"output_tokens"`
+	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
+	TotalTokens           int `json:"total_tokens"`
 }
 
 type codexTokenCountInfo struct {
@@ -50,7 +58,10 @@ type codexResponseContent struct {
 type codexResponseItemPayload struct {
 	Type    string                 `json:"type"`
 	Role    string                 `json:"role"`
+	CallID  string                 `json:"call_id"`
+	Name    string                 `json:"name"`
 	Content []codexResponseContent `json:"content"`
+	Output  any                    `json:"output"`
 }
 
 func recentCodexSessionFiles(codexHome string, limit int) ([]string, error) {
@@ -136,7 +147,16 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	seenQueries := map[string]struct{}{}
+	seenModels := map[string]struct{}{}
+	seenResponses := map[string]struct{}{}
+	toolCalls := make(map[string]int)
+	toolErrors := make(map[string]int)
+	toolWallTimesMS := make(map[string]int)
+	callToolByID := make(map[string]string)
+	var earliestTimestamp time.Time
 	var latestTimestamp time.Time
+	var firstMeaningfulUserAt time.Time
+	var firstAssistantResponseAt time.Time
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
@@ -149,8 +169,12 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 		if err := json.Unmarshal(line, &item); err != nil {
 			return request.SessionSummaryReq{}, fmt.Errorf("parse Codex session line %d: %w", lineNo, err)
 		}
-		if ts, ok := parseCodexTimestamp(item.Timestamp); ok && ts.After(latestTimestamp) {
-			latestTimestamp = ts
+		lineTimestamp, hasLineTimestamp := parseCodexTimestamp(item.Timestamp)
+		if hasLineTimestamp && (earliestTimestamp.IsZero() || lineTimestamp.Before(earliestTimestamp)) {
+			earliestTimestamp = lineTimestamp
+		}
+		if hasLineTimestamp && lineTimestamp.After(latestTimestamp) {
+			latestTimestamp = lineTimestamp
 		}
 
 		switch item.Type {
@@ -162,9 +186,21 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 			if req.SessionID == "" {
 				req.SessionID = strings.TrimSpace(payload.ID)
 			}
+			if req.ModelProvider == "" {
+				req.ModelProvider = strings.TrimSpace(payload.ModelProvider)
+			}
+			if ts, ok := parseCodexTimestamp(payload.Timestamp); ok && (earliestTimestamp.IsZero() || ts.Before(earliestTimestamp)) {
+				earliestTimestamp = ts
+			}
 			if ts, ok := parseCodexTimestamp(payload.Timestamp); ok && ts.After(latestTimestamp) {
 				latestTimestamp = ts
 			}
+		case "turn_context":
+			var payload codexTurnContextPayload
+			if err := json.Unmarshal(item.Payload, &payload); err != nil {
+				continue
+			}
+			appendUniqueSessionText(seenModels, &req.Models, payload.Model)
 		case "event_msg":
 			var payload codexEventMsgPayload
 			if err := json.Unmarshal(item.Payload, &payload); err != nil {
@@ -172,11 +208,19 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 			}
 			switch payload.Type {
 			case "user_message":
-				appendRawQuery(seenQueries, &req.RawQueries, payload.Message)
+				if appendRawQuery(seenQueries, &req.RawQueries, payload.Message) {
+					captureFirstCodexTimestamp(&firstMeaningfulUserAt, lineTimestamp, hasLineTimestamp)
+				}
+			case "agent_message":
+				if appendAssistantResponse(seenResponses, &req.AssistantResponses, payload.Message) {
+					captureFirstCodexTimestamp(&firstAssistantResponseAt, lineTimestamp, hasLineTimestamp)
+				}
 			case "token_count":
 				if payload.Info != nil && payload.Info.TotalTokenUsage != nil {
 					req.TokenIn = maxInt(req.TokenIn, payload.Info.TotalTokenUsage.InputTokens)
+					req.CachedInputTokens = maxInt(req.CachedInputTokens, payload.Info.TotalTokenUsage.CachedInputTokens)
 					req.TokenOut = maxInt(req.TokenOut, payload.Info.TotalTokenUsage.OutputTokens)
+					req.ReasoningOutputTokens = maxInt(req.ReasoningOutputTokens, payload.Info.TotalTokenUsage.ReasoningOutputTokens)
 				}
 			}
 		case "response_item":
@@ -184,14 +228,53 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 			if err := json.Unmarshal(item.Payload, &payload); err != nil {
 				continue
 			}
-			if payload.Type != "message" || payload.Role != "user" {
-				continue
-			}
-			for _, content := range payload.Content {
-				if content.Type != "input_text" {
-					continue
+			switch payload.Type {
+			case "function_call":
+				req.FunctionCallCount++
+				if toolName := strings.TrimSpace(payload.Name); toolName != "" {
+					toolCalls[toolName]++
+					if callID := strings.TrimSpace(payload.CallID); callID != "" {
+						callToolByID[callID] = toolName
+					}
 				}
-				appendRawQuery(seenQueries, &req.RawQueries, content.Text)
+			case "function_call_output":
+				wallTimeMS := codexFunctionCallOutputWallTimeMS(payload.Output)
+				toolName := strings.TrimSpace(callToolByID[strings.TrimSpace(payload.CallID)])
+				if toolName == "" && wallTimeMS > 0 {
+					toolName = "unknown"
+				}
+				if toolName != "" && wallTimeMS > 0 {
+					toolWallTimesMS[toolName] += wallTimeMS
+					req.ToolWallTimeMS += wallTimeMS
+				}
+				if codexFunctionCallOutputHasError(payload.Output) {
+					req.ToolErrorCount++
+					if toolName == "" {
+						toolName = "unknown"
+					}
+					toolErrors[toolName]++
+				}
+			case "message":
+				switch payload.Role {
+				case "user":
+					for _, content := range payload.Content {
+						if content.Type != "input_text" {
+							continue
+						}
+						if appendRawQuery(seenQueries, &req.RawQueries, content.Text) {
+							captureFirstCodexTimestamp(&firstMeaningfulUserAt, lineTimestamp, hasLineTimestamp)
+						}
+					}
+				case "assistant":
+					for _, content := range payload.Content {
+						if content.Type != "output_text" {
+							continue
+						}
+						if appendAssistantResponse(seenResponses, &req.AssistantResponses, content.Text) {
+							captureFirstCodexTimestamp(&firstAssistantResponseAt, lineTimestamp, hasLineTimestamp)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -206,6 +289,15 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 	if req.SessionID == "" {
 		req.SessionID = sanitizeID(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
 	}
+	if !firstMeaningfulUserAt.IsZero() && !firstAssistantResponseAt.IsZero() && firstAssistantResponseAt.After(firstMeaningfulUserAt) {
+		req.FirstResponseLatencyMS = int(firstAssistantResponseAt.Sub(firstMeaningfulUserAt) / time.Millisecond)
+	}
+	if !earliestTimestamp.IsZero() && !latestTimestamp.IsZero() && !latestTimestamp.Before(earliestTimestamp) {
+		req.SessionDurationMS = int(latestTimestamp.Sub(earliestTimestamp) / time.Millisecond)
+	}
+	req.ToolCalls = cloneToolCalls(toolCalls)
+	req.ToolErrors = cloneToolCalls(toolErrors)
+	req.ToolWallTimesMS = cloneToolCalls(toolWallTimesMS)
 
 	if len(req.RawQueries) == 0 {
 		return request.SessionSummaryReq{}, fmt.Errorf("no raw user queries found in Codex session %s", path)
@@ -213,16 +305,47 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 	return req, nil
 }
 
-func appendRawQuery(seen map[string]struct{}, dst *[]string, raw string) {
+func appendRawQuery(seen map[string]struct{}, dst *[]string, raw string) bool {
 	query := normalizeCodexUserMessage(raw)
 	if query == "" {
+		return false
+	}
+	appendUniqueString(seen, dst, query)
+	return true
+}
+
+func appendAssistantResponse(seen map[string]struct{}, dst *[]string, raw string) bool {
+	text := normalizeCodexSessionText(raw)
+	if text == "" {
+		return false
+	}
+	appendUniqueString(seen, dst, text)
+	return true
+}
+
+func appendUniqueSessionText(seen map[string]struct{}, dst *[]string, raw string) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
 		return
 	}
-	if _, ok := seen[query]; ok {
+	appendUniqueString(seen, dst, text)
+}
+
+func appendUniqueString(seen map[string]struct{}, dst *[]string, text string) {
+	if _, ok := seen[text]; ok {
 		return
 	}
-	seen[query] = struct{}{}
-	*dst = append(*dst, query)
+	seen[text] = struct{}{}
+	*dst = append(*dst, text)
+}
+
+func captureFirstCodexTimestamp(dst *time.Time, ts time.Time, ok bool) {
+	if !ok || ts.IsZero() {
+		return
+	}
+	if dst.IsZero() || ts.Before(*dst) {
+		*dst = ts
+	}
 }
 
 func normalizeCodexUserMessage(raw string) string {
@@ -241,14 +364,87 @@ func normalizeCodexUserMessage(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if strings.HasPrefix(raw, "<environment_context>") {
+
+	raw = stripCodexTaggedBlock(raw, "<environment_context>", "</environment_context>")
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return ""
 	}
 
 	raw = strings.ReplaceAll(raw, "\r\n", "\n")
-	raw = strings.ReplaceAll(raw, "\n\n", "\n")
+	lines := strings.Split(raw, "\n")
+	cleaned := make([]string, 0, len(lines))
+	skipInstructions := false
+	skipOpenTabs := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "# AGENTS.md instructions"):
+			skipInstructions = true
+			continue
+		case skipInstructions:
+			if strings.EqualFold(line, "</INSTRUCTIONS>") {
+				skipInstructions = false
+			}
+			continue
+		case strings.EqualFold(line, "# Context from my IDE setup:"),
+			strings.EqualFold(line, "# Context from my IDE setup"):
+			continue
+		case strings.EqualFold(line, "## Open tabs:"),
+			strings.EqualFold(line, "## Open tabs"):
+			skipOpenTabs = true
+			continue
+		case strings.HasPrefix(line, "## My request for Codex"):
+			skipOpenTabs = false
+			continue
+		case skipOpenTabs:
+			if strings.HasPrefix(line, "## ") {
+				skipOpenTabs = false
+			} else {
+				continue
+			}
+		}
+		if strings.EqualFold(line, "<image>") || strings.EqualFold(line, "</image>") {
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+
+	raw = strings.Join(cleaned, "\n")
+	for strings.Contains(raw, "\n\n") {
+		raw = strings.ReplaceAll(raw, "\n\n", "\n")
+	}
+	return strings.TrimSpace(raw)
+}
+
+func normalizeCodexSessionText(raw string) string {
 	raw = strings.TrimSpace(raw)
-	return raw
+	if raw == "" {
+		return ""
+	}
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	for strings.Contains(raw, "\n\n") {
+		raw = strings.ReplaceAll(raw, "\n\n", "\n")
+	}
+	return strings.TrimSpace(raw)
+}
+
+func stripCodexTaggedBlock(raw, openTag, closeTag string) string {
+	for {
+		start := strings.Index(raw, openTag)
+		if start < 0 {
+			return raw
+		}
+		end := strings.Index(raw[start+len(openTag):], closeTag)
+		if end < 0 {
+			return strings.TrimSpace(raw[:start])
+		}
+		end += start + len(openTag) + len(closeTag)
+		raw = raw[:start] + raw[end:]
+	}
 }
 
 func parseCodexTimestamp(raw string) (time.Time, bool) {
@@ -261,4 +457,71 @@ func parseCodexTimestamp(raw string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return ts.UTC(), true
+}
+
+func codexFunctionCallOutputHasError(raw any) bool {
+	text := strings.TrimSpace(fmt.Sprint(raw))
+	if text == "" || text == "<nil>" {
+		return false
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Exit code:") {
+			continue
+		}
+		code, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Exit code:")))
+		if err != nil {
+			return false
+		}
+		return code != 0
+	}
+	return false
+}
+
+func codexFunctionCallOutputWallTimeMS(raw any) int {
+	text := strings.TrimSpace(fmt.Sprint(raw))
+	if text == "" || text == "<nil>" {
+		return 0
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Wall time:") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "Wall time:")))
+		if len(fields) == 0 {
+			return 0
+		}
+		value, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			return 0
+		}
+		unit := "seconds"
+		if len(fields) > 1 {
+			unit = strings.ToLower(fields[1])
+		}
+		switch {
+		case strings.HasPrefix(unit, "ms"):
+			return int(value)
+		case strings.HasPrefix(unit, "s"), strings.HasPrefix(unit, "second"):
+			return int(value * 1000)
+		default:
+			return int(value * 1000)
+		}
+	}
+	return 0
+}
+
+func cloneToolCalls(input map[string]int) map[string]int {
+	if len(input) == 0 {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(input))
+	for k, v := range input {
+		if strings.TrimSpace(k) == "" || v <= 0 {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }

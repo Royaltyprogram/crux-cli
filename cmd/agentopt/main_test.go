@@ -483,9 +483,32 @@ func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {
 	err := os.WriteFile(sessionFile, []byte(`{
   "token_in": 1440,
   "token_out": 320,
+  "cached_input_tokens": 420,
+  "reasoning_output_tokens": 75,
+  "function_call_count": 2,
+  "tool_error_count": 1,
+  "session_duration_ms": 64000,
+  "tool_wall_time_ms": 2400,
+  "tool_calls": {
+    "shell": 1,
+    "read_file": 1
+  },
+  "tool_errors": {
+    "shell": 1
+  },
+  "tool_wall_times_ms": {
+    "shell": 1700,
+    "read_file": 700
+  },
   "raw_queries": [
     "Inspect the auth middleware and summarize the current token validation flow.",
     "Recommend the smallest patch that fixes the failing analytics test."
+  ],
+  "models": ["gpt-5.4"],
+  "model_provider": "openai",
+  "first_response_latency_ms": 1850,
+  "assistant_responses": [
+    "The auth middleware validates the shared API token before routing the request."
   ]
 }`), 0o644)
 	require.NoError(t, err)
@@ -531,7 +554,20 @@ func TestRunSessionUploadsTokenUsageAndRawQueries(t *testing.T) {
 	require.Equal(t, "codex", uploaded.Tool)
 	require.Equal(t, 1440, uploaded.TokenIn)
 	require.Equal(t, 320, uploaded.TokenOut)
+	require.Equal(t, 420, uploaded.CachedInputTokens)
+	require.Equal(t, 75, uploaded.ReasoningOutputTokens)
+	require.Equal(t, 2, uploaded.FunctionCallCount)
+	require.Equal(t, 1, uploaded.ToolErrorCount)
+	require.Equal(t, 64000, uploaded.SessionDurationMS)
+	require.Equal(t, 2400, uploaded.ToolWallTimeMS)
+	require.Equal(t, map[string]int{"shell": 1, "read_file": 1}, uploaded.ToolCalls)
+	require.Equal(t, map[string]int{"shell": 1}, uploaded.ToolErrors)
+	require.Equal(t, map[string]int{"shell": 1700, "read_file": 700}, uploaded.ToolWallTimesMS)
 	require.Len(t, uploaded.RawQueries, 2)
+	require.Equal(t, []string{"gpt-5.4"}, uploaded.Models)
+	require.Equal(t, "openai", uploaded.ModelProvider)
+	require.Equal(t, 1850, uploaded.FirstResponseLatencyMS)
+	require.Equal(t, []string{"The auth middleware validates the shared API token before routing the request."}, uploaded.AssistantResponses)
 	require.False(t, uploaded.Timestamp.IsZero())
 }
 
@@ -547,15 +583,22 @@ func TestRunSessionCollectsLatestCodexSessionFromLocalFiles(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(oldSession, []byte("{\"timestamp\":\"2026-03-08T09:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"obsolete prompt\"}}\n"), 0o644))
 	require.NoError(t, os.WriteFile(newSession, []byte(strings.Join([]string{
-		`{"timestamp":"2026-03-09T09:00:00Z","type":"session_meta","payload":{"id":"codex-session-123","timestamp":"2026-03-09T09:00:00Z"}}`,
+		`{"timestamp":"2026-03-09T09:00:00Z","type":"session_meta","payload":{"id":"codex-session-123","timestamp":"2026-03-09T09:00:00Z","model_provider":"openai"}}`,
+		`{"timestamp":"2026-03-09T09:00:00Z","type":"turn_context","payload":{"model":"gpt-5.4"}}`,
+		`{"timestamp":"2026-03-09T09:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /tmp/demo\n\n<INSTRUCTIONS>\nOnly follow safe steps.\n</INSTRUCTIONS>"}]}}`,
 		`{"timestamp":"2026-03-09T09:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/tmp/demo</cwd>\n</environment_context>"}]}}`,
 		`{"timestamp":"2026-03-09T09:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"# Context from my IDE setup:\n\n## My request for Codex:\nInspect the analytics route and summarize the current control flow.\n"}}`,
-		`{"timestamp":"2026-03-09T09:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2100,"output_tokens":480,"total_tokens":2580}}}}`,
-		`{"timestamp":"2026-03-09T09:00:04Z","type":"event_msg","payload":{"type":"user_message","message":"List the exact tests to run after the patch."}}`,
+		`{"timestamp":"2026-03-09T09:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2100,"cached_input_tokens":700,"output_tokens":480,"reasoning_output_tokens":120,"total_tokens":2580}}}}`,
+		`{"timestamp":"2026-03-09T09:00:03.500Z","type":"response_item","payload":{"type":"function_call","call_id":"call-analytics","name":"shell","arguments":"{\"cmd\":\"go test ./routes/controller\"}"}}`,
+		`{"timestamp":"2026-03-09T09:00:03.550Z","type":"response_item","payload":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"routes/controller/analytics.go\"}"}}`,
+		`{"timestamp":"2026-03-09T09:00:03.700Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-analytics","output":"Exit code: 1\nWall time: 0.3 seconds\nOutput:\nFAIL"}}`,
+		`{"timestamp":"2026-03-09T09:00:04Z","type":"event_msg","payload":{"type":"agent_message","message":"The analytics route registers auth, ingestion, and dashboard handlers in one place."}}`,
+		`{"timestamp":"2026-03-09T09:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The analytics route registers auth, ingestion, and dashboard handlers in one place."}]}}`,
+		`{"timestamp":"2026-03-09T09:00:06Z","type":"event_msg","payload":{"type":"user_message","message":"List the exact tests to run after the patch."}}`,
 	}, "\n")+"\n"), 0o644))
 
 	oldTime := time.Date(2026, 3, 8, 9, 0, 0, 0, time.UTC)
-	newTime := time.Date(2026, 3, 9, 9, 0, 4, 0, time.UTC)
+	newTime := time.Date(2026, 3, 9, 9, 0, 6, 0, time.UTC)
 	require.NoError(t, os.Chtimes(oldSession, oldTime, oldTime))
 	require.NoError(t, os.Chtimes(newSession, newTime, newTime))
 
@@ -592,10 +635,23 @@ func TestRunSessionCollectsLatestCodexSessionFromLocalFiles(t *testing.T) {
 	require.Equal(t, "codex", uploaded.Tool)
 	require.Equal(t, 2100, uploaded.TokenIn)
 	require.Equal(t, 480, uploaded.TokenOut)
+	require.Equal(t, 700, uploaded.CachedInputTokens)
+	require.Equal(t, 120, uploaded.ReasoningOutputTokens)
+	require.Equal(t, 2, uploaded.FunctionCallCount)
+	require.Equal(t, 1, uploaded.ToolErrorCount)
+	require.Equal(t, 6000, uploaded.SessionDurationMS)
+	require.Equal(t, 300, uploaded.ToolWallTimeMS)
+	require.Equal(t, map[string]int{"shell": 1, "read_file": 1}, uploaded.ToolCalls)
+	require.Equal(t, map[string]int{"shell": 1}, uploaded.ToolErrors)
+	require.Equal(t, map[string]int{"shell": 300}, uploaded.ToolWallTimesMS)
 	require.Equal(t, []string{
 		"Inspect the analytics route and summarize the current control flow.",
 		"List the exact tests to run after the patch.",
 	}, uploaded.RawQueries)
+	require.Equal(t, []string{"gpt-5.4"}, uploaded.Models)
+	require.Equal(t, "openai", uploaded.ModelProvider)
+	require.Equal(t, 2000, uploaded.FirstResponseLatencyMS)
+	require.Equal(t, []string{"The analytics route registers auth, ingestion, and dashboard handlers in one place."}, uploaded.AssistantResponses)
 	require.Equal(t, newTime, uploaded.Timestamp)
 }
 

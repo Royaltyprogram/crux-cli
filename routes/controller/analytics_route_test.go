@@ -73,14 +73,29 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Equal(t, "baseline", snapshotResp.ProfileID)
 
 	ingestResp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
-		ProjectID: projectResp.ProjectID,
-		Tool:      "codex",
-		TokenIn:   1000,
-		TokenOut:  200,
+		ProjectID:             projectResp.ProjectID,
+		Tool:                  "codex",
+		TokenIn:               1000,
+		TokenOut:              200,
+		CachedInputTokens:     260,
+		ReasoningOutputTokens: 40,
+		FunctionCallCount:     2,
+		ToolErrorCount:        1,
+		SessionDurationMS:     91000,
+		ToolWallTimeMS:        900,
+		ToolCalls:             map[string]int{"shell": 1, "read_file": 1},
+		ToolErrors:            map[string]int{"shell": 1},
+		ToolWallTimesMS:       map[string]int{"shell": 700, "read_file": 200},
 		RawQueries: []string{
 			"Inspect the route handler and summarize the current control flow.",
 			"Find the smallest patch that fixes the analytics route regression.",
 			"List the exact tests to run after the patch.",
+		},
+		Models:                 []string{"gpt-5.4"},
+		ModelProvider:          "openai",
+		FirstResponseLatencyMS: 2300,
+		AssistantResponses: []string{
+			"The analytics route registers auth, ingestion, and dashboard handlers in one place.",
 		},
 	})
 	require.NotEmpty(t, ingestResp.LatestRecommendationIDs)
@@ -95,6 +110,19 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		"limit":      []string{"5"},
 	})
 	require.NotEmpty(t, sessionList.Items)
+	require.Equal(t, []string{"gpt-5.4"}, sessionList.Items[0].Models)
+	require.Equal(t, "openai", sessionList.Items[0].ModelProvider)
+	require.Equal(t, 2300, sessionList.Items[0].FirstResponseLatencyMS)
+	require.Equal(t, 260, sessionList.Items[0].CachedInputTokens)
+	require.Equal(t, 40, sessionList.Items[0].ReasoningOutputTokens)
+	require.Equal(t, 2, sessionList.Items[0].FunctionCallCount)
+	require.Equal(t, 1, sessionList.Items[0].ToolErrorCount)
+	require.Equal(t, 91000, sessionList.Items[0].SessionDurationMS)
+	require.Equal(t, 900, sessionList.Items[0].ToolWallTimeMS)
+	require.Equal(t, map[string]int{"shell": 1, "read_file": 1}, sessionList.Items[0].ToolCalls)
+	require.Equal(t, map[string]int{"shell": 1}, sessionList.Items[0].ToolErrors)
+	require.Equal(t, map[string]int{"shell": 700, "read_file": 200}, sessionList.Items[0].ToolWallTimesMS)
+	require.Equal(t, []string{"The analytics route registers auth, ingestion, and dashboard handlers in one place."}, sessionList.Items[0].AssistantResponses)
 
 	recResp := getJSON[response.RecommendationListResp](t, echo, conf.App.APIToken, "/api/v1/recommendations", url.Values{
 		"project_id": []string{projectResp.ProjectID},
@@ -192,6 +220,50 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Greater(t, overviewResp.TotalTokens, 0)
 	require.NotEmpty(t, overviewResp.ActionSummary)
 	require.NotEmpty(t, overviewResp.OutcomeSummary)
+
+	insightsResp := getJSON[response.DashboardProjectInsightsResp](t, echo, conf.App.APIToken, "/api/v1/dashboard/project-insights", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.NotEmpty(t, insightsResp.Days)
+	require.Equal(t, projectResp.ProjectID, insightsResp.ProjectID)
+	require.Equal(t, 1, insightsResp.KnownModelSessions)
+	require.Equal(t, 1, insightsResp.KnownProviderSessions)
+	require.Equal(t, 1, insightsResp.KnownLatencySessions)
+	require.Equal(t, 1, insightsResp.KnownDurationSessions)
+	require.Equal(t, 2300, insightsResp.AvgFirstResponseLatencyMS)
+	require.Equal(t, 91000, insightsResp.AvgSessionDurationMS)
+	require.Equal(t, 260, insightsResp.TotalCachedInputTokens)
+	require.Equal(t, 40, insightsResp.TotalReasoningOutputTokens)
+	require.Equal(t, 2, insightsResp.TotalFunctionCalls)
+	require.Equal(t, 1, insightsResp.TotalToolErrors)
+	require.Equal(t, 900, insightsResp.TotalToolWallTimeMS)
+	require.Equal(t, 450, insightsResp.AvgToolWallTimeMS)
+	require.Equal(t, 1, insightsResp.SessionsWithFunctionCalls)
+	require.Equal(t, 1, insightsResp.SessionsWithToolErrors)
+	require.NotEmpty(t, insightsResp.Tools)
+	require.Equal(t, "read_file", insightsResp.Tools[0].Tool)
+	require.Equal(t, 1, insightsResp.Tools[0].CallCount)
+	require.Zero(t, insightsResp.Tools[0].ErrorCount)
+	require.Equal(t, 200, insightsResp.Tools[0].WallTimeMS)
+	require.Equal(t, 200, insightsResp.Tools[0].AvgWallTimeMS)
+	sumDayCalls := 0
+	sumDayErrors := 0
+	sumDayToolWallTime := 0
+	sumDayDurations := 0
+	for _, day := range insightsResp.Days {
+		sumDayCalls += day.FunctionCallCount
+		sumDayErrors += day.ToolErrorCount
+		sumDayToolWallTime += day.ToolWallTimeMS
+		sumDayDurations += day.DurationSessionCount
+	}
+	require.Equal(t, insightsResp.TotalFunctionCalls, sumDayCalls)
+	require.Equal(t, insightsResp.TotalToolErrors, sumDayErrors)
+	require.Equal(t, insightsResp.TotalToolWallTimeMS, sumDayToolWallTime)
+	require.Equal(t, insightsResp.KnownDurationSessions, sumDayDurations)
+	require.NotEmpty(t, insightsResp.Models)
+	require.Equal(t, "gpt-5.4", insightsResp.Models[0].Model)
+	require.NotEmpty(t, insightsResp.Providers)
+	require.Equal(t, "openai", insightsResp.Providers[0].Provider)
 
 	auditResp := getJSON[response.AuditListResp](t, echo, conf.App.APIToken, "/api/v1/audits", url.Values{
 		"org_id": []string{"org-route"},

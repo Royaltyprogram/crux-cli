@@ -70,13 +70,26 @@ type ConfigSnapshotListReq struct {
 }
 
 type SessionSummaryReq struct {
-	ProjectID  string    `json:"project_id"`
-	SessionID  string    `json:"session_id"`
-	Tool       string    `json:"tool" validate:"required"`
-	TokenIn    int       `json:"token_in"`
-	TokenOut   int       `json:"token_out"`
-	RawQueries []string  `json:"raw_queries"`
-	Timestamp  time.Time `json:"timestamp"`
+	ProjectID              string         `json:"project_id"`
+	SessionID              string         `json:"session_id"`
+	Tool                   string         `json:"tool" validate:"required"`
+	TokenIn                int            `json:"token_in"`
+	TokenOut               int            `json:"token_out"`
+	CachedInputTokens      int            `json:"cached_input_tokens"`
+	ReasoningOutputTokens  int            `json:"reasoning_output_tokens"`
+	FunctionCallCount      int            `json:"function_call_count"`
+	ToolErrorCount         int            `json:"tool_error_count"`
+	SessionDurationMS      int            `json:"session_duration_ms"`
+	ToolWallTimeMS         int            `json:"tool_wall_time_ms"`
+	ToolCalls              map[string]int `json:"tool_calls"`
+	ToolErrors             map[string]int `json:"tool_errors"`
+	ToolWallTimesMS        map[string]int `json:"tool_wall_times_ms"`
+	RawQueries             []string       `json:"raw_queries"`
+	Models                 []string       `json:"models"`
+	ModelProvider          string         `json:"model_provider"`
+	FirstResponseLatencyMS int            `json:"first_response_latency_ms"`
+	AssistantResponses     []string       `json:"assistant_responses"`
+	Timestamp              time.Time      `json:"timestamp"`
 }
 
 type SessionSummaryListReq struct {
@@ -90,6 +103,10 @@ type RecommendationListReq struct {
 
 type DashboardOverviewReq struct {
 	OrgID string `query:"org_id" validate:"required"`
+}
+
+type DashboardProjectInsightsReq struct {
+	ProjectID string `query:"project_id" validate:"required"`
 }
 
 type ProjectListReq struct {

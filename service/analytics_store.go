@@ -114,13 +114,26 @@ type ConfigSnapshot struct {
 }
 
 type SessionSummary struct {
-	ID         string
-	ProjectID  string
-	Tool       string
-	TokenIn    int
-	TokenOut   int
-	RawQueries []string
-	Timestamp  time.Time
+	ID                     string
+	ProjectID              string
+	Tool                   string
+	TokenIn                int
+	TokenOut               int
+	CachedInputTokens      int
+	ReasoningOutputTokens  int
+	FunctionCallCount      int
+	ToolErrorCount         int
+	SessionDurationMS      int
+	ToolWallTimeMS         int
+	ToolCalls              map[string]int
+	ToolErrors             map[string]int
+	ToolWallTimesMS        map[string]int
+	RawQueries             []string
+	Models                 []string
+	ModelProvider          string
+	FirstResponseLatencyMS int
+	AssistantResponses     []string
+	Timestamp              time.Time
 }
 
 type Recommendation struct {
@@ -840,6 +853,17 @@ func cloneFloatMap(input map[string]float64) map[string]float64 {
 		return map[string]float64{}
 	}
 	out := make(map[string]float64, len(input))
+	for k, v := range input {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneIntMap(input map[string]int) map[string]int {
+	if len(input) == 0 {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(input))
 	for k, v := range input {
 		out[k] = v
 	}

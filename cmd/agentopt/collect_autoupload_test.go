@@ -24,9 +24,13 @@ func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "10", "latest.jsonl")
 	require.NoError(t, os.MkdirAll(filepath.Dir(sessionPath), 0o755))
 	require.NoError(t, os.WriteFile(sessionPath, []byte(strings.Join([]string{
-		`{"timestamp":"2026-03-10T08:00:00Z","type":"session_meta","payload":{"id":"codex-session-collect","timestamp":"2026-03-10T08:00:00Z"}}`,
+		`{"timestamp":"2026-03-10T08:00:00Z","type":"session_meta","payload":{"id":"codex-session-collect","timestamp":"2026-03-10T08:00:00Z","model_provider":"openai"}}`,
+		`{"timestamp":"2026-03-10T08:00:00Z","type":"turn_context","payload":{"model":"gpt-5.4"}}`,
 		`{"timestamp":"2026-03-10T08:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"## My request for Codex:\nSummarize the upload pipeline."}}`,
-		`{"timestamp":"2026-03-10T08:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"output_tokens":180,"total_tokens":1080}}}}`,
+		`{"timestamp":"2026-03-10T08:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"cached_input_tokens":240,"output_tokens":180,"reasoning_output_tokens":60,"total_tokens":1080}}}}`,
+		`{"timestamp":"2026-03-10T08:00:02.500Z","type":"response_item","payload":{"type":"function_call","call_id":"call-1","name":"shell","arguments":"{\"cmd\":\"echo hi\"}"}}`,
+		`{"timestamp":"2026-03-10T08:00:02.700Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"Exit code: 1\nWall time: 0.1 seconds\nOutput:\npermission denied"}}`,
+		`{"timestamp":"2026-03-10T08:00:03Z","type":"event_msg","payload":{"type":"agent_message","message":"The collector uploads snapshots first and session summaries second."}}`,
 	}, "\n")+"\n"), 0o644))
 
 	var snapshotReq request.ConfigSnapshotReq
@@ -94,6 +98,19 @@ func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 	require.Equal(t, "codex-session-collect", sessionReq.SessionID)
 	require.Equal(t, 900, sessionReq.TokenIn)
 	require.Equal(t, 180, sessionReq.TokenOut)
+	require.Equal(t, 240, sessionReq.CachedInputTokens)
+	require.Equal(t, 60, sessionReq.ReasoningOutputTokens)
+	require.Equal(t, 1, sessionReq.FunctionCallCount)
+	require.Equal(t, 1, sessionReq.ToolErrorCount)
+	require.Equal(t, 3000, sessionReq.SessionDurationMS)
+	require.Equal(t, 100, sessionReq.ToolWallTimeMS)
+	require.Equal(t, map[string]int{"shell": 1}, sessionReq.ToolCalls)
+	require.Equal(t, map[string]int{"shell": 1}, sessionReq.ToolErrors)
+	require.Equal(t, map[string]int{"shell": 100}, sessionReq.ToolWallTimesMS)
+	require.Equal(t, []string{"gpt-5.4"}, sessionReq.Models)
+	require.Equal(t, "openai", sessionReq.ModelProvider)
+	require.Equal(t, 2000, sessionReq.FirstResponseLatencyMS)
+	require.Equal(t, []string{"The collector uploads snapshots first and session summaries second."}, sessionReq.AssistantResponses)
 }
 
 func TestRunCollectSkipsUnchangedSnapshotAndHandlesMissingSessions(t *testing.T) {
