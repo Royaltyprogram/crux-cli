@@ -45,7 +45,7 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
       "content": [
         {
           "type": "output_text",
-          "text": "{\"instruction_markdown\":\"- Keep patches minimal and explicit.\\n- List the exact verification steps after each edit.\\n- Compare nearby implementations before changing shared contracts.\\n- State the likely root cause before proposing a fix.\"}"
+          "text": "{\"finding_markdown\":\"- The user repeatedly has to ask for explicit verification, which suggests testing discipline is not being applied by default.\\n- Discovery and control-flow recap consume enough turns that the workflow likely starts without enough repo context.\\n- The sampled sessions show enough manual steering that default patch scope and diagnosis habits are still too weak.\"}"
         }
       ]
     }
@@ -87,22 +87,55 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 	require.Contains(t, recs[0].Evidence, "generation_mode=openai_responses_api")
 	require.Len(t, recs[0].Steps, 1)
 	require.Equal(t, "AGENTS.md", recs[0].Steps[0].TargetFile)
-	require.Contains(t, recs[0].Steps[0].ContentPreview, "## AgentOpt Personal Instruction Pack")
-	require.Contains(t, recs[0].Steps[0].ContentPreview, "- Keep patches minimal and explicit.")
-	require.Contains(t, recs[0].Steps[0].ContentPreview, "- State the likely root cause before proposing a fix.")
+	require.Contains(t, recs[0].Steps[0].ContentPreview, "## AgentOpt Research Findings")
+	require.Contains(t, recs[0].Steps[0].ContentPreview, "- The user repeatedly has to ask for explicit verification")
+	require.Contains(t, recs[0].Summary, "highlight repeated inefficiencies")
 }
 
 func TestBuildInstructionPromptLoadsMarkdownTemplate(t *testing.T) {
 	prompt, err := buildInstructionPrompt(&Project{Name: "demo-workspace"}, []string{
 		"Inspect the analytics route.",
 		"List the exact verification steps.",
+	}, researchUsageSummary{
+		SessionCount:               2,
+		RawQueryCount:              2,
+		TotalInputTokens:           2200,
+		TotalOutputTokens:          500,
+		TotalCachedInputTokens:     700,
+		TotalReasoningOutputTokens: 120,
+		AvgTokensPerQuery:          1350,
+		AvgFirstResponseLatencyMS:  1800,
+		AvgSessionDurationMS:       75000,
+		TotalFunctionCalls:         4,
+		TotalToolErrors:            1,
+		TotalToolWallTimeMS:        1600,
+		SessionsWithFunctionCalls:  2,
+		SessionsWithToolErrors:     1,
+		RecentSessions: []researchSessionSnapshot{{
+			TimestampLabel:         "2026-03-10T08:00:00Z",
+			Tool:                   "codex",
+			QueryCount:             2,
+			InputTokens:            1200,
+			OutputTokens:           280,
+			CachedInputTokens:      300,
+			ReasoningOutputTokens:  70,
+			FirstResponseLatencyMS: 1900,
+			SessionDurationMS:      81000,
+			FunctionCallCount:      3,
+			ToolErrorCount:         1,
+			ToolWallTimeMS:         900,
+		}},
 	})
 
 	require.NoError(t, err)
-	require.Contains(t, prompt, "writes reusable `AGENTS.md` instructions")
+	require.Contains(t, prompt, "reviews a user's real coding-agent usage history")
 	require.Contains(t, prompt, "## Requirements")
 	require.Contains(t, prompt, "## Project")
 	require.Contains(t, prompt, "demo-workspace")
+	require.Contains(t, prompt, "## Usage Summary")
+	require.Contains(t, prompt, "- avg_first_response_latency_ms=1800")
+	require.Contains(t, prompt, "## Recent Session Metrics")
+	require.Contains(t, prompt, "tool=codex")
 	require.Contains(t, prompt, "## Sampled Raw Queries (2)")
 	require.Contains(t, prompt, "sample_query_1: Inspect the analytics route.")
 	require.Contains(t, prompt, "sample_query_2: List the exact verification steps.")

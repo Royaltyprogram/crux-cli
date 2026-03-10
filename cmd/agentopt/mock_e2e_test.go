@@ -143,7 +143,7 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 
 	agentsAfterSync, err := os.ReadFile(agentsPath)
 	require.NoError(t, err)
-	require.Contains(t, string(agentsAfterSync), "## AgentOpt Personal Instruction Pack")
+	require.Contains(t, string(agentsAfterSync), "## AgentOpt Research Findings")
 
 	historyAfterSync := dashboardGetJSON[response.ApplyHistoryResp](t, dashboardClient, serverURL, "/api/v1/applies", url.Values{
 		"project_id": []string{workspaceID},

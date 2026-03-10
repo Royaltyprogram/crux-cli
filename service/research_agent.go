@@ -20,9 +20,9 @@ const (
 	defaultOpenAIResponsesModel      = "gpt-5.4"
 	defaultResearchSampleSize        = 10
 	defaultResearchRequestTimeout    = 45 * time.Second
-	defaultInstructionHeading        = "## AgentOpt Personal Instruction Pack"
-	openAIInstructionSchemaName      = "agent_instruction_pack"
-	openAIInstructionSchemaFieldName = "instruction_markdown"
+	defaultInstructionHeading        = "## AgentOpt Research Findings"
+	openAIInstructionSchemaName      = "agent_research_findings"
+	openAIInstructionSchemaFieldName = "finding_markdown"
 )
 
 type CloudResearchAgent struct {
@@ -63,41 +63,74 @@ type matchedInstructionPattern struct {
 	Count   int
 }
 
+type researchSessionSnapshot struct {
+	TimestampLabel         string
+	Tool                   string
+	QueryCount             int
+	InputTokens            int
+	OutputTokens           int
+	CachedInputTokens      int
+	ReasoningOutputTokens  int
+	FirstResponseLatencyMS int
+	SessionDurationMS      int
+	FunctionCallCount      int
+	ToolErrorCount         int
+	ToolWallTimeMS         int
+}
+
+type researchUsageSummary struct {
+	SessionCount               int
+	RawQueryCount              int
+	TotalInputTokens           int
+	TotalOutputTokens          int
+	TotalCachedInputTokens     int
+	TotalReasoningOutputTokens int
+	AvgTokensPerQuery          int
+	AvgFirstResponseLatencyMS  int
+	AvgSessionDurationMS       int
+	TotalFunctionCalls         int
+	TotalToolErrors            int
+	TotalToolWallTimeMS        int
+	SessionsWithFunctionCalls  int
+	SessionsWithToolErrors     int
+	RecentSessions             []researchSessionSnapshot
+}
+
 var personalInstructionPatterns = []instructionPattern{
 	{
 		Key:         "repo_discovery",
 		Label:       "repo discovery",
 		Terms:       []string{"find", "inspect", "explore", "locate", "repo", "which file", "control flow", "summarize the current"},
-		Instruction: "Before editing, identify the exact files involved and summarize the current control flow.",
+		Instruction: "The user repeatedly spends turns on repo discovery and control-flow recap before real work begins, which suggests the default workflow starts without enough context.",
 	},
 	{
 		Key:         "root_cause",
 		Label:       "root-cause analysis",
 		Terms:       []string{"why", "root cause", "cause", "bug", "error", "failing", "regression"},
-		Instruction: "State the likely root cause in one sentence before proposing a patch.",
+		Instruction: "The user often has to explicitly ask for root-cause analysis, which suggests fixes are attempted before the diagnosis is stable.",
 	},
 	{
 		Key:         "minimal_patch",
 		Label:       "minimal patching",
 		Terms:       []string{"minimal", "smallest", "small", "least", "patch", "fix only", "without changing"},
-		Instruction: "Prefer the smallest viable patch and call out any behavior that stays intentionally unchanged.",
+		Instruction: "The user repeatedly asks for smaller patches, which suggests the default response scope expands too aggressively without explicit pressure.",
 	},
 	{
 		Key:         "verification",
 		Label:       "targeted verification",
 		Terms:       []string{"test", "verify", "verification", "regression", "repro", "run", "check"},
-		Instruction: "List the exact verification steps or targeted tests immediately after each substantial edit.",
+		Instruction: "The user repeatedly asks for exact verification steps, which suggests testing discipline is not being applied by default.",
 	},
 	{
 		Key:         "contract_review",
 		Label:       "contract comparison",
 		Terms:       []string{"compare", "same", "contract", "response", "shared", "similar"},
-		Instruction: "Compare neighboring implementations before changing a shared API, route, or response contract.",
+		Instruction: "The user explicitly requests neighboring contract comparisons, which suggests shared interfaces are easy to change without enough compatibility checks.",
 	},
 }
 
 type openAIInstructionResponse struct {
-	InstructionMarkdown string `json:"instruction_markdown"`
+	FindingMarkdown string `json:"finding_markdown"`
 }
 
 func NewCloudResearchAgent(conf *configs.Config) *CloudResearchAgent {
@@ -145,19 +178,18 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 		return nil
 	}
 
-	totalTokens := 0
-	for _, session := range sessions {
-		totalTokens += session.TokenIn + session.TokenOut
-	}
-	avgTokensPerQuery := safeDiv(float64(totalTokens), float64(maxInt(len(rawQueries), 1)))
+	usageSummary := buildResearchUsageSummary(sessions, rawQueries)
 	sampledQueries := sampleRawQueries(rawQueries, minInt(a.sampleSize, len(rawQueries)), a.randSource)
-	contentPreview, generationMode := a.buildInstructionPreview(project, sampledQueries, rawQueries, avgTokensPerQuery)
+	contentPreview, generationMode := a.buildInstructionPreview(project, sampledQueries, rawQueries, usageSummary)
 
 	evidence := []string{
 		fmt.Sprintf("sessions=%d", len(sessions)),
 		fmt.Sprintf("raw_query_count=%d", len(rawQueries)),
 		fmt.Sprintf("sampled_raw_queries=%d", len(sampledQueries)),
-		fmt.Sprintf("avg_tokens_per_query=%.0f", avgTokensPerQuery),
+		fmt.Sprintf("avg_tokens_per_query=%d", usageSummary.AvgTokensPerQuery),
+		fmt.Sprintf("avg_first_response_latency_ms=%d", usageSummary.AvgFirstResponseLatencyMS),
+		fmt.Sprintf("total_function_calls=%d", usageSummary.TotalFunctionCalls),
+		fmt.Sprintf("total_tool_errors=%d", usageSummary.TotalToolErrors),
 		"selection=random",
 		"target_file=AGENTS.md",
 		"generation_mode=" + generationMode,
@@ -166,19 +198,19 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 	return []researchRecommendation{{
 		Kind:            "instruction-custom-rules",
 		Title:           instructionRecommendationTitle(project),
-		Summary:         "Recent session queries were sampled and distilled into a reusable instruction block for the local coding agent.",
-		Reason:          buildInstructionReason(sampledQueries, len(sessions)),
-		Explanation:     "The research agent samples up to 10 raw queries, asks OpenAI Responses API for a reusable instruction pack, and leaves the actual file edit to the local Codex agent.",
-		ExpectedBenefit: "Reduce repeated prompt boilerplate and make the first useful answer more consistent.",
+		Summary:         "Recent usage history was analyzed to highlight repeated inefficiencies before the local coding agent decides what instruction to add.",
+		Reason:          buildInstructionReason(sampledQueries, usageSummary),
+		Explanation:     "The research agent samples recent raw queries, adds latency and token context, asks OpenAI for abstract workflow findings, and leaves the final instruction edit to the local Codex agent.",
+		ExpectedBenefit: "Surface high-friction defaults without forcing the research agent to author the final AGENTS.md wording.",
 		Risk:            "Low. The plan is a reviewable append to AGENTS.md.",
-		ExpectedImpact:  "Lower setup churn and fewer repeated discovery prompts in later sessions.",
-		Score:           instructionRecommendationScore(len(sampledQueries), avgTokensPerQuery),
+		ExpectedImpact:  "Lower setup churn, less repeated prompt steering, and clearer evidence about where the workflow wastes time.",
+		Score:           instructionRecommendationScore(len(sampledQueries), float64(usageSummary.AvgTokensPerQuery)),
 		Evidence:        evidence,
 		Steps: []ChangePlanStep{{
 			Type:           "text_append",
 			Action:         "append_block",
 			TargetFile:     "AGENTS.md",
-			Summary:        "Append an instruction block synthesized from sampled raw queries.",
+			Summary:        "Append a research findings block distilled from usage history and sampled queries.",
 			ContentPreview: contentPreview,
 		}},
 	}}
@@ -186,9 +218,9 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 
 func instructionRecommendationTitle(project *Project) string {
 	if project != nil && strings.TrimSpace(project.Name) != "" {
-		return "Add a shared instruction block for " + project.Name
+		return "Highlight workflow inefficiencies for " + project.Name
 	}
-	return "Add a shared instruction block"
+	return "Highlight workflow inefficiencies"
 }
 
 func collectRawQueries(sessions []*SessionSummary) []string {
@@ -205,15 +237,15 @@ func collectRawQueries(sessions []*SessionSummary) []string {
 	return out
 }
 
-func (a *CloudResearchAgent) buildInstructionPreview(project *Project, sampledQueries, rawQueries []string, avgTokensPerQuery float64) (string, string) {
-	markdown, err := a.generateInstructionMarkdown(project, sampledQueries)
+func (a *CloudResearchAgent) buildInstructionPreview(project *Project, sampledQueries, rawQueries []string, usageSummary researchUsageSummary) (string, string) {
+	markdown, err := a.generateInstructionMarkdown(project, sampledQueries, usageSummary)
 	if err == nil && strings.TrimSpace(markdown) != "" {
 		return wrapInstructionMarkdown(markdown), "openai_responses_api"
 	}
-	return buildFallbackInstructionContent(rawQueries, avgTokensPerQuery), "local_fallback"
+	return buildFallbackInstructionContent(rawQueries, usageSummary), "local_fallback"
 }
 
-func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampledQueries []string) (string, error) {
+func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampledQueries []string, usageSummary researchUsageSummary) (string, error) {
 	if strings.TrimSpace(a.apiKey) == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
@@ -226,7 +258,7 @@ func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampl
 		"properties": map[string]any{
 			openAIInstructionSchemaFieldName: map[string]any{
 				"type":        "string",
-				"description": "Markdown bullet lines to append under an AGENTS.md heading.",
+				"description": "Markdown bullet lines that describe workflow inefficiencies and missing defaults.",
 			},
 		},
 		"required":             []string{openAIInstructionSchemaFieldName},
@@ -234,13 +266,13 @@ func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampl
 	})
 	if format.OfJSONSchema != nil {
 		format.OfJSONSchema.Strict = openai.Bool(true)
-		format.OfJSONSchema.Description = openai.String("Markdown bullet lines to append under an AGENTS.md heading.")
+		format.OfJSONSchema.Description = openai.String("Markdown bullet lines that describe workflow inefficiencies and missing defaults.")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultResearchRequestTimeout)
 	defer cancel()
 
-	prompt, err := buildInstructionPrompt(project, sampledQueries)
+	prompt, err := buildInstructionPrompt(project, sampledQueries, usageSummary)
 	if err != nil {
 		return "", err
 	}
@@ -262,11 +294,11 @@ func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampl
 	if err := json.Unmarshal([]byte(resp.OutputText()), &structured); err != nil {
 		return "", fmt.Errorf("decode openai instruction payload: %w", err)
 	}
-	return normalizeInstructionMarkdown(structured.InstructionMarkdown), nil
+	return normalizeInstructionMarkdown(structured.FindingMarkdown), nil
 }
 
-func buildInstructionPrompt(project *Project, sampledQueries []string) (string, error) {
-	return renderResearchAgentInstructionPrompt(project, sampledQueries)
+func buildInstructionPrompt(project *Project, sampledQueries []string, usageSummary researchUsageSummary) (string, error) {
+	return renderResearchAgentInstructionPrompt(project, sampledQueries, usageSummary)
 }
 
 func sampleRawQueries(queries []string, limit int, rng *rand.Rand) []string {
@@ -318,18 +350,24 @@ func normalizeInstructionMarkdown(markdown string) string {
 	return strings.Join(lines, "\n")
 }
 
-func buildFallbackInstructionContent(rawQueries []string, avgTokensPerQuery float64) string {
+func buildFallbackInstructionContent(rawQueries []string, usageSummary researchUsageSummary) string {
 	matches := topInstructionPatterns(matchInstructionPatterns(rawQueries), 3)
 	lines := []string{
 		"",
 		defaultInstructionHeading,
-		"- Before editing, restate the goal, affected files, and the success check you will use.",
+		"- Repeated prompt steering suggests the workflow still depends on manual setup instead of strong defaults.",
 	}
 	for _, match := range matches {
 		lines = append(lines, "- "+match.Pattern.Instruction)
 	}
-	if avgTokensPerQuery >= 2500 {
-		lines = append(lines, "- Keep the first response compact and avoid reopening files without new evidence.")
+	if usageSummary.AvgTokensPerQuery >= 2500 {
+		lines = append(lines, "- Token usage per query is high enough that too much context is likely being rebuilt instead of reused.")
+	}
+	if usageSummary.AvgFirstResponseLatencyMS >= 2000 {
+		lines = append(lines, "- First-response latency is high enough to suggest too much discovery happens before the first useful answer.")
+	}
+	if usageSummary.TotalToolErrors > 0 {
+		lines = append(lines, "- Tool-call errors are recurring, which suggests execution steps are being attempted without enough preflight or constraint awareness.")
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
@@ -377,11 +415,17 @@ func topInstructionPatterns(items []matchedInstructionPattern, limit int) []matc
 	return append([]matchedInstructionPattern(nil), items...)
 }
 
-func buildInstructionReason(sampledQueries []string, sessionCount int) string {
+func buildInstructionReason(sampledQueries []string, usageSummary researchUsageSummary) string {
 	if len(sampledQueries) == 0 {
 		return "No sampled raw queries were available for instruction synthesis."
 	}
-	return fmt.Sprintf("Synthesized from %d randomly sampled raw queries across %d uploaded sessions.", len(sampledQueries), sessionCount)
+	return fmt.Sprintf(
+		"Synthesized from %d randomly sampled raw queries across %d uploaded sessions, with %d ms average first-response latency and %d average tokens per query.",
+		len(sampledQueries),
+		usageSummary.SessionCount,
+		usageSummary.AvgFirstResponseLatencyMS,
+		usageSummary.AvgTokensPerQuery,
+	)
 }
 
 func instructionRecommendationScore(sampleCount int, avgTokensPerQuery float64) float64 {
@@ -409,4 +453,69 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildResearchUsageSummary(sessions []*SessionSummary, rawQueries []string) researchUsageSummary {
+	summary := researchUsageSummary{
+		SessionCount:  len(sessions),
+		RawQueryCount: len(rawQueries),
+	}
+
+	totalTokens := 0
+	totalLatencyMS := 0
+	knownLatencySessions := 0
+	totalDurationMS := 0
+	knownDurationSessions := 0
+	recentSessions := make([]researchSessionSnapshot, 0, len(sessions))
+
+	for _, session := range sessions {
+		summary.TotalInputTokens += session.TokenIn
+		summary.TotalOutputTokens += session.TokenOut
+		summary.TotalCachedInputTokens += session.CachedInputTokens
+		summary.TotalReasoningOutputTokens += session.ReasoningOutputTokens
+		summary.TotalFunctionCalls += session.FunctionCallCount
+		summary.TotalToolErrors += session.ToolErrorCount
+		summary.TotalToolWallTimeMS += session.ToolWallTimeMS
+		totalTokens += session.TokenIn + session.TokenOut
+		if session.FunctionCallCount > 0 {
+			summary.SessionsWithFunctionCalls++
+		}
+		if session.ToolErrorCount > 0 {
+			summary.SessionsWithToolErrors++
+		}
+		if session.FirstResponseLatencyMS > 0 {
+			totalLatencyMS += session.FirstResponseLatencyMS
+			knownLatencySessions++
+		}
+		if session.SessionDurationMS > 0 {
+			totalDurationMS += session.SessionDurationMS
+			knownDurationSessions++
+		}
+		recentSessions = append(recentSessions, researchSessionSnapshot{
+			TimestampLabel:         session.Timestamp.UTC().Format(time.RFC3339),
+			Tool:                   firstNonEmptyString(strings.TrimSpace(session.Tool), "unknown"),
+			QueryCount:             len(session.RawQueries),
+			InputTokens:            session.TokenIn,
+			OutputTokens:           session.TokenOut,
+			CachedInputTokens:      session.CachedInputTokens,
+			ReasoningOutputTokens:  session.ReasoningOutputTokens,
+			FirstResponseLatencyMS: session.FirstResponseLatencyMS,
+			SessionDurationMS:      session.SessionDurationMS,
+			FunctionCallCount:      session.FunctionCallCount,
+			ToolErrorCount:         session.ToolErrorCount,
+			ToolWallTimeMS:         session.ToolWallTimeMS,
+		})
+	}
+
+	sort.Slice(recentSessions, func(i, j int) bool {
+		return recentSessions[i].TimestampLabel > recentSessions[j].TimestampLabel
+	})
+	if len(recentSessions) > 5 {
+		recentSessions = recentSessions[:5]
+	}
+	summary.RecentSessions = recentSessions
+	summary.AvgTokensPerQuery = int(round(safeDiv(float64(totalTokens), float64(maxInt(len(rawQueries), 1)))))
+	summary.AvgFirstResponseLatencyMS = int(round(safeDiv(float64(totalLatencyMS), float64(maxInt(knownLatencySessions, 1)))))
+	summary.AvgSessionDurationMS = int(round(safeDiv(float64(totalDurationMS), float64(maxInt(knownDurationSessions, 1)))))
+	return summary
 }

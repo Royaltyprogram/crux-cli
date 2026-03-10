@@ -108,7 +108,7 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 		Success:     true,
 		Note:        "applied by e2e",
 		AppliedFile: "AGENTS.md",
-		AppliedText: "AgentOpt Personal Instruction Pack",
+		AppliedText: "AgentOpt Research Findings",
 	})
 	require.Equal(s.T(), "applied", applyResult.Status)
 	require.False(s.T(), applyResult.RolledBack)

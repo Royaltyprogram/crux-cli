@@ -105,7 +105,7 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Equal(t, "instruction-custom-rules", recommendations.Items[0].Kind)
 	require.Len(t, recommendations.Items[0].ChangePlan, 1)
 	require.Equal(t, "AGENTS.md", recommendations.Items[0].ChangePlan[0].TargetFile)
-	require.Contains(t, recommendations.Items[0].ChangePlan[0].ContentPreview, "AgentOpt Personal Instruction Pack")
+	require.Contains(t, recommendations.Items[0].ChangePlan[0].ContentPreview, "AgentOpt Research Findings")
 
 	planOld, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
 		RecommendationID: recommendations.Items[0].ID,
@@ -741,7 +741,7 @@ func TestReportApplyResultTracksApplyAndRollbackLifecycle(t *testing.T) {
 		Success:     true,
 		Note:        "applied by lifecycle test",
 		AppliedFile: "AGENTS.md",
-		AppliedText: "AgentOpt Personal Instruction Pack",
+		AppliedText: "AgentOpt Research Findings",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "applied", applyResult.Status)

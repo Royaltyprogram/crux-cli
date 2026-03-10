@@ -154,7 +154,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		Success:     true,
 		Note:        "applied by route test",
 		AppliedFile: "AGENTS.md",
-		AppliedText: "AgentOpt Personal Instruction Pack",
+		AppliedText: "AgentOpt Research Findings",
 	})
 	require.Equal(t, "applied", applyResult.Status)
 	require.False(t, applyResult.RolledBack)
