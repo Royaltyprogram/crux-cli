@@ -5,6 +5,8 @@ import process from "node:process";
 
 import { Codex } from "@openai/codex-sdk";
 
+import { buildPrompt } from "./prompt.mjs";
+
 async function main() {
   const requestPath = process.argv[2];
   if (!requestPath) {
@@ -43,7 +45,7 @@ async function main() {
   let finalResponse = "";
   let usage = null;
 
-  const { events } = await thread.runStreamed(buildPrompt(request), {
+  const { events } = await thread.runStreamed(await buildPrompt(request), {
     outputSchema,
   });
 
@@ -101,55 +103,6 @@ async function main() {
       2,
     ),
   );
-}
-
-function buildPrompt(request) {
-  const lines = [
-    "You are applying an approved local change plan.",
-    "Modify only the approved files listed below.",
-    "Do not create, edit, rename, or delete any file outside that list.",
-    "If the request cannot be completed exactly within those files, do not guess. Return status=blocked.",
-    "Keep changes minimal and aligned with the approved plan.",
-    "",
-    "Approved files:",
-  ];
-
-  for (const file of request.allowed_files ?? []) {
-    lines.push(`- ${file}`);
-  }
-
-  lines.push("", "Approved steps:");
-
-  for (const [index, step] of (request.steps ?? []).entries()) {
-    lines.push(`${index + 1}. target_file=${step.target_file}`);
-    lines.push(`   operation=${step.operation || "merge_patch"}`);
-    if (step.summary) {
-      lines.push(`   summary=${step.summary}`);
-    }
-    if (step.content_preview) {
-      lines.push("   required_text:");
-      lines.push(indentBlock(step.content_preview, "     "));
-    }
-    if (step.settings_updates && Object.keys(step.settings_updates).length > 0) {
-      lines.push("   required_json_updates:");
-      lines.push(indentBlock(JSON.stringify(step.settings_updates, null, 2), "     "));
-    }
-  }
-
-  lines.push(
-    "",
-    'After applying the changes, respond strictly as JSON matching {"status":"applied|blocked","summary":"..."}.',
-  );
-
-  return lines.join("\n");
-}
-
-function indentBlock(text, prefix) {
-  return String(text)
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => `${prefix}${line}`)
-    .join("\n");
 }
 
 main().catch((error) => {
