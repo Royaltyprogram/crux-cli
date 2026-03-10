@@ -10,6 +10,8 @@ It assumes:
 - Go, Node, `wire`, and the local toolchain are already installed
 - the server runs on `http://127.0.0.1:8082` by default
 
+For beta user machines that install the released CLI, Go is not required. The installer also provisions Node.js automatically when the machine does not already have a compatible runtime. Only the development-from-source flow below uses `go run`.
+
 ## 1. Local Development Run
 
 Start the local development server:
@@ -25,7 +27,7 @@ Open `http://127.0.0.1:8082/` and sign in with the local demo account:
 - email: `demo@example.com`
 - password: `demo1234`
 
-From another shell, run the CLI against the local server:
+From another shell, run the CLI against the local server. These commands are for source development:
 
 ```bash
 go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_DASHBOARD>
@@ -51,15 +53,15 @@ Notes:
 If you want a beta machine to keep uploading usage data without manual CLI runs, install background uploads once:
 
 ```bash
-./agentopt autoupload enable --interval 30m
-./agentopt autoupload status
-./agentopt autoupload disable
+agentopt autoupload enable --interval 30m
+agentopt autoupload status
+agentopt autoupload disable
 ```
 
 Notes:
 
 - The current background installer targets macOS `launchd`.
-- Prefer the bundled `./agentopt` binary for `autoupload`; do not rely on `go run` for long-lived beta machine setup.
+- Prefer the installed `agentopt` command for `autoupload`; do not rely on `go run` for long-lived beta machine setup.
 - The background job runs `agentopt collect` on each interval.
 
 For beta users who should install from GitHub Releases instead of an unpacked bundle:
@@ -69,7 +71,8 @@ curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/i
 AGENTOPT_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
 ```
 
-The installer downloads the matching release bundle, installs it under `~/.local/share/agentopt/<version>`, and writes a wrapper to `~/.local/bin/agentopt`.
+The installer downloads the matching release bundle, installs it under `~/.local/share/agentopt/<version>`, writes a wrapper to `~/.local/bin/agentopt`, and provisions a local Node.js runtime when needed.
+That release install uses a prebuilt binary, so Go is not required on the beta machine.
 
 ## 2. Local Verification
 

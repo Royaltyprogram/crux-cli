@@ -1,6 +1,7 @@
 # AgentOpt Test Commands
 
 아래 커맨드들은 `/Users/doyechan/Desktop/codes/aiops` 기준으로 작성했다.
+배포 머신에서는 릴리스 설치 후 `agentopt ...`를 직접 사용하고, 아래 `go run` 예시는 로컬 개발/테스트용이다.
 
 ## 1. 서버 실행
 

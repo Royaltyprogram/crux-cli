@@ -9,6 +9,9 @@ agentopt install script
 Usage:
   sh install.sh [--version <tag>] [--install-root <dir>] [--bin-dir <dir>]
 
+Release installs use a prebuilt binary. Go is not required.
+When Node.js is missing or too old, the installer can provision a local runtime automatically.
+
 Environment overrides:
   AGENTOPT_VERSION           release tag to install (default: newest published release)
   AGENTOPT_REPO              GitHub repo in owner/name form (default: Royaltyprogram/aiops)
@@ -17,6 +20,9 @@ Environment overrides:
   AGENTOPT_GITHUB_TOKEN      optional token used for GitHub API requests
   AGENTOPT_INSTALL_ROOT      install root (default: $HOME/.local/share/agentopt)
   AGENTOPT_BIN_DIR           wrapper script directory (default: $HOME/.local/bin)
+  AGENTOPT_INSTALL_NODE      Node.js install mode: auto, always, never (default: auto)
+  AGENTOPT_NODE_VERSION      Node.js version used for local runtime install (default: 20.11.1)
+  AGENTOPT_NODE_DIST_BASE_URL  Node.js distribution base URL (default: https://nodejs.org/dist)
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
@@ -120,12 +126,12 @@ sha256_file() {
   die "sha256sum, shasum, or openssl is required"
 }
 
-extract_bundle_dir() {
+extract_archive_dir() {
   archive="$1"
   dest="$2"
   tar -xzf "$archive" -C "$dest"
   first_entry="$(tar -tzf "$archive" | head -n 1)"
-  [ -n "$first_entry" ] || die "bundle archive is empty: $archive"
+  [ -n "$first_entry" ] || die "archive is empty: $archive"
   first_dir="${first_entry%%/*}"
   [ -n "$first_dir" ] || die "failed to determine extracted bundle directory"
   printf '%s\n' "$dest/$first_dir"
@@ -134,11 +140,98 @@ extract_bundle_dir() {
 create_wrapper() {
   bin_path="$1"
   target_path="$2"
+  node_bin_path="$3"
   cat >"$bin_path" <<EOF
 #!/bin/sh
+set -eu
+if [ -d "$node_bin_path" ]; then
+  PATH="$node_bin_path:\${PATH:-}"
+  export PATH
+fi
 exec "$target_path" "\$@"
 EOF
   chmod 755 "$bin_path"
+}
+
+normalize_version_tag() {
+  version="$1"
+  case "$version" in
+    v*) printf '%s\n' "$version" ;;
+    *) printf 'v%s\n' "$version" ;;
+  esac
+}
+
+node_major_version() {
+  version="${1#v}"
+  printf '%s\n' "$version" | awk -F. '{print $1}'
+}
+
+has_compatible_node() {
+  if ! command -v node >/dev/null 2>&1; then
+    return 1
+  fi
+  current_version="$(node --version 2>/dev/null || true)"
+  [ -n "$current_version" ] || return 1
+  current_major="$(node_major_version "$current_version")"
+  [ -n "$current_major" ] || return 1
+  [ "$current_major" -ge 18 ]
+}
+
+install_node_runtime() {
+  install_root="$1"
+  node_platform="$2"
+  node_arch="$3"
+  install_mode="$4"
+  node_version="$5"
+  node_dist_base_url="$6"
+
+  case "$install_mode" in
+    auto|always|never) ;;
+    *) die "invalid AGENTOPT_INSTALL_NODE value: $install_mode" ;;
+  esac
+
+  if [ "$install_mode" = "never" ]; then
+    say "skipping Node.js install because AGENTOPT_INSTALL_NODE=never"
+    return
+  fi
+
+  if [ "$install_mode" = "auto" ] && has_compatible_node; then
+    say "using existing Node.js $(node --version)"
+    return
+  fi
+
+  normalized_version="$(normalize_version_tag "$node_version")"
+  archive_base="node-$normalized_version-$node_platform-$node_arch"
+  archive_name="$archive_base.tar.gz"
+  archive_url="$node_dist_base_url/$normalized_version/$archive_name"
+  checksum_url="$node_dist_base_url/$normalized_version/SHASUMS256.txt"
+  archive_path="$TMPDIR_WORK/$archive_name"
+  checksum_path="$TMPDIR_WORK/SHASUMS256.txt"
+  extract_dir="$TMPDIR_WORK/node-extract"
+  node_root="$install_root/node"
+  version_dir="$node_root/$normalized_version"
+  current_link="$node_root/current"
+  stage_dir="$node_root/.install-$normalized_version.$$"
+
+  say "installing Node.js $normalized_version from $archive_url"
+  fetch_to_file "$archive_url" "$archive_path"
+  fetch_to_file "$checksum_url" "$checksum_path"
+
+  expected_sha="$(awk -v name="$archive_name" '$2 == name {print $1; exit}' "$checksum_path")"
+  [ -n "$expected_sha" ] || die "unable to find checksum for $archive_name"
+  actual_sha="$(sha256_file "$archive_path")"
+  [ "$expected_sha" = "$actual_sha" ] || die "checksum mismatch for $archive_name"
+
+  mkdir -p "$node_root" "$extract_dir"
+  extracted_dir="$(extract_archive_dir "$archive_path" "$extract_dir")"
+  [ -x "$extracted_dir/bin/node" ] || die "node archive is missing bin/node"
+
+  rm -rf "$stage_dir"
+  mv "$extracted_dir" "$stage_dir"
+  rm -rf "$version_dir"
+  mv "$stage_dir" "$version_dir"
+  ln -sfn "$version_dir" "$current_link"
+  say "installed local Node.js runtime to $version_dir"
 }
 
 VERSION="${AGENTOPT_VERSION:-}"
@@ -147,6 +240,9 @@ BIN_DIR="${AGENTOPT_BIN_DIR:-$HOME/.local/bin}"
 REPO="${AGENTOPT_REPO:-Royaltyprogram/aiops}"
 RELEASE_BASE_URL="${AGENTOPT_RELEASE_BASE_URL:-https://github.com/$REPO/releases/download}"
 RELEASES_API_URL="${AGENTOPT_RELEASES_API_URL:-https://api.github.com/repos/$REPO/releases?per_page=20}"
+INSTALL_NODE="${AGENTOPT_INSTALL_NODE:-auto}"
+NODE_VERSION="${AGENTOPT_NODE_VERSION:-20.11.1}"
+NODE_DIST_BASE_URL="${AGENTOPT_NODE_DIST_BASE_URL:-https://nodejs.org/dist}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -194,6 +290,12 @@ case "$ARCH" in
   arm64|aarch64) GOARCH="arm64" ;;
   *) die "unsupported architecture: $ARCH" ;;
 esac
+case "$GOARCH" in
+  amd64) NODE_ARCH="x64" ;;
+  arm64) NODE_ARCH="arm64" ;;
+  *) die "unsupported node architecture: $GOARCH" ;;
+esac
+NODE_PLATFORM="$GOOS"
 
 TMPDIR_ROOT="${TMPDIR:-/tmp}"
 TMPDIR_WORK="$(mktemp -d "$TMPDIR_ROOT/agentopt-install.XXXXXX")"
@@ -225,7 +327,7 @@ ACTUAL_SHA="$(sha256_file "$ARCHIVE_PATH")"
 
 EXTRACT_DIR="$TMPDIR_WORK/extract"
 mkdir -p "$EXTRACT_DIR"
-BUNDLE_DIR="$(extract_bundle_dir "$ARCHIVE_PATH" "$EXTRACT_DIR")"
+BUNDLE_DIR="$(extract_archive_dir "$ARCHIVE_PATH" "$EXTRACT_DIR")"
 [ -x "$BUNDLE_DIR/agentopt" ] || die "bundle is missing agentopt executable"
 [ -f "$BUNDLE_DIR/tools/codex-runner/run.mjs" ] || die "bundle is missing tools/codex-runner/run.mjs"
 
@@ -233,17 +335,27 @@ VERSION_DIR="$INSTALL_ROOT/$VERSION"
 CURRENT_LINK="$INSTALL_ROOT/current"
 BIN_PATH="$BIN_DIR/agentopt"
 STAGE_DIR="$INSTALL_ROOT/.install-$VERSION.$$"
+LOCAL_NODE_BIN="$INSTALL_ROOT/node/current/bin"
 
 mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
+install_node_runtime "$INSTALL_ROOT" "$NODE_PLATFORM" "$NODE_ARCH" "$INSTALL_NODE" "$NODE_VERSION" "$NODE_DIST_BASE_URL"
 rm -rf "$STAGE_DIR"
 cp -R "$BUNDLE_DIR" "$STAGE_DIR"
 rm -rf "$VERSION_DIR"
 mv "$STAGE_DIR" "$VERSION_DIR"
 ln -sfn "$VERSION_DIR" "$CURRENT_LINK"
-create_wrapper "$BIN_PATH" "$CURRENT_LINK/agentopt"
+create_wrapper "$BIN_PATH" "$CURRENT_LINK/agentopt" "$LOCAL_NODE_BIN"
 
 say "installed $VERSION to $VERSION_DIR"
 say "wrapper created at $BIN_PATH"
+say "release install uses a prebuilt agentopt binary; Go is not required"
+if [ -x "$LOCAL_NODE_BIN/node" ]; then
+  say "agentopt will use local Node.js from $LOCAL_NODE_BIN when needed"
+elif command -v node >/dev/null 2>&1; then
+  say "agentopt will use system Node.js $(node --version)"
+else
+  say "node runtime not found; local sync/apply commands require Node.js"
+fi
 if ! command -v agentopt >/dev/null 2>&1; then
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;

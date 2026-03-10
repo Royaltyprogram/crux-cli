@@ -53,6 +53,8 @@ make run
 
 In another shell:
 
+For source development:
+
 ```bash
 go run ./cmd/agentopt login --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_DASHBOARD>
 go run ./cmd/agentopt connect --repo-path .
@@ -72,6 +74,18 @@ go run ./cmd/agentopt history
 go run ./cmd/agentopt impact
 go run ./cmd/agentopt audit
 ```
+
+For beta or production user machines, install the released CLI and run `agentopt` directly instead of `go run`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
+agentopt login --server http://127.0.0.1:8082
+agentopt connect --repo-path .
+agentopt collect --codex-home ~/.codex
+agentopt autoupload enable --interval 30m
+```
+
+Release installs use a prebuilt binary, so Go is not required. The installer also provisions a local Node.js runtime when needed for sync/apply. If your shell cannot find `agentopt`, add `~/.local/bin` to `PATH`.
 
 You can still use:
 
@@ -125,9 +139,9 @@ AGENTOPT_CODEX_REASONING_EFFORT=low go run ./cmd/agentopt apply --recommendation
 To keep local usage uploads running in the background on macOS, install the launchd job once:
 
 ```bash
-go run ./cmd/agentopt autoupload enable --interval 30m
-go run ./cmd/agentopt autoupload status
-go run ./cmd/agentopt autoupload disable
+agentopt autoupload enable --interval 30m
+agentopt autoupload status
+agentopt autoupload disable
 ```
 
 `autoupload enable` runs `agentopt collect` on each interval. `collect` uploads recent session summaries every run and skips snapshot uploads unless the fingerprint changed, so the background job can poll without forcing duplicate manual commands.
@@ -228,7 +242,7 @@ The bundle itself contains:
 - `tools/codex-runner/run.mjs`
 - the pinned Node dependencies required for local apply
 
-The bundled CLI also answers `./agentopt version`, and `make build` now embeds git version metadata into `output/agentopt`.
+The installed CLI answers `agentopt version`, and `make build` now embeds git version metadata into `output/agentopt`.
 
 For a one-command install from GitHub Releases:
 
@@ -237,7 +251,7 @@ curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/i
 AGENTOPT_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
 ```
 
-The installer downloads the matching release bundle for the current platform, installs it under `~/.local/share/agentopt/<version>`, and writes `~/.local/bin/agentopt`.
+The installer downloads the matching release bundle for the current platform, installs it under `~/.local/share/agentopt/<version>`, writes `~/.local/bin/agentopt`, does not require Go on the target machine, and installs a local Node.js runtime automatically when the machine does not already have a compatible one.
 
 ## Container Deploy
 

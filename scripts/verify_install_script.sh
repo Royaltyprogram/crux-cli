@@ -13,6 +13,40 @@ need_cmd() {
   }
 }
 
+sha256_file() {
+  python3 - <<'PY' "$1"
+import hashlib
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256(path.read_bytes()).hexdigest()
+print(digest)
+PY
+}
+
+node_platform() {
+  case "$(uname -s)" in
+    Darwin) printf 'darwin\n' ;;
+    Linux) printf 'linux\n' ;;
+    *)
+      echo "unsupported operating system for fake node dist: $(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+node_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf 'x64\n' ;;
+    arm64|aarch64) printf 'arm64\n' ;;
+    *)
+      echo "unsupported architecture for fake node dist: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+}
+
 latest_bundle() {
   python3 - <<'PY' "$RELEASE_DIR"
 import pathlib
@@ -93,6 +127,7 @@ AGENTOPT_VERSION="$VERSION_LABEL" \
 AGENTOPT_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
 AGENTOPT_INSTALL_ROOT="$INSTALL_ROOT" \
 AGENTOPT_BIN_DIR="$BIN_DIR" \
+AGENTOPT_INSTALL_NODE=never \
 sh "$ROOT_DIR/scripts/install.sh" >/dev/null
 
 [[ -x "$BIN_DIR/agentopt" ]] || {
@@ -120,11 +155,61 @@ AGENTOPT_VERSION="$VERSION_LABEL" \
 AGENTOPT_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
 AGENTOPT_INSTALL_ROOT="$INSTALL_ROOT" \
 AGENTOPT_BIN_DIR="$BIN_DIR" \
+AGENTOPT_INSTALL_NODE=never \
 sh "$ROOT_DIR/scripts/install.sh" >/dev/null
 
 VERSION_OUTPUT="$("$BIN_DIR/agentopt" version)"
 [[ "$VERSION_OUTPUT" == agentopt\ "$VERSION_LABEL"* ]] || {
   echo "unexpected version output after reinstall: $VERSION_OUTPUT" >&2
+  exit 1
+}
+
+NODE_VERSION_TAG="v20.11.1"
+NODE_PLATFORM="$(node_platform)"
+NODE_ARCH="$(node_arch)"
+NODE_DIST_ROOT="$TMPDIR_WORK/node-dist"
+NODE_STAGE_ROOT="$TMPDIR_WORK/node-stage"
+NODE_ARCHIVE_BASE="node-$NODE_VERSION_TAG-$NODE_PLATFORM-$NODE_ARCH"
+NODE_ARCHIVE_PATH="$NODE_DIST_ROOT/$NODE_VERSION_TAG/$NODE_ARCHIVE_BASE.tar.gz"
+NODE_CHECKSUM_PATH="$NODE_DIST_ROOT/$NODE_VERSION_TAG/SHASUMS256.txt"
+FORCED_INSTALL_ROOT="$TMPDIR_WORK/install-root-with-node"
+FORCED_BIN_DIR="$TMPDIR_WORK/bin-with-node"
+
+mkdir -p "$NODE_STAGE_ROOT/$NODE_ARCHIVE_BASE/bin" "$NODE_DIST_ROOT/$NODE_VERSION_TAG" "$FORCED_INSTALL_ROOT" "$FORCED_BIN_DIR"
+cat >"$NODE_STAGE_ROOT/$NODE_ARCHIVE_BASE/bin/node" <<EOF
+#!/bin/sh
+if [ "\${1:-}" = "--version" ]; then
+  printf '%s\n' "$NODE_VERSION_TAG"
+  exit 0
+fi
+printf 'fake node invoked\n'
+EOF
+chmod 755 "$NODE_STAGE_ROOT/$NODE_ARCHIVE_BASE/bin/node"
+tar -czf "$NODE_ARCHIVE_PATH" -C "$NODE_STAGE_ROOT" "$NODE_ARCHIVE_BASE"
+printf '%s  %s\n' "$(sha256_file "$NODE_ARCHIVE_PATH")" "$(basename "$NODE_ARCHIVE_PATH")" >"$NODE_CHECKSUM_PATH"
+
+AGENTOPT_VERSION="$VERSION_LABEL" \
+AGENTOPT_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
+AGENTOPT_INSTALL_ROOT="$FORCED_INSTALL_ROOT" \
+AGENTOPT_BIN_DIR="$FORCED_BIN_DIR" \
+AGENTOPT_INSTALL_NODE=always \
+AGENTOPT_NODE_VERSION="$NODE_VERSION_TAG" \
+AGENTOPT_NODE_DIST_BASE_URL="file://$NODE_DIST_ROOT" \
+sh "$ROOT_DIR/scripts/install.sh" >/dev/null
+
+[[ -x "$FORCED_INSTALL_ROOT/node/current/bin/node" ]] || {
+  echo "install script did not provision local node runtime" >&2
+  exit 1
+}
+
+NODE_VERSION_OUTPUT="$("$FORCED_INSTALL_ROOT/node/current/bin/node" --version)"
+[[ "$NODE_VERSION_OUTPUT" == "$NODE_VERSION_TAG" ]] || {
+  echo "unexpected local node version output: $NODE_VERSION_OUTPUT" >&2
+  exit 1
+}
+
+grep -F "$FORCED_INSTALL_ROOT/node/current/bin" "$FORCED_BIN_DIR/agentopt" >/dev/null || {
+  echo "agentopt wrapper does not include local node path" >&2
   exit 1
 }
 
