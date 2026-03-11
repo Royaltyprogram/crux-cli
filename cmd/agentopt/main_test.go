@@ -86,6 +86,7 @@ if (mode === "extra_change") {
 }
 
 process.stdout.write(JSON.stringify({
+  thread_id: "thread-" + mode,
   status: mode === "blocked" ? "blocked" : "applied",
   summary: mode === "blocked" ? "stub blocked request" : "stub applied request",
   changed_files: changed,
@@ -773,6 +774,8 @@ func TestExecuteLocalApplyCreatesBackupAndWritesConfig(t *testing.T) {
 	backup, err := loadApplyBackup("apply-1")
 	require.NoError(t, err)
 	require.Len(t, backup.Files, 1)
+	require.Equal(t, "thread-apply", backup.CodexThreadID)
+	require.Equal(t, "stub applied request", backup.CodexSummary)
 	require.True(t, backup.Files[0].OriginalExists)
 	require.Equal(t, true, backup.Files[0].OriginalJSON["baseline"])
 }
@@ -831,6 +834,8 @@ func TestExecuteLocalApplyInstallsAgentoptSkillFile(t *testing.T) {
 	backup, err := loadApplyBackup("apply-skill")
 	require.NoError(t, err)
 	require.Len(t, backup.Files, 1)
+	require.Equal(t, "thread-apply", backup.CodexThreadID)
+	require.Equal(t, "stub applied request", backup.CodexSummary)
 	require.False(t, backup.Files[0].OriginalExists)
 	require.Equal(t, "text_replace", backup.Files[0].FileKind)
 }

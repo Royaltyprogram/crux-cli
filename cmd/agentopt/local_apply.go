@@ -19,6 +19,8 @@ import (
 type applyBackup struct {
 	ApplyID        string            `json:"apply_id"`
 	WorkspaceID    string            `json:"workspace_id,omitempty"`
+	CodexThreadID  string            `json:"codex_thread_id,omitempty"`
+	CodexSummary   string            `json:"codex_summary,omitempty"`
 	Files          []applyFileBackup `json:"files"`
 	FilePath       string            `json:"file_path"`
 	FileKind       string            `json:"file_kind"`
@@ -31,6 +33,8 @@ type applyBackupDisk struct {
 	ApplyID         string            `json:"apply_id"`
 	WorkspaceID     string            `json:"workspace_id,omitempty"`
 	LegacyProjectID string            `json:"project_id,omitempty"`
+	CodexThreadID   string            `json:"codex_thread_id,omitempty"`
+	CodexSummary    string            `json:"codex_summary,omitempty"`
 	Files           []applyFileBackup `json:"files"`
 	FilePath        string            `json:"file_path"`
 	FileKind        string            `json:"file_kind"`
@@ -141,9 +145,11 @@ func executeLocalApply(st state, applyID string, previews []response.PatchPrevie
 	}
 
 	if err := saveApplyBackup(applyBackup{
-		ApplyID:     applyID,
-		WorkspaceID: st.workspaceID(),
-		Files:       backups,
+		ApplyID:       applyID,
+		WorkspaceID:   st.workspaceID(),
+		CodexThreadID: strings.TrimSpace(codexResp.ThreadID),
+		CodexSummary:  strings.TrimSpace(firstNonEmpty(codexResp.Summary, codexResp.FinalResponse)),
+		Files:         backups,
 	}); err != nil {
 		restoreErr := rollbackAppliedSteps(backups)
 		if restoreErr != nil {
@@ -692,6 +698,8 @@ func saveApplyBackup(backup applyBackup) error {
 	data, err := json.MarshalIndent(applyBackupDisk{
 		ApplyID:        backup.ApplyID,
 		WorkspaceID:    backup.WorkspaceID,
+		CodexThreadID:  backup.CodexThreadID,
+		CodexSummary:   backup.CodexSummary,
 		Files:          backup.Files,
 		FilePath:       backup.FilePath,
 		FileKind:       backup.FileKind,
@@ -725,6 +733,8 @@ func loadApplyBackup(applyID string) (applyBackup, error) {
 	backup := applyBackup{
 		ApplyID:        disk.ApplyID,
 		WorkspaceID:    firstNonEmpty(disk.WorkspaceID, disk.LegacyProjectID),
+		CodexThreadID:  disk.CodexThreadID,
+		CodexSummary:   disk.CodexSummary,
 		Files:          disk.Files,
 		FilePath:       disk.FilePath,
 		FileKind:       disk.FileKind,
