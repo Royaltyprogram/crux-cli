@@ -15,7 +15,7 @@ async function main() {
 
   const request = JSON.parse(await readFile(requestPath, "utf8"));
   const codex = new Codex();
-  const thread = codex.startThread({
+  const threadOptions = {
     workingDirectory: request.working_directory,
     additionalDirectories: request.additional_directories ?? [],
     sandboxMode: request.sandbox_mode ?? "workspace-write",
@@ -23,7 +23,10 @@ async function main() {
     modelReasoningEffort: request.model_reasoning_effort || undefined,
     skipGitRepoCheck: request.skip_git_repo_check !== false,
     networkAccessEnabled: request.network_access_enabled === true,
-  });
+  };
+  const thread = request.resume_thread_id
+    ? codex.resumeThread(request.resume_thread_id, threadOptions)
+    : codex.startThread(threadOptions);
 
   const outputSchema = {
     type: "object",
@@ -90,8 +93,8 @@ async function main() {
 
   process.stdout.write(
     JSON.stringify(
-      {
-        thread_id: thread.id,
+        {
+        thread_id: thread.id ?? request.resume_thread_id ?? null,
         status: structured.status,
         summary: structured.summary,
         final_response: finalResponse,

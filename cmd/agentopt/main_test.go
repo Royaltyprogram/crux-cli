@@ -46,7 +46,7 @@ func useStubCodexRunner(t *testing.T, mode string) string {
 
 	scriptPath := filepath.Join(t.TempDir(), "codex-runner-stub.mjs")
 	script := `#!/usr/bin/env node
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 const requestPath = process.argv[2];
@@ -54,7 +54,18 @@ const request = JSON.parse(await readFile(requestPath, "utf8"));
 const mode = process.env.AGENTOPT_STUB_MODE || "apply";
 const changed = [];
 
+if (process.env.AGENTOPT_STUB_REQUIRE_RESUME === "1" && !request.resume_thread_id) {
+  process.stderr.write("missing resume_thread_id\n");
+  process.exit(1);
+}
+
 for (const step of request.steps || []) {
+  if (step.operation === "delete_file") {
+    await rm(step.target_file, { force: true });
+    changed.push(step.target_file);
+    continue;
+  }
+
   await mkdir(path.dirname(step.target_file), { recursive: true });
   if (step.operation === "append_block" || step.operation === "text_append") {
     let original = "";
@@ -86,7 +97,7 @@ if (mode === "extra_change") {
 }
 
 process.stdout.write(JSON.stringify({
-  thread_id: "thread-" + mode,
+  thread_id: request.resume_thread_id || ("thread-" + mode),
   status: mode === "blocked" ? "blocked" : "applied",
   summary: mode === "blocked" ? "stub blocked request" : "stub applied request",
   changed_files: changed,
@@ -1215,6 +1226,113 @@ func TestRunSyncOnceRollsBackRequestedPlansAndDeletesBackup(t *testing.T) {
 	require.Contains(t, reported.AppliedFile, textTarget)
 
 	backupPath, err := applyBackupPath("apply-sync-rollback")
+	require.NoError(t, err)
+	_, err = os.Stat(backupPath)
+	require.Error(t, err)
+	require.True(t, os.IsNotExist(err))
+}
+
+func TestRunSyncOnceFallsBackToCodexRollbackThreadWhenLocalRestoreFails(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+	useStubCodexRunner(t, "rollback")
+	t.Setenv("AGENTOPT_STUB_REQUIRE_RESUME", "1")
+
+	originalRollbackRestore := rollbackRestoreExecutor
+	rollbackRestoreExecutor = func([]applyFileBackup) error {
+		return fmt.Errorf("forced local restore failure")
+	}
+	t.Cleanup(func() {
+		rollbackRestoreExecutor = originalRollbackRestore
+	})
+
+	configTarget := filepath.Join(root, "config.json")
+	createdTarget := filepath.Join(root, ".mcp.json")
+	require.NoError(t, os.WriteFile(configTarget, []byte("{\"shell_profile\":\"safe\"}\n"), 0o644))
+	require.NoError(t, os.WriteFile(createdTarget, []byte("{\"new\":true}\n"), 0o644))
+
+	require.NoError(t, saveApplyBackup(applyBackup{
+		ApplyID:       "apply-sync-rollback-thread",
+		WorkspaceID:   "project-1",
+		CodexThreadID: "thread-apply-rollback",
+		Files: []applyFileBackup{
+			{
+				FilePath:       configTarget,
+				FileKind:       "json_merge",
+				OriginalExists: true,
+				OriginalJSON: map[string]any{
+					"baseline": true,
+				},
+			},
+			{
+				FilePath:       createdTarget,
+				FileKind:       "json_merge",
+				OriginalExists: false,
+			},
+		},
+	}))
+
+	var reported request.ApplyResultReq
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token-sync-rollback-thread", r.Header.Get("X-AgentOpt-Token"))
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/applies/pending":
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.PendingApplyResp{
+					Items: []response.PendingApplyItem{{
+						ApplyID: "apply-sync-rollback-thread",
+						Action:  "rollback",
+						Status:  "rollback_requested",
+						Note:    "fallback rollback requested",
+					}},
+				}),
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/applies/result":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&reported))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ApplyResultResp{
+					ApplyID:    reported.ApplyID,
+					Status:     "rollback_confirmed",
+					RolledBack: true,
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	st := state{
+		ServerURL:   server.URL,
+		APIToken:    "token-sync-rollback-thread",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
+	}
+
+	err := runSyncOnce(st, newAPIClient(server.URL, "token-sync-rollback-thread"), "", "")
+	require.NoError(t, err)
+
+	configData, err := os.ReadFile(configTarget)
+	require.NoError(t, err)
+	require.Contains(t, string(configData), "\"baseline\": true")
+	require.NotContains(t, string(configData), "\"shell_profile\"")
+
+	_, err = os.Stat(createdTarget)
+	require.Error(t, err)
+	require.True(t, os.IsNotExist(err))
+
+	require.Equal(t, "apply-sync-rollback-thread", reported.ApplyID)
+	require.True(t, reported.Success)
+	require.True(t, reported.RolledBack)
+	require.Equal(t, "rolled back by agentopt sync", reported.Note)
+	require.Contains(t, reported.AppliedFile, configTarget)
+	require.Contains(t, reported.AppliedFile, createdTarget)
+
+	backupPath, err := applyBackupPath("apply-sync-rollback-thread")
 	require.NoError(t, err)
 	_, err = os.Stat(backupPath)
 	require.Error(t, err)

@@ -1,10 +1,14 @@
 import { readFile } from "node:fs/promises";
 
 const applyPlanPromptTemplateURL = new URL("./prompts/apply_plan_prompt.md", import.meta.url);
+const rollbackPlanPromptTemplateURL = new URL("./prompts/rollback_plan_prompt.md", import.meta.url);
 
 export async function buildPrompt(request) {
-  const template = await readFile(applyPlanPromptTemplateURL, "utf8");
+  const templateURL =
+    request.mode === "rollback" ? rollbackPlanPromptTemplateURL : applyPlanPromptTemplateURL;
+  const template = await readFile(templateURL, "utf8");
   return renderPromptTemplate(template, {
+    ROLLBACK_CONTEXT: buildRollbackContextBlock(request),
     APPROVED_FILES: buildApprovedFilesBlock(request.allowed_files ?? []),
     APPROVED_STEPS: buildApprovedStepsBlock(request.steps ?? []),
   });
@@ -47,6 +51,21 @@ export function buildApprovedStepsBlock(steps) {
     }
   }
   return lines.join("\n");
+}
+
+function buildRollbackContextBlock(request) {
+  if (request.mode !== "rollback") {
+    return "";
+  }
+
+  const lines = [];
+  if (request.apply_id) {
+    lines.push(`- apply_id=${request.apply_id}`);
+  }
+  if (request.resume_thread_id) {
+    lines.push(`- resume_thread_id=${request.resume_thread_id}`);
+  }
+  return lines.length ? lines.join("\n") : "- none";
 }
 
 function indentBlock(text, prefix) {

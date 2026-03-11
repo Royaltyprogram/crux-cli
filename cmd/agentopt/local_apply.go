@@ -59,7 +59,9 @@ type localApplyResult struct {
 }
 
 type codexApplyRequest struct {
+	Mode                  string           `json:"mode,omitempty"`
 	ApplyID               string           `json:"apply_id"`
+	ResumeThreadID        string           `json:"resume_thread_id,omitempty"`
 	WorkingDirectory      string           `json:"working_directory"`
 	AdditionalDirectories []string         `json:"additional_directories"`
 	AllowedFiles          []string         `json:"allowed_files"`
@@ -109,6 +111,8 @@ type preflightStep struct {
 	TargetSource string `json:"target_source"`
 	Allowed      bool   `json:"allowed"`
 }
+
+var rollbackRestoreExecutor = rollbackAppliedSteps
 
 func executeLocalApply(st state, applyID string, previews []response.PatchPreviewItem, targetOverride, reasoningEffort string) (localApplyResult, error) {
 	preflight, err := preflightLocalApply(st, applyID, previews, targetOverride)
@@ -173,8 +177,15 @@ func executeLocalRollback(applyID string) (localApplyResult, error) {
 	}
 
 	files := normalizeApplyBackupFiles(backup)
-	if err := rollbackAppliedSteps(files); err != nil {
-		return localApplyResult{}, err
+	if err := rollbackRestoreExecutor(files); err != nil {
+		if strings.TrimSpace(backup.CodexThreadID) == "" {
+			return localApplyResult{}, err
+		}
+		fallbackResult, fallbackErr := runCodexRollback(backup, "")
+		if fallbackErr != nil {
+			return localApplyResult{}, fmt.Errorf("local rollback failed: %v; Codex rollback fallback failed: %w", err, fallbackErr)
+		}
+		return fallbackResult, nil
 	}
 
 	return localApplyResult{
@@ -257,6 +268,7 @@ func newCodexApplyRequest(applyID string, preflight preflightResult, previews []
 		})
 	}
 	return codexApplyRequest{
+		Mode:                  "apply",
 		ApplyID:               applyID,
 		WorkingDirectory:      workingDirectory,
 		AdditionalDirectories: additionalDirectories,
@@ -268,6 +280,93 @@ func newCodexApplyRequest(applyID string, preflight preflightResult, previews []
 		NetworkAccessEnabled:  false,
 		Steps:                 steps,
 	}, nil
+}
+
+func newCodexRollbackRequest(backup applyBackup, reasoningEffort string) (codexApplyRequest, error) {
+	files := normalizeApplyBackupFiles(backup)
+	if len(files) == 0 {
+		return codexApplyRequest{}, errors.New("rollback backup has no tracked files")
+	}
+
+	steps := make([]preflightStep, 0, len(files))
+	allowedFiles := make([]string, 0, len(files))
+	codexSteps := make([]codexApplyStep, 0, len(files))
+	for _, file := range files {
+		if strings.TrimSpace(file.FilePath) == "" {
+			return codexApplyRequest{}, errors.New("rollback backup has an empty file path")
+		}
+		steps = append(steps, preflightStep{TargetFile: file.FilePath})
+		allowedFiles = append(allowedFiles, file.FilePath)
+
+		step, err := buildCodexRollbackStep(file)
+		if err != nil {
+			return codexApplyRequest{}, err
+		}
+		codexSteps = append(codexSteps, step)
+	}
+
+	workingDirectory, additionalDirectories, err := chooseApplyWorkspace(steps)
+	if err != nil {
+		return codexApplyRequest{}, err
+	}
+
+	return codexApplyRequest{
+		Mode:                  "rollback",
+		ApplyID:               backup.ApplyID,
+		ResumeThreadID:        strings.TrimSpace(backup.CodexThreadID),
+		WorkingDirectory:      workingDirectory,
+		AdditionalDirectories: additionalDirectories,
+		AllowedFiles:          allowedFiles,
+		ModelReasoningEffort:  reasoningEffort,
+		SandboxMode:           "workspace-write",
+		ApprovalPolicy:        "never",
+		SkipGitRepoCheck:      true,
+		NetworkAccessEnabled:  false,
+		Steps:                 codexSteps,
+	}, nil
+}
+
+func buildCodexRollbackStep(file applyFileBackup) (codexApplyStep, error) {
+	if !file.OriginalExists {
+		return codexApplyStep{
+			TargetFile: file.FilePath,
+			Operation:  "delete_file",
+			Summary:    "Remove the file created by the previous apply.",
+		}, nil
+	}
+
+	content, err := renderBackupOriginalContent(file)
+	if err != nil {
+		return codexApplyStep{}, err
+	}
+	return codexApplyStep{
+		TargetFile:     file.FilePath,
+		Operation:      "text_replace",
+		Summary:        "Restore the file to its original contents.",
+		ContentPreview: content,
+	}, nil
+}
+
+func renderBackupOriginalContent(file applyFileBackup) (string, error) {
+	switch file.FileKind {
+	case "json_merge":
+		data, err := json.MarshalIndent(file.OriginalJSON, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(append(data, '\n')), nil
+	case "text_append", "text_replace":
+		return file.OriginalText, nil
+	default:
+		if len(file.OriginalJSON) > 0 {
+			data, err := json.MarshalIndent(file.OriginalJSON, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(append(data, '\n')), nil
+		}
+		return file.OriginalText, nil
+	}
 }
 
 func chooseApplyWorkspace(steps []preflightStep) (string, []string, error) {
@@ -488,6 +587,14 @@ func validateChangedFiles(req codexApplyRequest, changedFiles []string) error {
 }
 
 func validateAppliedStep(filePath string, preview response.PatchPreviewItem) error {
+	if preview.Operation == "delete_file" {
+		if _, err := os.Stat(filePath); err == nil {
+			return fmt.Errorf("applied file %s still exists after approved delete", filePath)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
 	if isTextApplyOperation(preview.Operation) {
 		data, err := os.ReadFile(filePath)
 		if err != nil {
@@ -604,6 +711,52 @@ func rollbackAppliedSteps(files []applyFileBackup) error {
 		}
 	}
 	return nil
+}
+
+func runCodexRollback(backup applyBackup, reasoningEffort string) (localApplyResult, error) {
+	req, err := newCodexRollbackRequest(backup, reasoningEffort)
+	if err != nil {
+		return localApplyResult{}, err
+	}
+	if strings.TrimSpace(req.ResumeThreadID) == "" {
+		return localApplyResult{}, errors.New("rollback fallback requires a stored Codex thread id")
+	}
+
+	resp, err := runCodexApply(req)
+	if err != nil {
+		return localApplyResult{}, err
+	}
+
+	previews := make([]response.PatchPreviewItem, 0, len(req.Steps))
+	for _, step := range req.Steps {
+		previews = append(previews, response.PatchPreviewItem{
+			FilePath:       step.TargetFile,
+			Operation:      step.Operation,
+			ContentPreview: step.ContentPreview,
+		})
+	}
+	preflight := preflightResult{
+		ApplyID: backup.ApplyID,
+		Allowed: true,
+		Steps:   make([]preflightStep, 0, len(req.Steps)),
+	}
+	for _, step := range req.Steps {
+		preflight.Steps = append(preflight.Steps, preflightStep{
+			TargetFile: step.TargetFile,
+			Allowed:    true,
+		})
+	}
+	if err := validateCodexApply(req, preflight, previews, resp); err != nil {
+		return localApplyResult{}, err
+	}
+
+	files := normalizeApplyBackupFiles(backup)
+	return localApplyResult{
+		FilePath:        rollbackAppliedFile(files),
+		FilePaths:       backupFilePaths(files),
+		AppliedSettings: rollbackAppliedSettings(files),
+		AppliedText:     rollbackAppliedText(files),
+	}, nil
 }
 
 func normalizeApplyBackupFiles(backup applyBackup) []applyFileBackup {
