@@ -36,6 +36,8 @@ ci-beta:
 	$(MAKE) verify-beta-bundle
 	$(MAKE) verify-install-script
 
+verify: ci-beta
+
 beta-cli-bundle:
 	./scripts/build_beta_bundle.sh
 

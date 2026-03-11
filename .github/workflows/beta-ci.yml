@@ -39,16 +39,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload beta binaries
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: agentopt-beta-binaries-${{ github.sha }}
           path: |
@@ -109,7 +109,7 @@ jobs:
 
       - name: Upload server log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: agentopt-beta-server-log-${{ github.sha }}
           path: /tmp/agentopt-server.log
@@ -117,7 +117,7 @@ jobs:
 
       - name: Upload prod server log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: agentopt-beta-prod-server-log-${{ github.sha }}
           path: /tmp/agentopt-prod-server.log
@@ -145,16 +145,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -175,7 +175,7 @@ jobs:
         run: make verify-beta-bundle
 
       - name: Upload beta bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: agentopt-beta-bundle-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
           path: |
@@ -191,10 +191,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download beta bundle artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: output/release
           pattern: agentopt-beta-bundle-*-${{ github.sha }}
@@ -206,7 +206,7 @@ jobs:
         run: make build-release-index
 
       - name: Upload release index artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: agentopt-beta-release-index-${{ github.sha }}
           path: |
@@ -222,17 +222,17 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download beta bundle artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: output/release
           pattern: agentopt-beta-bundle-*-${{ github.sha }}
           merge-multiple: true
 
       - name: Download release index artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: output/release
           pattern: agentopt-beta-release-index-${{ github.sha }}
