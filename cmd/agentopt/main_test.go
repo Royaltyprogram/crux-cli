@@ -66,6 +66,8 @@ for (const step of request.steps || []) {
       next += step.content_preview || "";
     }
     await writeFile(step.target_file, next, "utf8");
+  } else if (step.operation === "text_replace") {
+    await writeFile(step.target_file, step.content_preview || "", "utf8");
   } else {
     let current = {};
     try {
@@ -801,6 +803,38 @@ func TestExecuteLocalApplyAppendsTextFile(t *testing.T) {
 	require.Contains(t, string(data), "safe rollout")
 }
 
+func TestExecuteLocalApplyInstallsAgentoptSkillFile(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+	t.Setenv("HOME", home)
+	useStubCodexRunner(t, "apply")
+
+	skillTarget := filepath.Join(home, ".codex", "skills", "agentopt-repo-discovery", "SKILL.md")
+	content := "---\nname: agentopt-repo-discovery\n---\n\n# Repo Discovery Baseline\n"
+
+	result, err := executeLocalApply(state{WorkspaceID: "project-1"}, "apply-skill", []response.PatchPreviewItem{
+		{
+			FilePath:       "~/.codex/skills/agentopt-repo-discovery/SKILL.md",
+			Operation:      "text_replace",
+			ContentPreview: content,
+		},
+	}, "", "")
+	require.NoError(t, err)
+	require.Equal(t, skillTarget, result.FilePath)
+	require.Contains(t, result.AppliedText, "Repo Discovery Baseline")
+
+	data, err := os.ReadFile(skillTarget)
+	require.NoError(t, err)
+	require.Equal(t, content, string(data))
+
+	backup, err := loadApplyBackup("apply-skill")
+	require.NoError(t, err)
+	require.Len(t, backup.Files, 1)
+	require.False(t, backup.Files[0].OriginalExists)
+	require.Equal(t, "text_replace", backup.Files[0].FileKind)
+}
+
 func TestPreflightLocalApplyRejectsUnsafeTarget(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
@@ -815,6 +849,44 @@ func TestPreflightLocalApplyRejectsUnsafeTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Allowed)
 	require.Len(t, result.Steps, 1)
+	require.Equal(t, "file_scope", result.Steps[0].Guard)
+}
+
+func TestPreflightLocalApplyAllowsAgentoptSkillTarget(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+	t.Setenv("HOME", home)
+
+	result, err := preflightLocalApply(state{WorkspaceID: "project-1"}, "apply-skill", []response.PatchPreviewItem{
+		{
+			FilePath:       "~/.codex/skills/agentopt-repo-discovery/SKILL.md",
+			Operation:      "text_replace",
+			ContentPreview: "---\nname: agentopt-repo-discovery\n",
+		},
+	}, "")
+	require.NoError(t, err)
+	require.True(t, result.Allowed)
+	require.Len(t, result.Steps, 1)
+	require.True(t, result.Steps[0].Allowed)
+	require.Equal(t, filepath.Join(home, ".codex", "skills", "agentopt-repo-discovery", "SKILL.md"), result.Steps[0].TargetFile)
+}
+
+func TestPreflightLocalApplyRejectsNonAgentoptSkillTarget(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+	t.Setenv("HOME", home)
+
+	result, err := preflightLocalApply(state{WorkspaceID: "project-1"}, "apply-skill-unsafe", []response.PatchPreviewItem{
+		{
+			FilePath:       "~/.codex/skills/custom-repo/SKILL.md",
+			Operation:      "text_replace",
+			ContentPreview: "---\nname: custom-repo\n",
+		},
+	}, "")
+	require.NoError(t, err)
+	require.False(t, result.Allowed)
 	require.Equal(t, "file_scope", result.Steps[0].Guard)
 }
 

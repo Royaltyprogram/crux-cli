@@ -22,6 +22,7 @@ const (
 	defaultInstructionHeading     = "## AgentOpt Research Findings"
 	defaultCodexInstructionTarget = "~/.codex/AGENTS.md"
 	defaultMCPConfigTarget        = ".mcp.json"
+	defaultCodexSkillTarget       = "~/.codex/skills/agentopt-repo-discovery/SKILL.md"
 )
 
 type CloudResearchAgent struct {
@@ -221,6 +222,9 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 	if configRecommendation, ok := buildInstructionFileRecommendation(latestSnapshot, patternCounts); ok {
 		recommendations = append(recommendations, configRecommendation)
 	}
+	if skillRecommendation, ok := buildSkillRecommendation(latestSnapshot, patternCounts, usageSummary); ok {
+		recommendations = append(recommendations, skillRecommendation)
+	}
 	if mcpRecommendation, ok := buildMCPRecommendation(latestSnapshot, patternCounts, usageSummary); ok {
 		recommendations = append(recommendations, mcpRecommendation)
 	}
@@ -310,6 +314,44 @@ func buildInstructionFileRecommendation(snapshot *ConfigSnapshot, patternCounts 
 			SettingsUpdates: map[string]any{
 				"instruction_files": nextFiles,
 			},
+		}},
+	}, true
+}
+
+func buildSkillRecommendation(snapshot *ConfigSnapshot, patternCounts map[string]int, usageSummary researchUsageSummary) (researchRecommendation, bool) {
+	if snapshot == nil || strings.ToLower(strings.TrimSpace(snapshot.Tool)) != "codex" {
+		return researchRecommendation{}, false
+	}
+
+	repoDiscoveryPressure := patternCounts["repo_discovery"] + patternCounts["verification"] + patternCounts["contract_review"]
+	if repoDiscoveryPressure < 3 {
+		return researchRecommendation{}, false
+	}
+	if strings.TrimSpace(bundledRepoDiscoverySkill) == "" {
+		return researchRecommendation{}, false
+	}
+
+	return researchRecommendation{
+		Kind:            "skill-repo-discovery-baseline",
+		Title:           "Install a Codex repo-discovery skill",
+		Summary:         "The user keeps spending early turns on repo discovery and verification setup, so that workflow should become a reusable Codex skill instead of a repeated prompt pattern.",
+		Reason:          fmt.Sprintf("Recent sessions hit %d repo-discovery or verification prompts with %d ms average first-response latency.", repoDiscoveryPressure, usageSummary.AvgFirstResponseLatencyMS),
+		Explanation:     "Installing a small Codex skill turns recurring repo-orientation behavior into a stable workflow the agent can reuse before proposing edits.",
+		ExpectedBenefit: "Faster control-flow mapping and more consistent verification plans in unfamiliar repositories.",
+		Risk:            "Low. Single-file skill install into the local Codex skills directory.",
+		ExpectedImpact:  "Less repeated repo-discovery prompting before the first useful patch.",
+		Score:           skillRecommendationScore(repoDiscoveryPressure, usageSummary.AvgFirstResponseLatencyMS),
+		Evidence: []string{
+			fmt.Sprintf("repo_discovery_prompts=%d", repoDiscoveryPressure),
+			fmt.Sprintf("avg_first_response_latency_ms=%d", usageSummary.AvgFirstResponseLatencyMS),
+			"target_file=" + defaultCodexSkillTarget,
+		},
+		Steps: []ChangePlanStep{{
+			Type:           "skill_install",
+			Action:         "text_replace",
+			TargetFile:     defaultCodexSkillTarget,
+			Summary:        "Install the AgentOpt repo-discovery skill into the local Codex skills directory.",
+			ContentPreview: bundledRepoDiscoverySkill,
 		}},
 	}, true
 }
@@ -663,6 +705,17 @@ func mcpRecommendationScore(repoDiscoveryPressure, enabledMCPCount, toolWallTime
 	}
 	if score > 0.64 {
 		score = 0.64
+	}
+	return round(score)
+}
+
+func skillRecommendationScore(repoDiscoveryPressure, avgFirstResponseLatencyMS int) float64 {
+	score := 0.54 + 0.02*float64(minInt(repoDiscoveryPressure, 4))
+	if avgFirstResponseLatencyMS >= 1800 {
+		score += 0.04
+	}
+	if score > 0.68 {
+		score = 0.68
 	}
 	return round(score)
 }

@@ -667,13 +667,19 @@ func TestAnalyzeProjectAddsConfigAndMCPRecommendationsFromSnapshot(t *testing.T)
 
 	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-config"})
 	require.NoError(t, err)
-	require.Len(t, recommendations.Items, 3)
+	require.Len(t, recommendations.Items, 4)
 
 	configRecommendation := findRecommendationByKind(recommendations.Items, "config-personal-instruction-files")
 	require.NotNil(t, configRecommendation)
 	require.Equal(t, ".codex/config.json", configRecommendation.ChangePlan[0].TargetFile)
 	require.Equal(t, "merge_patch", configRecommendation.ChangePlan[0].Action)
 	require.Equal(t, []string{"AGENTS.md", defaultCodexInstructionTarget}, configRecommendation.ChangePlan[0].SettingsUpdates["instruction_files"])
+
+	skillRecommendation := findRecommendationByKind(recommendations.Items, "skill-repo-discovery-baseline")
+	require.NotNil(t, skillRecommendation)
+	require.Equal(t, defaultCodexSkillTarget, skillRecommendation.ChangePlan[0].TargetFile)
+	require.Equal(t, "text_replace", skillRecommendation.ChangePlan[0].Action)
+	require.Contains(t, skillRecommendation.ChangePlan[0].ContentPreview, "Repo Discovery Baseline")
 
 	mcpRecommendation := findRecommendationByKind(recommendations.Items, "mcp-repo-discovery-baseline")
 	require.NotNil(t, mcpRecommendation)
@@ -688,6 +694,30 @@ func TestAnalyzeProjectAddsConfigAndMCPRecommendationsFromSnapshot(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, "auto_approved", plan.PolicyMode)
 	require.Equal(t, "approved_for_local_apply", plan.Status)
+
+	_, err = svc.ReportApplyResult(ctx, &request.ApplyResultReq{
+		ApplyID: plan.ApplyID,
+		Success: true,
+		Note:    "config recommendation applied in test",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ReportApplyResult(ctx, &request.ApplyResultReq{
+		ApplyID:    plan.ApplyID,
+		Success:    true,
+		Note:       "config recommendation rolled back in test",
+		RolledBack: true,
+	})
+	require.NoError(t, err)
+
+	skillPlan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
+		RecommendationID: skillRecommendation.ID,
+		RequestedBy:      "user-config",
+		Scope:            "user",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "requires_review", skillPlan.PolicyMode)
+	require.Equal(t, "awaiting_review", skillPlan.Status)
 }
 
 func TestCreateApplyPlanBlocksWhenActiveExperimentExists(t *testing.T) {

@@ -213,7 +213,7 @@ func snapshotApplyTarget(filePath string, preview response.PatchPreviewItem) (ap
 		}
 		return applyFileBackup{
 			FilePath:       filePath,
-			FileKind:       "text_append",
+			FileKind:       textFileKind(preview.Operation),
 			OriginalExists: err == nil,
 			OriginalText:   string(originalBytes),
 		}, nil
@@ -487,7 +487,14 @@ func validateAppliedStep(filePath string, preview response.PatchPreviewItem) err
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(string(data), preview.ContentPreview) {
+		content := string(data)
+		if preview.Operation == "text_replace" {
+			if content != preview.ContentPreview {
+				return fmt.Errorf("applied file %s does not match approved content", filePath)
+			}
+			return nil
+		}
+		if !strings.Contains(content, preview.ContentPreview) {
 			return fmt.Errorf("applied file %s does not contain approved content", filePath)
 		}
 		return nil
@@ -548,11 +555,18 @@ func plannedAppliedText(previews []response.PatchPreviewItem) string {
 
 func isTextApplyOperation(operation string) bool {
 	switch operation {
-	case "append_block", "text_append":
+	case "append_block", "text_append", "text_replace":
 		return true
 	default:
 		return false
 	}
+}
+
+func textFileKind(operation string) string {
+	if operation == "text_replace" {
+		return "text_replace"
+	}
+	return "text_append"
 }
 
 func rollbackAppliedSteps(files []applyFileBackup) error {

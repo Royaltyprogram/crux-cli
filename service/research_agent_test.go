@@ -111,22 +111,29 @@ func TestCloudResearchAgentAnalyzeProjectAddsConfigAndMCPRecommendations(t *test
 		CapturedAt: time.Now().UTC(),
 	}})
 
-	require.Len(t, recs, 3)
+	require.Len(t, recs, 4)
 	require.Equal(t, "instruction-custom-rules", recs[0].Kind)
 
 	var configRecommendation *researchRecommendation
+	var skillRecommendation *researchRecommendation
 	var mcpRecommendation *researchRecommendation
 	for i := range recs {
 		switch recs[i].Kind {
 		case "config-personal-instruction-files":
 			configRecommendation = &recs[i]
+		case "skill-repo-discovery-baseline":
+			skillRecommendation = &recs[i]
 		case "mcp-repo-discovery-baseline":
 			mcpRecommendation = &recs[i]
 		}
 	}
 	require.NotNil(t, configRecommendation)
+	require.NotNil(t, skillRecommendation)
 	require.NotNil(t, mcpRecommendation)
 	require.Equal(t, ".codex/config.json", configRecommendation.Steps[0].TargetFile)
+	require.Equal(t, defaultCodexSkillTarget, skillRecommendation.Steps[0].TargetFile)
+	require.Equal(t, "text_replace", skillRecommendation.Steps[0].Action)
+	require.Contains(t, skillRecommendation.Steps[0].ContentPreview, "name: agentopt-repo-discovery")
 	require.Equal(t, defaultMCPConfigTarget, mcpRecommendation.Steps[0].TargetFile)
 	require.Equal(t, []string{"filesystem", "git"}, mcpRecommendation.Steps[0].SettingsUpdates["mcp_servers"])
 }

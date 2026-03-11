@@ -726,6 +726,9 @@
       if (value.includes("instruction")) {
         return "Custom instruction";
       }
+      if (value.includes("skill")) {
+        return "Codex skill";
+      }
       if (value.includes("mcp")) {
         return "MCP baseline";
       }
@@ -739,6 +742,9 @@
       const value = String(kind || "").toLowerCase();
       if (value.includes("instruction")) {
         return "warn";
+      }
+      if (value.includes("skill")) {
+        return "good";
       }
       if (value.includes("mcp")) {
         return "sky";

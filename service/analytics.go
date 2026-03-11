@@ -2353,10 +2353,10 @@ func buildDashboardOutcomeSummary(successfulRollouts, failedExecutions int, roll
 	case failedExecutions > 0:
 		return fmt.Sprintf("%d rollout(s) need attention after failing local execution.", failedExecutions)
 	case successfulRollouts == 0:
-		return "No completed rollouts yet. Approve a change to start measuring token trends."
+		return "No completed rollouts yet. Approve a change to start measuring workflow impact."
 	case rollbackRate >= 0.25:
-		return "Recent rollouts are being reversed too often. Narrow the next instruction change."
+		return "Recent rollouts are being reversed too often. Narrow the next configuration change."
 	default:
-		return "Recent instruction changes are landing. Keep uploading sessions to measure token impact."
+		return "Recent configuration changes are landing. Keep uploading sessions to measure workflow impact."
 	}
 }

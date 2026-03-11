@@ -1401,7 +1401,7 @@ func stepTargetOverride(raw string, index int) string {
 
 func isAllowedOperation(operation string) bool {
 	switch operation {
-	case "", "merge_patch", "append_block", "text_append":
+	case "", "merge_patch", "append_block", "text_append", "text_replace":
 		return true
 	default:
 		return false
@@ -1409,6 +1409,7 @@ func isAllowedOperation(operation string) bool {
 }
 
 func isAllowedTarget(previewPath, resolvedPath string) bool {
+	allowSkillTarget := isAllowedAgentoptSkillTarget(previewPath) || isAllowedAgentoptSkillTarget(resolvedPath)
 	allowedRelative := map[string]struct{}{
 		filepath.Clean(".codex/config.json"):          {},
 		filepath.Clean(".claude/settings.local.json"): {},
@@ -1419,7 +1420,7 @@ func isAllowedTarget(previewPath, resolvedPath string) bool {
 	}
 
 	if !filepath.IsAbs(previewPath) {
-		if _, ok := allowedRelative[filepath.Clean(previewPath)]; !ok {
+		if _, ok := allowedRelative[filepath.Clean(previewPath)]; !ok && !allowSkillTarget {
 			return false
 		}
 	}
@@ -1431,8 +1432,12 @@ func isAllowedTarget(previewPath, resolvedPath string) bool {
 		".mcp.json":           {},
 		"AGENTS.md":           {},
 		"CLAUDE.md":           {},
+		"SKILL.md":            {},
 	}
 	if _, ok := allowedBase[base]; !ok {
+		return false
+	}
+	if base == "SKILL.md" && !allowSkillTarget {
 		return false
 	}
 
@@ -1448,6 +1453,23 @@ func isAllowedTarget(previewPath, resolvedPath string) bool {
 		return true
 	}
 	return false
+}
+
+func isAllowedAgentoptSkillTarget(target string) bool {
+	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
+	if cleaned == "" || !strings.HasSuffix(cleaned, "/SKILL.md") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(cleaned, ".codex/skills/agentopt-"):
+		return true
+	case strings.HasPrefix(cleaned, "~/.codex/skills/agentopt-"):
+		return true
+	case strings.Contains(cleaned, "/.codex/skills/agentopt-"):
+		return true
+	default:
+		return false
+	}
 }
 
 func isWithinRoot(root, target string) bool {
