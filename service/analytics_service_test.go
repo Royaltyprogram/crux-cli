@@ -10,7 +10,17 @@ import (
 
 	"github.com/Royaltyprogram/aiops/configs"
 	"github.com/Royaltyprogram/aiops/dto/request"
+	"github.com/Royaltyprogram/aiops/dto/response"
 )
+
+func findRecommendationByKind(items []response.RecommendationResp, kind string) *response.RecommendationResp {
+	for i := range items {
+		if items[i].Kind == kind {
+			return &items[i]
+		}
+	}
+	return nil
+}
 
 func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	ctx := context.Background()
@@ -594,6 +604,90 @@ func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
 	require.Equal(t, "awaiting_review", plan.ApprovalStatus)
 	require.Equal(t, "pending", plan.Decision)
 	require.Empty(t, plan.ReviewedBy)
+}
+
+func TestAnalyzeProjectAddsConfigAndMCPRecommendationsFromSnapshot(t *testing.T) {
+	ctx := context.Background()
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:         conf,
+		AnalyticsStore: store,
+	})
+
+	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+		OrgID:      "org-config",
+		UserID:     "user-config",
+		DeviceName: "macbook",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-config",
+		AgentID:     agentResp.AgentID,
+		ProjectID:   "project-config",
+		Name:        "config",
+		RepoHash:    "config-hash",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UploadConfigSnapshot(ctx, &request.ConfigSnapshotReq{
+		ProjectID:        "project-config",
+		Tool:             "codex",
+		ProfileID:        "baseline",
+		Settings:         map[string]any{"mcp_servers": []any{"filesystem"}},
+		EnabledMCPCount:  1,
+		InstructionFiles: []string{"AGENTS.md"},
+		CapturedAt:       time.Now().UTC().Add(-time.Hour),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID:              "project-config",
+		SessionID:              "session-config",
+		Tool:                   "codex",
+		TokenIn:                1300,
+		TokenOut:               320,
+		ToolWallTimeMS:         2100,
+		FirstResponseLatencyMS: 2200,
+		RawQueries: []string{
+			"Inspect the current analytics flow before editing it.",
+			"Locate the files involved in the approval flow.",
+			"Compare this response contract with the health controller.",
+			"List the exact tests to run after the patch.",
+		},
+		Timestamp: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-config"})
+	require.NoError(t, err)
+	require.Len(t, recommendations.Items, 3)
+
+	configRecommendation := findRecommendationByKind(recommendations.Items, "config-personal-instruction-files")
+	require.NotNil(t, configRecommendation)
+	require.Equal(t, ".codex/config.json", configRecommendation.ChangePlan[0].TargetFile)
+	require.Equal(t, "merge_patch", configRecommendation.ChangePlan[0].Action)
+	require.Equal(t, []string{"AGENTS.md", defaultCodexInstructionTarget}, configRecommendation.ChangePlan[0].SettingsUpdates["instruction_files"])
+
+	mcpRecommendation := findRecommendationByKind(recommendations.Items, "mcp-repo-discovery-baseline")
+	require.NotNil(t, mcpRecommendation)
+	require.Equal(t, defaultMCPConfigTarget, mcpRecommendation.ChangePlan[0].TargetFile)
+	require.Equal(t, []string{"filesystem", "git"}, mcpRecommendation.ChangePlan[0].SettingsUpdates["mcp_servers"])
+
+	plan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
+		RecommendationID: configRecommendation.ID,
+		RequestedBy:      "user-config",
+		Scope:            "user",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "auto_approved", plan.PolicyMode)
+	require.Equal(t, "approved_for_local_apply", plan.Status)
 }
 
 func TestCreateApplyPlanBlocksWhenActiveExperimentExists(t *testing.T) {

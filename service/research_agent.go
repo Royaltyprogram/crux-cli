@@ -21,6 +21,7 @@ const (
 	defaultResearchRequestTimeout = 45 * time.Second
 	defaultInstructionHeading     = "## AgentOpt Research Findings"
 	defaultCodexInstructionTarget = "~/.codex/AGENTS.md"
+	defaultMCPConfigTarget        = ".mcp.json"
 )
 
 type CloudResearchAgent struct {
@@ -165,8 +166,6 @@ func NewCloudResearchAgentPlaceholder(conf *configs.Config) *CloudResearchAgent 
 }
 
 func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) []researchRecommendation {
-	_ = snapshots
-
 	rawQueries := collectRawQueries(sessions)
 	rawQueries = normalizeQueriesForResearchPrompt(rawQueries)
 	if len(rawQueries) == 0 {
@@ -176,6 +175,8 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 	usageSummary := buildResearchUsageSummary(sessions, rawQueries)
 	sampledQueries := sampleRawQueries(rawQueries, minInt(a.sampleSize, len(rawQueries)), a.randSource)
 	contentPreview, generationMode := a.buildInstructionPreview(project, sampledQueries, rawQueries, usageSummary)
+	patternCounts := countInstructionPatternMatches(rawQueries)
+	latestSnapshot := latestConfigSnapshot(snapshots)
 
 	evidence := []string{
 		fmt.Sprintf("sessions=%d", len(sessions)),
@@ -189,8 +190,15 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 		"target_file=" + defaultCodexInstructionTarget,
 		"generation_mode=" + generationMode,
 	}
+	if latestSnapshot != nil {
+		evidence = append(evidence,
+			fmt.Sprintf("snapshot_profile=%s", latestSnapshot.ProfileID),
+			fmt.Sprintf("snapshot_instruction_files=%d", len(latestSnapshot.InstructionFiles)),
+			fmt.Sprintf("snapshot_enabled_mcp_count=%d", latestSnapshot.EnabledMCPCount),
+		)
+	}
 
-	return []researchRecommendation{{
+	recommendations := []researchRecommendation{{
 		Kind:            "instruction-custom-rules",
 		Title:           instructionRecommendationTitle(project),
 		Summary:         "Recent usage history was analyzed to highlight repeated inefficiencies before the local coding agent decides what instruction to add.",
@@ -209,6 +217,21 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 			ContentPreview: contentPreview,
 		}},
 	}}
+
+	if configRecommendation, ok := buildInstructionFileRecommendation(latestSnapshot, patternCounts); ok {
+		recommendations = append(recommendations, configRecommendation)
+	}
+	if mcpRecommendation, ok := buildMCPRecommendation(latestSnapshot, patternCounts, usageSummary); ok {
+		recommendations = append(recommendations, mcpRecommendation)
+	}
+
+	sort.Slice(recommendations, func(i, j int) bool {
+		if recommendations[i].Score == recommendations[j].Score {
+			return recommendations[i].Kind < recommendations[j].Kind
+		}
+		return recommendations[i].Score > recommendations[j].Score
+	})
+	return recommendations
 }
 
 func instructionRecommendationTitle(project *Project) string {
@@ -230,6 +253,116 @@ func collectRawQueries(sessions []*SessionSummary) []string {
 		}
 	}
 	return out
+}
+
+func latestConfigSnapshot(snapshots []*ConfigSnapshot) *ConfigSnapshot {
+	var latest *ConfigSnapshot
+	for _, snapshot := range snapshots {
+		if snapshot == nil {
+			continue
+		}
+		if latest == nil || snapshot.CapturedAt.After(latest.CapturedAt) {
+			latest = snapshot
+		}
+	}
+	return latest
+}
+
+func buildInstructionFileRecommendation(snapshot *ConfigSnapshot, patternCounts map[string]int) (researchRecommendation, bool) {
+	if snapshot == nil || len(snapshot.InstructionFiles) == 0 {
+		return researchRecommendation{}, false
+	}
+
+	workflowFriction := patternCounts["repo_discovery"] + patternCounts["verification"] + patternCounts["contract_review"] + patternCounts["root_cause"]
+	if workflowFriction < 2 {
+		return researchRecommendation{}, false
+	}
+
+	nextFiles := append([]string(nil), snapshot.InstructionFiles...)
+	nextFiles = appendMissingString(nextFiles, "AGENTS.md")
+	nextFiles = appendMissingString(nextFiles, defaultCodexInstructionTarget)
+	if len(nextFiles) == len(snapshot.InstructionFiles) {
+		return researchRecommendation{}, false
+	}
+
+	targetFile := targetConfigFileForTool(snapshot.Tool)
+	return researchRecommendation{
+		Kind:            "config-personal-instruction-files",
+		Title:           "Load personal instruction findings by default",
+		Summary:         "The current config only loads part of the instruction context, so the agent keeps asking for repo discovery and verification guidance again.",
+		Reason:          fmt.Sprintf("Recent sessions hit %d workflow-friction prompts while the latest profile loads %d instruction file(s).", workflowFriction, len(snapshot.InstructionFiles)),
+		Explanation:     "This recommendation connects the global AgentOpt findings file into the coding-agent config so learned workflow guidance stays active without repeating the same steering prompts.",
+		ExpectedBenefit: "Less repeated prompt steering for discovery, diagnosis, and verification across future sessions.",
+		Risk:            "Low. Single-file config merge that only updates the instruction file list.",
+		ExpectedImpact:  "Lower setup churn and fewer repeated control-flow recap prompts.",
+		Score:           instructionFilesRecommendationScore(workflowFriction, len(snapshot.InstructionFiles)),
+		Evidence: []string{
+			fmt.Sprintf("workflow_friction_prompts=%d", workflowFriction),
+			fmt.Sprintf("current_instruction_files=%d", len(snapshot.InstructionFiles)),
+			"current_instruction_file_list=" + strings.Join(snapshot.InstructionFiles, ","),
+			"target_file=" + targetFile,
+		},
+		Steps: []ChangePlanStep{{
+			Type:       "config_merge",
+			Action:     "merge_patch",
+			TargetFile: targetFile,
+			Summary:    "Update the instruction file list so the agent loads both workspace and personal findings by default.",
+			SettingsUpdates: map[string]any{
+				"instruction_files": nextFiles,
+			},
+		}},
+	}, true
+}
+
+func buildMCPRecommendation(snapshot *ConfigSnapshot, patternCounts map[string]int, usageSummary researchUsageSummary) (researchRecommendation, bool) {
+	if snapshot == nil {
+		return researchRecommendation{}, false
+	}
+
+	repoDiscoveryPressure := patternCounts["repo_discovery"] + patternCounts["contract_review"]
+	if repoDiscoveryPressure < 2 {
+		return researchRecommendation{}, false
+	}
+
+	currentServers := snapshotStringList(snapshot.Settings, "mcp_servers")
+	if len(currentServers) == 0 && snapshot.EnabledMCPCount >= 2 {
+		return researchRecommendation{}, false
+	}
+	desiredServers := append([]string(nil), currentServers...)
+	desiredServers = appendMissingString(desiredServers, "filesystem")
+	desiredServers = appendMissingString(desiredServers, "git")
+
+	if len(desiredServers) == len(currentServers) && snapshot.EnabledMCPCount >= 2 {
+		return researchRecommendation{}, false
+	}
+
+	return researchRecommendation{
+		Kind:            "mcp-repo-discovery-baseline",
+		Title:           "Add baseline MCP servers for repo discovery",
+		Summary:         "The usage history shows repeated repo discovery turns, but the current MCP baseline is too thin to support that workflow.",
+		Reason:          fmt.Sprintf("Recent sessions hit %d repo-discovery prompts with %d MCP server(s) enabled in the latest snapshot.", repoDiscoveryPressure, snapshot.EnabledMCPCount),
+		Explanation:     "This recommendation enables a small MCP baseline for file-system and git context so the agent can inspect the workspace state with less manual prompting.",
+		ExpectedBenefit: "Reduce repeated file-location and contract-comparison prompts before the real task begins.",
+		Risk:            "Low. Reviewable JSON merge that only updates the baseline MCP server list.",
+		ExpectedImpact:  "Faster repo discovery and fewer exploratory turns before edits.",
+		Score:           mcpRecommendationScore(repoDiscoveryPressure, snapshot.EnabledMCPCount, usageSummary.TotalToolWallTimeMS),
+		Evidence: []string{
+			fmt.Sprintf("repo_discovery_prompts=%d", repoDiscoveryPressure),
+			fmt.Sprintf("enabled_mcp_count=%d", snapshot.EnabledMCPCount),
+			fmt.Sprintf("total_tool_wall_time_ms=%d", usageSummary.TotalToolWallTimeMS),
+			"current_mcp_servers=" + strings.Join(currentServers, ","),
+			"target_file=" + defaultMCPConfigTarget,
+		},
+		Steps: []ChangePlanStep{{
+			Type:       "config_merge",
+			Action:     "merge_patch",
+			TargetFile: defaultMCPConfigTarget,
+			Summary:    "Install a baseline MCP server list for filesystem and git context.",
+			SettingsUpdates: map[string]any{
+				"mcp_servers": desiredServers,
+			},
+		}},
+	}, true
 }
 
 func (a *CloudResearchAgent) buildInstructionPreview(project *Project, sampledQueries, rawQueries []string, usageSummary researchUsageSummary) (string, string) {
@@ -426,6 +559,22 @@ func stripTaggedBlock(raw, openTag, closeTag string) string {
 	}
 }
 
+func countInstructionPatternMatches(queries []string) map[string]int {
+	counts := make(map[string]int, len(personalInstructionPatterns))
+	for _, query := range queries {
+		normalized := strings.ToLower(strings.TrimSpace(query))
+		if normalized == "" {
+			continue
+		}
+		for _, pattern := range personalInstructionPatterns {
+			if queryMatchesPattern(normalized, pattern.Terms) {
+				counts[pattern.Key]++
+			}
+		}
+	}
+	return counts
+}
+
 func matchInstructionPatterns(queries []string) []matchedInstructionPattern {
 	out := make([]matchedInstructionPattern, 0, len(personalInstructionPatterns))
 	for _, pattern := range personalInstructionPatterns {
@@ -491,6 +640,74 @@ func instructionRecommendationScore(sampleCount int, avgTokensPerQuery float64) 
 		score = 0.93
 	}
 	return round(score)
+}
+
+func instructionFilesRecommendationScore(workflowFriction, currentInstructionFiles int) float64 {
+	score := 0.50 + 0.02*float64(minInt(workflowFriction, 4))
+	if currentInstructionFiles <= 1 {
+		score += 0.03
+	}
+	if score > 0.67 {
+		score = 0.67
+	}
+	return round(score)
+}
+
+func mcpRecommendationScore(repoDiscoveryPressure, enabledMCPCount, toolWallTimeMS int) float64 {
+	score := 0.49 + 0.02*float64(minInt(repoDiscoveryPressure, 4))
+	if enabledMCPCount <= 1 {
+		score += 0.04
+	}
+	if toolWallTimeMS >= 1500 {
+		score += 0.03
+	}
+	if score > 0.64 {
+		score = 0.64
+	}
+	return round(score)
+}
+
+func targetConfigFileForTool(tool string) string {
+	switch strings.ToLower(strings.TrimSpace(tool)) {
+	case "claude", "claude-code":
+		return ".claude/settings.local.json"
+	default:
+		return ".codex/config.json"
+	}
+}
+
+func snapshotStringList(settings map[string]any, key string) []string {
+	raw, ok := settings[key]
+	if !ok {
+		return nil
+	}
+	switch typed := raw.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func appendMissingString(items []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return items
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), value) {
+			return items
+		}
+	}
+	return append(items, value)
 }
 
 func minInt(a, b int) int {

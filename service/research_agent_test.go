@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -82,6 +83,52 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 	require.Contains(t, recs[0].Steps[0].ContentPreview, "## AgentOpt Research Findings")
 	require.Contains(t, recs[0].Steps[0].ContentPreview, "- The user repeatedly has to ask for explicit verification")
 	require.Contains(t, recs[0].Summary, "highlight repeated inefficiencies")
+}
+
+func TestCloudResearchAgentAnalyzeProjectAddsConfigAndMCPRecommendations(t *testing.T) {
+	agent := NewCloudResearchAgent(&configs.Config{})
+	agent.randSource = deterministicRand()
+
+	recs := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
+		TokenIn:                1800,
+		TokenOut:               420,
+		ToolWallTimeMS:         1900,
+		FirstResponseLatencyMS: 2100,
+		RawQueries: []string{
+			"Inspect the current analytics flow before editing it.",
+			"Locate the files involved in the approval flow.",
+			"Compare this response contract with the health controller.",
+			"List the exact tests to run after the patch.",
+		},
+	}}, []*ConfigSnapshot{{
+		Tool:             "codex",
+		ProfileID:        "baseline",
+		InstructionFiles: []string{"AGENTS.md"},
+		EnabledMCPCount:  1,
+		Settings: map[string]any{
+			"mcp_servers": []any{"filesystem"},
+		},
+		CapturedAt: time.Now().UTC(),
+	}})
+
+	require.Len(t, recs, 3)
+	require.Equal(t, "instruction-custom-rules", recs[0].Kind)
+
+	var configRecommendation *researchRecommendation
+	var mcpRecommendation *researchRecommendation
+	for i := range recs {
+		switch recs[i].Kind {
+		case "config-personal-instruction-files":
+			configRecommendation = &recs[i]
+		case "mcp-repo-discovery-baseline":
+			mcpRecommendation = &recs[i]
+		}
+	}
+	require.NotNil(t, configRecommendation)
+	require.NotNil(t, mcpRecommendation)
+	require.Equal(t, ".codex/config.json", configRecommendation.Steps[0].TargetFile)
+	require.Equal(t, defaultMCPConfigTarget, mcpRecommendation.Steps[0].TargetFile)
+	require.Equal(t, []string{"filesystem", "git"}, mcpRecommendation.Steps[0].SettingsUpdates["mcp_servers"])
 }
 
 func TestBuildInstructionPromptLoadsMarkdownTemplate(t *testing.T) {

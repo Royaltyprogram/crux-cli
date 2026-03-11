@@ -2342,7 +2342,7 @@ func buildDashboardActionSummary(pendingReview, approvedQueue, activeRecommendat
 	case approvedQueue > 0:
 		return fmt.Sprintf("%d approved plan(s) are ready for the next local sync.", approvedQueue)
 	case activeRecommendations > 0:
-		return fmt.Sprintf("%d instruction recommendation(s) are ready to review.", activeRecommendations)
+		return fmt.Sprintf("%d recommendation(s) are ready to review.", activeRecommendations)
 	default:
 		return "No rollout action is waiting right now."
 	}
