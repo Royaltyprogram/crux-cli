@@ -1322,6 +1322,11 @@ func resolveApplyTarget(previewPath, targetOverride string) (string, string, err
 		target = targetOverride
 		source = "override"
 	}
+	if expanded, ok, err := expandUserPath(target); err != nil {
+		return "", "", err
+	} else if ok {
+		return expanded, source, nil
+	}
 	if filepath.IsAbs(target) {
 		return filepath.Clean(target), source, nil
 	}
@@ -1330,6 +1335,25 @@ func resolveApplyTarget(previewPath, targetOverride string) (string, string, err
 		return "", "", err
 	}
 	return filepath.Clean(filepath.Join(cwd, target)), source, nil
+}
+
+func expandUserPath(target string) (string, bool, error) {
+	if target == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false, err
+		}
+		return filepath.Clean(home), true, nil
+	}
+	prefix := "~" + string(os.PathSeparator)
+	if !strings.HasPrefix(target, prefix) {
+		return "", false, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false, err
+	}
+	return filepath.Clean(filepath.Join(home, strings.TrimPrefix(target, prefix))), true, nil
 }
 
 func stepTargetOverride(raw string, index int) string {
@@ -1362,6 +1386,7 @@ func isAllowedTarget(previewPath, resolvedPath string) bool {
 		filepath.Clean(".claude/settings.local.json"): {},
 		filepath.Clean(".mcp.json"):                   {},
 		filepath.Clean("AGENTS.md"):                   {},
+		filepath.Clean("~/.codex/AGENTS.md"):          {},
 		filepath.Clean("CLAUDE.md"):                   {},
 	}
 

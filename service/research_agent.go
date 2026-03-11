@@ -20,6 +20,7 @@ const (
 	defaultResearchSampleSize     = 10
 	defaultResearchRequestTimeout = 45 * time.Second
 	defaultInstructionHeading     = "## AgentOpt Research Findings"
+	defaultCodexInstructionTarget = "~/.codex/AGENTS.md"
 )
 
 type CloudResearchAgent struct {
@@ -185,7 +186,7 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 		fmt.Sprintf("total_function_calls=%d", usageSummary.TotalFunctionCalls),
 		fmt.Sprintf("total_tool_errors=%d", usageSummary.TotalToolErrors),
 		"selection=random",
-		"target_file=AGENTS.md",
+		"target_file=" + defaultCodexInstructionTarget,
 		"generation_mode=" + generationMode,
 	}
 
@@ -195,16 +196,16 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 		Summary:         "Recent usage history was analyzed to highlight repeated inefficiencies before the local coding agent decides what instruction to add.",
 		Reason:          buildInstructionReason(sampledQueries, usageSummary),
 		Explanation:     "The research agent samples recent raw queries, adds latency and token context, asks OpenAI for abstract workflow findings, and leaves the final instruction edit to the local Codex agent.",
-		ExpectedBenefit: "Surface high-friction defaults without forcing the research agent to author the final AGENTS.md wording.",
-		Risk:            "Low. The plan is a reviewable append to AGENTS.md.",
+		ExpectedBenefit: "Surface high-friction defaults without forcing the research agent to author the final Codex global instruction wording.",
+		Risk:            "Low. The plan is a reviewable append to the Codex global instruction file.",
 		ExpectedImpact:  "Lower setup churn, less repeated prompt steering, and clearer evidence about where the workflow wastes time.",
 		Score:           instructionRecommendationScore(len(sampledQueries), float64(usageSummary.AvgTokensPerQuery)),
 		Evidence:        evidence,
 		Steps: []ChangePlanStep{{
 			Type:           "text_append",
 			Action:         "append_block",
-			TargetFile:     "AGENTS.md",
-			Summary:        "Append a research findings block distilled from usage history and sampled queries.",
+			TargetFile:     defaultCodexInstructionTarget,
+			Summary:        "Append a research findings block to the Codex global instruction file.",
 			ContentPreview: contentPreview,
 		}},
 	}}

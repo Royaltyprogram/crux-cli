@@ -104,7 +104,7 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Len(t, recommendations.Items, 1)
 	require.Equal(t, "instruction-custom-rules", recommendations.Items[0].Kind)
 	require.Len(t, recommendations.Items[0].ChangePlan, 1)
-	require.Equal(t, "AGENTS.md", recommendations.Items[0].ChangePlan[0].TargetFile)
+	require.Equal(t, defaultCodexInstructionTarget, recommendations.Items[0].ChangePlan[0].TargetFile)
 	require.Contains(t, recommendations.Items[0].ChangePlan[0].ContentPreview, "AgentOpt Research Findings")
 
 	planOld, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{

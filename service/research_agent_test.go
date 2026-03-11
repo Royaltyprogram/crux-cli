@@ -78,7 +78,7 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 	require.Contains(t, recs[0].Evidence, "sampled_raw_queries=10")
 	require.Contains(t, recs[0].Evidence, "generation_mode=openai_responses_api")
 	require.Len(t, recs[0].Steps, 1)
-	require.Equal(t, "AGENTS.md", recs[0].Steps[0].TargetFile)
+	require.Equal(t, defaultCodexInstructionTarget, recs[0].Steps[0].TargetFile)
 	require.Contains(t, recs[0].Steps[0].ContentPreview, "## AgentOpt Research Findings")
 	require.Contains(t, recs[0].Steps[0].ContentPreview, "- The user repeatedly has to ask for explicit verification")
 	require.Contains(t, recs[0].Summary, "highlight repeated inefficiencies")

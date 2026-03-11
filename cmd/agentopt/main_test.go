@@ -124,6 +124,16 @@ func TestReadOptionalJSONMapMissingFile(t *testing.T) {
 	require.Empty(t, out)
 }
 
+func TestResolveApplyTargetExpandsHomeInstructionPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	resolved, source, err := resolveApplyTarget("~/.codex/AGENTS.md", "")
+	require.NoError(t, err)
+	require.Equal(t, "preview", source)
+	require.Equal(t, filepath.Join(home, ".codex", "AGENTS.md"), resolved)
+}
+
 func TestCodexApplyTimeoutUsesDefault(t *testing.T) {
 	t.Setenv("AGENTOPT_CODEX_TIMEOUT", "")
 	timeout, err := codexApplyTimeout()
