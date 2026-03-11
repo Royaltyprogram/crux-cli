@@ -155,15 +155,35 @@
       const user = session.user || {};
       const org = session.organization || {};
 
-      $("sessionHeading").textContent = org.name
-        ? `${org.name} workspace dashboard`
-        : "Review AI usage and approve recommended changes for your workspace.";
-      $("sessionSummary").textContent = user.name
-        ? `Signed in as ${user.name}. Review your AI usage history, captured models and replies, and approve or decline recommended changes.`
-        : "Sign in on the landing page to review your AI usage, captured models, and recommended changes.";
-
       $("topBarUser").textContent = user.name || user.email || "-";
       $("topBarOrg").textContent = org.name || org.id || "-";
+    }
+
+    function renderAgentStatus(overview, recommendations, applyItems, experiments) {
+      const bar = $("agentStatusBar");
+      const text = $("agentStatusText");
+      const activeRecs = Number(overview.active_recommendations || 0);
+      const totalSessions = Number(overview.total_sessions || 0);
+      const experimentItems = toArray(experiments);
+      const measuringCount = experimentItems.filter((item) => String(item.status || "").toLowerCase() === "measuring").length;
+      const rollbackCount = experimentItems.filter((item) => String(item.status || "").toLowerCase() === "rollback_requested").length;
+
+      if (rollbackCount > 0) {
+        bar.dataset.state = "suggestion";
+        text.textContent = `Rollback requested — ${rollbackCount} experiment${rollbackCount > 1 ? "s" : ""} will restore the previous config on the next sync`;
+      } else if (activeRecs > 0) {
+        bar.dataset.state = "suggestion";
+        text.textContent = `Suggestion ready \u2014 ${activeRecs} optimization${activeRecs > 1 ? "s" : ""} awaiting your review`;
+      } else if (measuringCount > 0) {
+        bar.dataset.state = "measuring";
+        text.textContent = `Measuring impact of ${measuringCount} applied change${measuringCount > 1 ? "s" : ""} \u2014 collecting post-apply sessions`;
+      } else if (totalSessions === 0) {
+        bar.dataset.state = "";
+        text.textContent = "Waiting for sessions \u2014 connect a workspace to start observing";
+      } else {
+        bar.dataset.state = "";
+        text.textContent = `Observing \u2014 analyzed ${totalSessions} session${totalSessions > 1 ? "s" : ""}, researching patterns`;
+      }
     }
 
     function syncBusyUI() {
@@ -694,6 +714,53 @@
     function recommendationSummary(recommendationID) {
       const recommendation = state.recommendationIndex.get(recommendationID);
       return recommendation ? recommendation.summary : "A reviewed configuration update for this workspace.";
+    }
+
+    function recommendationKind(recommendationID) {
+      const recommendation = state.recommendationIndex.get(recommendationID);
+      return recommendation ? String(recommendation.kind || "").trim() : "";
+    }
+
+    function recommendationKindLabel(kind) {
+      const value = String(kind || "").toLowerCase();
+      if (value.includes("instruction")) {
+        return "Custom instruction";
+      }
+      if (value.includes("mcp")) {
+        return "MCP baseline";
+      }
+      if (value.includes("config")) {
+        return "Agent config";
+      }
+      return "Suggestion";
+    }
+
+    function recommendationKindTone(kind) {
+      const value = String(kind || "").toLowerCase();
+      if (value.includes("instruction")) {
+        return "warn";
+      }
+      if (value.includes("mcp")) {
+        return "sky";
+      }
+      if (value.includes("config")) {
+        return "good";
+      }
+      return "sky";
+    }
+
+    function experimentTone(status) {
+      const value = String(status || "").toLowerCase();
+      if (value === "completed" || value === "rolled_back") {
+        return "good";
+      }
+      if (value === "rollback_requested" || value === "rollback_failed" || value === "failed") {
+        return "danger";
+      }
+      if (value === "measuring" || value === "awaiting_review" || value === "queued_for_apply") {
+        return "warn";
+      }
+      return "sky";
     }
 
     function tokenSummary(item) {
@@ -2287,10 +2354,138 @@
       `).join("");
     }
 
+    function renderOptimizationLoop(overview, recommendations, reviewQueue, applyItems, experiments) {
+      const totalSessions = Number(overview.total_sessions || 0);
+      const experimentItems = toArray(experiments);
+      const activeExperiment = experimentItems.find((item) => {
+        const status = String(item.status || "").toLowerCase();
+        return status === "awaiting_review" || status === "queued_for_apply" || status === "measuring" || status === "rollback_requested";
+      }) || experimentItems[0] || null;
+
+      const stageCounts = {
+        observe: totalSessions,
+        suggest: toArray(recommendations).length,
+        approve: toArray(reviewQueue).length,
+        measure: experimentItems.filter((item) => String(item.status || "").toLowerCase() === "measuring").length,
+        rollback: experimentItems.filter((item) => {
+          const status = String(item.status || "").toLowerCase();
+          return status === "rollback_requested" || status === "rolled_back" || status === "rollback_failed";
+        }).length
+      };
+
+      const activeStage = activeExperiment
+        ? ({
+            awaiting_review: "approve",
+            queued_for_apply: "approve",
+            measuring: "measure",
+            rollback_requested: "rollback",
+            rolled_back: "rollback",
+            completed: "measure",
+            rollback_failed: "rollback",
+            failed: "rollback"
+          }[String(activeExperiment.status || "").toLowerCase()] || "suggest")
+        : (stageCounts.suggest > 0 ? "suggest" : "observe");
+
+      const stages = [
+        {
+          key: "observe",
+          label: "Observe",
+          value: formatCount(stageCounts.observe),
+          meta: stageCounts.observe > 0 ? `${formatCount(stageCounts.observe)} session(s) captured` : "Waiting for local sessions"
+        },
+        {
+          key: "suggest",
+          label: "Suggest",
+          value: formatCount(stageCounts.suggest),
+          meta: stageCounts.suggest > 0 ? `${formatCount(stageCounts.suggest)} ranked suggestion(s)` : "No active suggestions yet"
+        },
+        {
+          key: "approve",
+          label: "Approve",
+          value: formatCount(stageCounts.approve),
+          meta: stageCounts.approve > 0 ? `${formatCount(stageCounts.approve)} decision(s) waiting` : "No approval blockers"
+        },
+        {
+          key: "measure",
+          label: "Measure",
+          value: formatCount(stageCounts.measure),
+          meta: stageCounts.measure > 0 ? `${formatCount(stageCounts.measure)} rollout(s) in measurement` : "No active measurement window"
+        },
+        {
+          key: "rollback",
+          label: "Roll back",
+          value: formatCount(stageCounts.rollback),
+          meta: stageCounts.rollback > 0 ? `${formatCount(stageCounts.rollback)} rollback event(s)` : "No rollback pressure"
+        }
+      ];
+
+      $("loopStageGrid").innerHTML = stages.map((stage) => `
+        <div class="loop-stage${stage.key === activeStage ? " is-active" : ""}">
+          <div class="loop-stage-label">${escapeHTML(stage.label)}</div>
+          <div class="loop-stage-value">${escapeHTML(stage.value)}</div>
+          <div class="loop-stage-meta">${escapeHTML(stage.meta)}</div>
+        </div>
+      `).join("");
+
+      if (!activeExperiment) {
+        $("loopSummary").textContent = totalSessions > 0
+          ? "The loop is in observation mode. AgentOpt is digesting recent raw queries and config state before promoting the next change."
+          : "The loop starts after the CLI uploads sessions and snapshots from your coding-agent workspace.";
+        $("loopFocusCard").innerHTML = `
+          <div class="loop-focus-empty">
+            <strong>No experiment is running right now.</strong>
+            <span>${escapeHTML(totalSessions > 0 ? "Approve the next suggestion to start a measured rollout." : "Connect the CLI and upload sessions to seed the first suggestion.")}</span>
+          </div>
+        `;
+        return;
+      }
+
+      const activeRecommendation = state.recommendationIndex.get(activeExperiment.recommendation_id);
+      const recommendationTitleText = activeRecommendation ? activeRecommendation.title : recommendationTitle(activeExperiment.recommendation_id);
+      const kind = activeRecommendation ? activeRecommendation.kind : recommendationKind(activeExperiment.recommendation_id);
+      const focusBits = [
+        `Baseline ${formatCount(activeExperiment.baseline_sessions || 0)} sessions / ${formatCount(activeExperiment.baseline_queries || 0)} queries`,
+        `Post-apply ${formatCount(activeExperiment.post_apply_sessions || 0)} sessions / ${formatCount(activeExperiment.post_apply_queries || 0)} queries`
+      ];
+      if (activeExperiment.scope) {
+        focusBits.push(`${titleize(activeExperiment.scope)} scope`);
+      }
+      if (activeExperiment.requested_by) {
+        focusBits.push(`Requested by ${activeExperiment.requested_by}`);
+      }
+
+      const decisionReason = String(activeExperiment.decision_reason || "").trim()
+        || "This experiment is waiting for the next transition.";
+
+      $("loopSummary").textContent = String(activeExperiment.status || "").toLowerCase() === "rollback_requested"
+        ? "The loop detected a regression and has queued an automatic rollback for the local CLI."
+        : "Each approved change becomes an experiment with a baseline, a measurement window, and a rollback path if the metrics regress.";
+
+      $("loopFocusCard").innerHTML = `
+        <div class="loop-focus-top">
+          <div>
+            <div class="loop-focus-kicker">Current experiment</div>
+            <div class="loop-focus-title">${escapeHTML(recommendationTitleText)}</div>
+          </div>
+          <div class="loop-focus-pills">
+            ${pill(recommendationKindLabel(kind), recommendationKindTone(kind))}
+            ${pill(titleize(activeExperiment.status || "pending"), experimentTone(activeExperiment.status))}
+          </div>
+        </div>
+        <div class="loop-focus-body">
+          <div class="loop-focus-reason">${escapeHTML(decisionReason)}</div>
+          <div class="loop-focus-metrics">
+            ${focusBits.map((item) => `<span>${escapeHTML(item)}</span>`).join("")}
+          </div>
+        </div>
+      `;
+    }
+
     function renderActionItems(recommendations, reviewQueue) {
       const html = [];
 
       reviewQueue.forEach((item) => {
+        const kind = recommendationKind(item.recommendation_id);
         html.push(`
           <div class="item">
             <div class="item-top">
@@ -2298,7 +2493,10 @@
                 ${escapeHTML(recommendationTitle(item.recommendation_id))}
                 <small>${escapeHTML(recommendationSummary(item.recommendation_id))}</small>
               </div>
-              ${pill("Needs approval", "warn")}
+              <div class="item-pill-row">
+                ${pill(recommendationKindLabel(kind), recommendationKindTone(kind))}
+                ${pill("Needs approval", "warn")}
+              </div>
             </div>
             <div class="step-list">
               <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
@@ -2322,7 +2520,10 @@
                 ${escapeHTML(item.title)}
                 <small>${escapeHTML(truncateText(item.summary, 150))}</small>
               </div>
-              ${pill(item.risk || "Low risk", riskTone(item.risk))}
+              <div class="item-pill-row">
+                ${pill(recommendationKindLabel(item.kind), recommendationKindTone(item.kind))}
+                ${pill(item.risk || "Low risk", riskTone(item.risk))}
+              </div>
             </div>
             <div class="step-list">
               <div class="step-line">${escapeHTML(truncateText(item.reason, 150))}</div>
@@ -2336,12 +2537,58 @@
         `);
       });
 
-      $("actionItemList").innerHTML = html.length
-        ? html.join("")
-        : emptyState(
-            "No suggestions yet",
-            "Upload sessions from the CLI and AgentOpt will start proposing configuration improvements."
-          );
+      const section = $("activeSuggestionSection");
+      if (html.length) {
+        section.dataset.empty = "false";
+        $("actionItemList").innerHTML = html.join("");
+      } else {
+        section.dataset.empty = "true";
+        $("actionItemList").innerHTML = "";
+      }
+    }
+
+    function renderImpactTimeline(impactItems, applyItems, recommendations) {
+      const target = $("impactTimelineList");
+      const allApplied = applyItems.filter((item) => {
+        const status = String(item.status || "").toLowerCase();
+        return status === "applied" || status === "rollback_confirmed" || item.rolled_back;
+      });
+
+      if (!allApplied.length) {
+        target.innerHTML = emptyState(
+          "No applied changes yet",
+          "When you approve a suggestion, it will appear here with before-and-after metrics. The agent tracks whether each change improved your workflow."
+        );
+        return;
+      }
+
+      const impactIndex = new Map(impactItems.map((item) => [item.apply_id, item]));
+      target.innerHTML = allApplied.slice(0, 8).map((item) => {
+        const impact = impactIndex.get(item.apply_id) || {};
+        const title = recommendationTitle(item.recommendation_id);
+        const isRolledBack = item.rolled_back || String(item.status || "").toLowerCase() === "rollback_confirmed";
+        const statusLabel = isRolledBack ? "Rolled back" : "Improved";
+        const statusTone = isRolledBack ? "danger" : "good";
+        const tokenDelta = Number(impact.tokens_per_query_delta || 0);
+        const tokenDeltaText = tokenDelta !== 0 ? `${formatSignedCount(tokenDelta)} tokens/query` : "";
+        const interpretation = impact.interpretation || (isRolledBack ? "Metrics declined after applying this change. The agent reverted it." : "Measuring impact...");
+        const appliedDate = formatDateTime(item.applied_at);
+
+        return `
+          <div class="item">
+            <div class="item-top">
+              <div class="item-title">
+                ${escapeHTML(title)}
+                <small>${escapeHTML(interpretation)}</small>
+              </div>
+              ${pill(statusLabel, statusTone)}
+            </div>
+            <div class="step-list">
+              ${tokenDeltaText ? `<div class="step-line">${escapeHTML(tokenDeltaText)} &middot; Applied ${escapeHTML(appliedDate)}</div>` : `<div class="step-line">Applied ${escapeHTML(appliedDate)}</div>`}
+            </div>
+          </div>
+        `;
+      }).join("");
     }
 
     function renderSessionSummaries(items) {
@@ -2713,6 +2960,7 @@
         let insights = {};
         let impactItems = [];
         let applyItems = [];
+        let experiments = [];
         let snapshots = [];
         let audits = [];
 
@@ -2724,6 +2972,7 @@
             insightsData,
             impactData,
             applyHistoryData,
+            experimentData,
             snapshotData,
             auditData
           ] = await Promise.all([
@@ -2733,6 +2982,7 @@
             requestJSON(`/api/v1/dashboard/project-insights?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load usage trends."),
             requestJSON(`/api/v1/impact?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load rollout impact."),
             requestJSON(`/api/v1/applies?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load rollout history."),
+            requestJSON(`/api/v1/experiments?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load experiment history."),
             requestJSON(`/api/v1/config-snapshots?project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load config snapshots."),
             requestJSON(`/api/v1/audits?org_id=${encodeURIComponent(orgID)}&project_id=${encodeURIComponent(projectID)}`, {}, "Failed to load workspace activity.")
           ]);
@@ -2743,6 +2993,7 @@
           insights = insightsData || {};
           impactItems = toArray(impactData.items);
           applyItems = toArray(applyHistoryData.items);
+          experiments = toArray(experimentData.items);
           snapshots = toArray(snapshotData.items);
           audits = toArray(auditData.items);
 
@@ -2751,7 +3002,10 @@
           });
         }
 
+        renderAgentStatus(overview, recommendations, applyItems, experiments);
+        renderOptimizationLoop(overview, recommendations, reviewQueue, applyItems, experiments);
         renderActionItems(recommendations, reviewQueue);
+        renderImpactTimeline(impactItems, applyItems, recommendations);
         renderUsageTrend(insights);
         renderTrendCoverage(insights);
         renderModelCoverage(insights);

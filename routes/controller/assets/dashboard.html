@@ -25,7 +25,7 @@
 
       <div class="wizard-step wizard-step-center is-active" data-wizard-step="0">
         <div class="wizard-title">Welcome to AgentOpt</div>
-        <div class="wizard-desc">Review your AI usage history, get analysis-driven configuration suggestions, and approve changes before they reach your local workspace.</div>
+        <div class="wizard-desc">AgentOpt watches how you use your coding agents, then suggests better configurations &mdash; one safe change at a time. Approve it, and we'll measure the impact. If it doesn't help, we roll it back automatically.</div>
         <div class="wizard-actions">
           <button class="primary-button" type="button" data-action="wizard-next">Get started</button>
         </div>
@@ -33,7 +33,7 @@
 
       <div class="wizard-step" data-wizard-step="1">
         <div class="wizard-title">Install the CLI</div>
-        <div class="wizard-desc">Install the released CLI on the machine you want to connect. The release build does not require Go, and the installer provisions Node.js automatically when needed.</div>
+        <div class="wizard-desc">Install the CLI on the machine you want to connect. It collects session data in the background.</div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Install command</span>
@@ -75,7 +75,7 @@
 
       <div class="wizard-step" data-wizard-step="3">
         <div class="wizard-title">Connect a workspace</div>
-        <div class="wizard-desc">Link a local repository so AgentOpt can start analyzing your workflow.</div>
+        <div class="wizard-desc">Link a local repository so AgentOpt can start observing your workflow and suggesting improvements.</div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Connect command</span>
@@ -113,10 +113,35 @@
     <div class="content-wrap">
       <div class="status" id="status" data-tone="info" aria-live="polite">Loading workspace signals...</div>
 
-      <div class="page-header">
-        <h1 id="sessionHeading">Review AI usage and approve recommended changes for your workspace.</h1>
-        <p id="sessionSummary">Upload sessions from the CLI to see your AI usage history, captured models, and recent assistant replies. Review recommendations and approve or decline changes before they are applied locally.</p>
+      <!-- ── Agent Status Indicator ── -->
+
+      <div class="agent-status-bar" id="agentStatusBar">
+        <div class="agent-status-dot"></div>
+        <span id="agentStatusText">Agent is observing your workspace...</span>
       </div>
+
+      <div class="loop-section" id="optimizationLoopSection">
+        <div class="section-header">
+          <div class="section-kicker">Optimization loop</div>
+          <div class="section-title">Observe - Suggest - Approve - Measure - Roll back</div>
+          <div class="section-desc" id="loopSummary">AgentOpt watches raw queries, tools, and config snapshots to decide the next safe change.</div>
+        </div>
+        <div class="loop-stage-grid" id="loopStageGrid"></div>
+        <div class="loop-focus-card" id="loopFocusCard"></div>
+      </div>
+
+      <!-- ── Active Suggestion (always visible at top) ── -->
+
+      <div class="active-suggestion-section" id="activeSuggestionSection">
+        <div class="section-header">
+          <div class="section-kicker">Active suggestion</div>
+          <div class="section-title">Review and approve</div>
+          <div class="section-desc">The agent found an optimization opportunity. Only one experiment runs at a time, so each approval gets a clean before-and-after measurement.</div>
+        </div>
+        <div class="list" id="actionItemList"></div>
+      </div>
+
+      <!-- ── Signals row ── -->
 
       <div class="signals">
         <div class="signal-cell">
@@ -125,7 +150,7 @@
           <div class="signal-cell-meta" id="activeRecommendationsMeta">Configuration suggestions from the analysis engine.</div>
         </div>
         <div class="signal-cell">
-          <div class="signal-cell-label">Sessions uploaded</div>
+          <div class="signal-cell-label">Sessions observed</div>
           <div class="signal-cell-value" id="totalSessions">0</div>
           <div class="signal-cell-meta" id="totalSessionsMeta">AI usage sessions collected from your local CLI.</div>
         </div>
@@ -142,30 +167,31 @@
       </div>
 
       <div class="context-bar" id="overviewNarrative">
-        Recommendations will sharpen after a few more sessions and setup snapshots.
+        The agent is collecting enough context to produce its first recommendation.
       </div>
 
       <nav class="dashboard-nav" aria-label="Dashboard views">
-        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="overview">Overview</button>
-        <button class="tab-button" type="button" data-action="switch-tab" data-tab="trends">Trends</button>
-        <button class="tab-button" type="button" data-action="switch-tab" data-tab="rollouts">Rollouts</button>
+        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="overview">Change History</button>
+        <button class="tab-button" type="button" data-action="switch-tab" data-tab="trends">Usage Analytics</button>
+        <button class="tab-button" type="button" data-action="switch-tab" data-tab="rollouts">Applied Changes</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="sessions">Sessions</button>
-        <button class="tab-button" type="button" data-action="switch-tab" data-tab="cli">CLI Access</button>
+        <button class="tab-button" type="button" data-action="switch-tab" data-tab="cli">Settings</button>
       </nav>
 
-      <!-- ── Overview ── -->
+      <!-- ── Change History (was Overview) ── -->
 
       <section class="tab-panel is-active" data-tab-panel="overview">
         <div class="section">
           <div class="section-header">
-            <div class="section-kicker">Action required</div>
-            <div class="section-title">Suggested changes</div>
+            <div class="section-kicker">Impact timeline</div>
+            <div class="section-title">Applied suggestions and their results</div>
+            <div class="section-desc">Each suggestion is tracked after approval. Green means it improved your workflow. Red means it was rolled back.</div>
           </div>
-          <div class="list" id="actionItemList"></div>
+          <div class="list" id="impactTimelineList"></div>
         </div>
       </section>
 
-      <!-- ── Trends ── -->
+      <!-- ── Usage Analytics (was Trends) ── -->
 
       <section class="tab-panel" data-tab-panel="trends" hidden>
         <div class="section">
@@ -179,7 +205,7 @@
             <div class="chart-legend">
               <span class="legend-item"><span class="legend-swatch legend-swatch-input"></span>Input tokens</span>
               <span class="legend-item"><span class="legend-swatch legend-swatch-output"></span>Output tokens</span>
-              <span class="legend-item"><span class="legend-swatch legend-swatch-activity"></span>Rollout activity</span>
+              <span class="legend-item"><span class="legend-swatch legend-swatch-activity"></span>Change activity</span>
             </div>
             <div class="usage-chart" id="usageTrendChart"></div>
           </div>
@@ -335,13 +361,13 @@
         </div>
       </section>
 
-      <!-- ── Rollouts ── -->
+      <!-- ── Applied Changes (was Rollouts) ── -->
 
       <section class="tab-panel" data-tab-panel="rollouts" hidden>
         <div class="section">
           <div class="section-header">
-            <div class="section-kicker">Rollout flow</div>
-            <div class="section-title">Suggestion to rollout path</div>
+            <div class="section-kicker">Change pipeline</div>
+            <div class="section-title">Applied changes overview</div>
             <div class="section-desc">Track how many suggestions are waiting, approved, applied, or rolled back.</div>
           </div>
           <div class="funnel-grid" id="rolloutFunnel"></div>
@@ -349,9 +375,9 @@
 
         <div class="section collapsible" id="rolloutTempoSection">
           <div class="section-header section-toggle" data-action="toggle-section" data-target="rolloutTempoSection" role="button" tabindex="0">
-            <div class="section-kicker">Rollout tempo</div>
+            <div class="section-kicker">Timing</div>
             <div class="section-title">Approval cadence & recent timeline <span class="toggle-chevron"></span></div>
-            <div class="section-desc">How quickly recommendations move from request to review to local apply, and the most recent change plan states.</div>
+            <div class="section-desc">How quickly suggestions move from review to applied, and the most recent change timelines.</div>
           </div>
           <div class="section-body">
             <div class="insight-grid">
@@ -366,7 +392,7 @@
               <div class="insight-card">
                 <div class="section-header compact">
                   <div class="section-kicker">Recent path</div>
-                  <div class="section-title">Latest rollout timeline</div>
+                  <div class="section-title">Latest change timeline</div>
                 </div>
                 <div class="rollout-lanes" id="rolloutPulseTimeline"></div>
               </div>
@@ -404,7 +430,7 @@
               <div class="insight-card">
                 <div class="section-header compact">
                   <div class="section-kicker">Activity</div>
-                  <div class="section-title">Recent rollout events</div>
+                  <div class="section-title">Recent events</div>
                 </div>
                 <div class="list compact-list" id="activityTimeline"></div>
               </div>
@@ -418,14 +444,15 @@
       <section class="tab-panel" data-tab-panel="sessions" hidden>
         <div class="section">
           <div class="section-header">
-            <div class="section-kicker">AI usage history</div>
-            <div class="section-title">Recent sessions</div>
+            <div class="section-kicker">Observed sessions</div>
+            <div class="section-title">Recent AI usage sessions</div>
+            <div class="section-desc">Raw sessions the agent has observed. These feed into its analysis and suggestions.</div>
           </div>
           <div class="list" id="sessionSummaryList"></div>
         </div>
       </section>
 
-      <!-- ── CLI Access ── -->
+      <!-- ── Settings (was CLI Access) ── -->
 
       <section class="tab-panel" data-tab-panel="cli" hidden>
         <div class="section">
