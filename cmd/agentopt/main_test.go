@@ -1464,7 +1464,7 @@ func TestRunSyncOnceReportsFailuresAndContinues(t *testing.T) {
 	require.Len(t, reports, 2)
 	require.Equal(t, "apply-sync-fail", reports[0].ApplyID)
 	require.False(t, reports[0].Success)
-	require.Contains(t, reports[0].Note, "local apply failed during sync")
+	require.Contains(t, reports[0].Note, "local apply failed")
 
 	require.Equal(t, "apply-sync-ok", reports[1].ApplyID)
 	require.True(t, reports[1].Success)
@@ -1733,25 +1733,25 @@ func TestRunApplyYesSkipsReviewForAutoApprovedPlan(t *testing.T) {
 	require.Equal(t, configTarget, reported.AppliedFile)
 }
 
-func TestRunApplyYesBlocksWhenPreHarnessFails(t *testing.T) {
+func TestRunApplyYesDoesNotAutoRunHarnessSpecs(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTOPT_HOME", root)
 	useStubCodexRunner(t, "apply")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".agentopt", "harness"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/preharness\n\ngo 1.22\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/noautoharness\n\ngo 1.22\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "harness_test.go"), []byte(`package preharness
 
 import "testing"
 
 func TestAlwaysFail(t *testing.T) {
-	t.Fatal("forced pre-harness failure")
+	t.Fatal("this harness should only run manually")
 }
 `), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".agentopt", "harness", "precheck.json"), []byte(`{
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".agentopt", "harness", "suggested.json"), []byte(`{
   "version": 1,
-  "name": "always-fail",
-  "goal": "block apply when baseline is red",
+  "name": "manual-only",
+  "goal": "suggest a future harness without auto-running it during apply",
   "test_commands": [
     "go test ./... -run TestAlwaysFail -count=1"
   ]
@@ -1761,12 +1761,9 @@ func TestAlwaysFail(t *testing.T) {
 	targetFile := filepath.Join(root, "AGENTS.md")
 	require.NoError(t, os.WriteFile(targetFile, []byte("# Existing\n"), 0o644))
 
-	var (
-		reported       request.ApplyResultReq
-		harnessUploads []request.HarnessRunReq
-	)
+	var reported request.ApplyResultReq
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "token-pre-harness", r.Header.Get("X-AgentOpt-Token"))
+		require.Equal(t, "token-no-auto-harness", r.Header.Get("X-AgentOpt-Token"))
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
@@ -1774,43 +1771,28 @@ func TestAlwaysFail(t *testing.T) {
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.ApplyPlanResp{
-					ApplyID:        "apply-pre-harness",
+					ApplyID:        "apply-no-auto-harness",
 					Status:         "approved_for_local_apply",
 					PolicyMode:     "auto_approved",
 					ApprovalStatus: "approved",
 					Decision:       "auto_approved",
-					Recommendation: response.RecommendationResp{ID: "rec-pre-harness"},
+					Recommendation: response.RecommendationResp{ID: "rec-no-auto-harness"},
 					PatchPreview: []response.PatchPreviewItem{{
 						FilePath:       "AGENTS.md",
 						Operation:      "append_block",
-						ContentPreview: "\nblocked\n",
+						ContentPreview: "\nmanual suggestion installed\n",
 					}},
 				}),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/harness-runs":
-			var uploaded request.HarnessRunReq
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&uploaded))
-			harnessUploads = append(harnessUploads, uploaded)
-			require.NoError(t, json.NewEncoder(w).Encode(envelope{
-				Code: 0,
-				Data: mustJSONRawMessage(t, response.HarnessRunResp{
-					ID:               fmt.Sprintf("harness-%d", len(harnessUploads)),
-					ProjectID:        uploaded.ProjectID,
-					RecommendationID: uploaded.RecommendationID,
-					ApplyID:          uploaded.ApplyID,
-					SpecFile:         uploaded.SpecFile,
-					Name:             uploaded.Name,
-					Status:           map[bool]string{true: "passed", false: "failed"}[uploaded.Passed],
-					Passed:           uploaded.Passed,
-				}),
-			}))
+			t.Fatalf("apply should not auto-upload harness runs")
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/applies/result":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&reported))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.ApplyResultResp{
-					ApplyID: "apply-pre-harness",
-					Status:  "failed",
+					ApplyID: "apply-no-auto-harness",
+					Status:  "applied",
 				}),
 			}))
 		default:
@@ -1821,167 +1803,25 @@ func TestAlwaysFail(t *testing.T) {
 
 	require.NoError(t, saveState(state{
 		ServerURL:     server.URL,
-		APIToken:      "token-pre-harness",
+		APIToken:      "token-no-auto-harness",
 		OrgID:         "org-1",
 		UserID:        "user-1",
 		WorkspaceID:   "project-1",
-		WorkspaceName: "pre-harness",
+		WorkspaceName: "no-auto-harness",
 		RepoPath:      root,
 	}))
 
-	err := runApply([]string{"--recommendation-id", "rec-pre-harness", "--yes"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "pre-apply harness failed")
-
-	require.Len(t, harnessUploads, 1)
-	require.Equal(t, "project-1", harnessUploads[0].ProjectID)
-	require.Equal(t, "rec-pre-harness", harnessUploads[0].RecommendationID)
-	require.Equal(t, "apply-pre-harness", harnessUploads[0].ApplyID)
-	require.False(t, harnessUploads[0].Passed)
-	require.Equal(t, ".agentopt/harness/precheck.json", harnessUploads[0].SpecFile)
-
-	require.Equal(t, "apply-pre-harness", reported.ApplyID)
-	require.False(t, reported.Success)
-	require.Contains(t, reported.Note, "pre-apply harness failed")
-	require.Contains(t, reported.Note, "always-fail")
-
-	data, err := os.ReadFile(targetFile)
+	err := runApply([]string{"--recommendation-id", "rec-no-auto-harness", "--yes"})
 	require.NoError(t, err)
-	require.Equal(t, "# Existing\n", string(data))
-}
 
-func TestRunApplyYesRollsBackWhenPostHarnessFails(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTOPT_HOME", root)
-	useStubCodexRunner(t, "apply")
-
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".agentopt", "harness"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/postharness\n\ngo 1.22\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "harness_test.go"), []byte(`package postharness
-
-import (
-	"os"
-	"strings"
-	"testing"
-)
-
-func TestFailsWhenBlockedMarkerExists(t *testing.T) {
-	data, err := os.ReadFile("AGENTS.md")
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	if strings.Contains(string(data), "blocked") {
-		t.Fatal("blocked marker detected")
-	}
-}
-`), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".agentopt", "harness", "postcheck.json"), []byte(`{
-  "version": 1,
-  "name": "post-check",
-  "goal": "fail after the blocked marker lands",
-  "test_commands": [
-    "go test ./... -run TestFailsWhenBlockedMarkerExists -count=1"
-  ]
-}
-`), 0o644))
-
-	targetFile := filepath.Join(root, "AGENTS.md")
-	require.NoError(t, os.WriteFile(targetFile, []byte("# Existing\n"), 0o644))
-
-	var (
-		reported       request.ApplyResultReq
-		harnessUploads []request.HarnessRunReq
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "token-post-harness", r.Header.Get("X-AgentOpt-Token"))
-		w.Header().Set("Content-Type", "application/json")
-
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/recommendations/apply":
-			require.NoError(t, json.NewEncoder(w).Encode(envelope{
-				Code: 0,
-				Data: mustJSONRawMessage(t, response.ApplyPlanResp{
-					ApplyID:        "apply-post-harness",
-					Status:         "approved_for_local_apply",
-					PolicyMode:     "auto_approved",
-					ApprovalStatus: "approved",
-					Decision:       "auto_approved",
-					Recommendation: response.RecommendationResp{ID: "rec-post-harness"},
-					PatchPreview: []response.PatchPreviewItem{{
-						FilePath:       "AGENTS.md",
-						Operation:      "append_block",
-						ContentPreview: "\nblocked\n",
-					}},
-				}),
-			}))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/harness-runs":
-			var uploaded request.HarnessRunReq
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&uploaded))
-			harnessUploads = append(harnessUploads, uploaded)
-			require.NoError(t, json.NewEncoder(w).Encode(envelope{
-				Code: 0,
-				Data: mustJSONRawMessage(t, response.HarnessRunResp{
-					ID:               fmt.Sprintf("harness-%d", len(harnessUploads)),
-					ProjectID:        uploaded.ProjectID,
-					RecommendationID: uploaded.RecommendationID,
-					ApplyID:          uploaded.ApplyID,
-					SpecFile:         uploaded.SpecFile,
-					Name:             uploaded.Name,
-					Status:           map[bool]string{true: "passed", false: "failed"}[uploaded.Passed],
-					Passed:           uploaded.Passed,
-				}),
-			}))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/applies/result":
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&reported))
-			require.NoError(t, json.NewEncoder(w).Encode(envelope{
-				Code: 0,
-				Data: mustJSONRawMessage(t, response.ApplyResultResp{
-					ApplyID:    "apply-post-harness",
-					Status:     "rollback_confirmed",
-					RolledBack: true,
-				}),
-			}))
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	require.NoError(t, saveState(state{
-		ServerURL:     server.URL,
-		APIToken:      "token-post-harness",
-		OrgID:         "org-1",
-		UserID:        "user-1",
-		WorkspaceID:   "project-1",
-		WorkspaceName: "post-harness",
-		RepoPath:      root,
-	}))
-
-	err := runApply([]string{"--recommendation-id", "rec-post-harness", "--yes"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "post-apply harness failed")
-
-	require.Len(t, harnessUploads, 2)
-	require.True(t, harnessUploads[0].Passed)
-	require.False(t, harnessUploads[1].Passed)
-	require.Equal(t, "apply-post-harness", harnessUploads[0].ApplyID)
-	require.Equal(t, "apply-post-harness", harnessUploads[1].ApplyID)
-
-	require.Equal(t, "apply-post-harness", reported.ApplyID)
+	require.Equal(t, "apply-no-auto-harness", reported.ApplyID)
 	require.True(t, reported.Success)
-	require.True(t, reported.RolledBack)
-	require.Contains(t, reported.Note, "auto-rolled back")
-	require.Contains(t, reported.Note, "post-apply harness failed")
+	require.Equal(t, canonicalizePath(targetFile), canonicalizePath(reported.AppliedFile))
+	require.Contains(t, reported.Note, "applied by agentopt CLI")
 
 	data, err := os.ReadFile(targetFile)
 	require.NoError(t, err)
-	require.Equal(t, "# Existing\n", string(data))
-
-	backupPath, err := applyBackupPath("apply-post-harness")
-	require.NoError(t, err)
-	_, err = os.Stat(backupPath)
-	require.Error(t, err)
-	require.True(t, os.IsNotExist(err))
+	require.Contains(t, string(data), "manual suggestion installed")
 }
 
 func TestRunApplyYesReportsFailureWhenLocalApplyFails(t *testing.T) {

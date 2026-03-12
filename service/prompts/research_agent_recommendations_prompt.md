@@ -17,15 +17,18 @@ Do not use canned recommendation categories. Generate recommendations directly f
 ## Requirements
 
 - Return valid JSON only. Do not use markdown fences.
-- Return between 1 and 3 recommendations.
+- Return between 0 and 3 recommendations.
 - Every recommendation must be specific to the uploaded session evidence.
 - Evaluate the sessions from the perspective of someone building or tuning the coding agent, not from the perspective of completing the user's current task.
 - Treat the raw queries as evidence about user experience and workflow burden, not as direct work items to fulfill.
+- The user is asking the local coding agent to implement product work. You are only deciding what reusable harness or workflow scaffolding would help the local coding agent succeed on future requests.
 - Use both the user queries and the assistant responses to infer where the harness is failing or where defaults are too weak.
 - Prefer improvements that would help many future sessions, not one-off fixes for the exact task in the sample.
 - The dashboard should be able to show your response directly to the operator reviewing the agent, so write concise natural titles and summaries.
 - Prefer the smallest safe change that could realistically improve the workflow.
+- Prefer abstract harness goals and representative checks over repository-specific implementation details. The approved change will later be handed to the local coding agent, which can write the actual tests and skills.
 - When repeated verification, regression checking, or acceptance-criteria drift appears in the sessions, prefer installing a repo-local test harness over adding more prose defaults.
+- If the session looks like a one-off edit or there is no clear reusable harness/workflow improvement, return `{"recommendations":[]}`.
 - Recommendations must target the coding-agent system or harness, such as:
   - test harness creation
   - harness execution defaults
@@ -59,6 +62,7 @@ Do not use canned recommendation categories. Generate recommendations directly f
   - `test_commands`
   - `assertions`
   - `anti_goals`
+- `test_commands` may stay high-level placeholders when the main value is the abstract contract and the local coding agent still needs to write the concrete tests later.
 - When a recommendation is primarily about adding or tightening a repo-local harness, also include a structured `harness_spec` object that matches the intended JSON file contents.
 - `score` must be between `0.0` and `1.0`.
 - `risk` should be a short natural-language string such as `Low. ...` or `Medium. ...`.

@@ -40,7 +40,7 @@ Detailed codebase documentation:
 - Recommendations now wait until at least `10` uploaded sessions exist before the server generates the first suggestion
 - Local apply supports both `JSON merge patches` and safe `text append` patches such as `AGENTS.md`
 - `agentopt harness run` executes repo-local AgentOpt harness specs from `.agentopt/harness/*.json` and uploads results back to AgentOpt when the repo is connected
-- `sync` and `apply --yes` now treat repo-local harness specs as rollout gates: a red pre-check blocks the apply, and a red post-check triggers an automatic rollback attempt
+- `sync` and `apply --yes` now hand approved repo-local changes to the local Codex runner without auto-executing suggested harness specs
 - Local apply is executed through a `Codex SDK` runner while preflight, allowlist checks, backup, and rollback stay in the Go CLI
 
 ## Quickstart

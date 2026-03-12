@@ -385,6 +385,9 @@ func parseResearchRecommendations(raw string) ([]researchRecommendation, error) 
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return nil, err
 	}
+	if len(payload.Recommendations) == 0 {
+		return nil, nil
+	}
 
 	items := make([]researchRecommendation, 0, len(payload.Recommendations))
 	for _, rawItem := range payload.Recommendations {
