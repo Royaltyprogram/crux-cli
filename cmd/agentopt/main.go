@@ -1692,23 +1692,6 @@ func isAllowedAgentoptSkillTarget(target string) bool {
 	}
 }
 
-func isAgentoptTestHarnessSkillTarget(target string) bool {
-	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
-	if cleaned == "" {
-		return false
-	}
-	switch {
-	case cleaned == ".codex/skills/agentopt-test-harness/SKILL.md":
-		return true
-	case cleaned == "~/.codex/skills/agentopt-test-harness/SKILL.md":
-		return true
-	case strings.Contains(cleaned, "/.codex/skills/agentopt-test-harness/SKILL.md"):
-		return true
-	default:
-		return false
-	}
-}
-
 func isAllowedRepoTestTarget(target string) bool {
 	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
 	if cleaned == "" {

@@ -167,8 +167,6 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 	require.Contains(t, prompt, "sample_query_2: List the exact verification steps.")
 	require.Contains(t, prompt, `{"recommendations":[],"no_recommendation_reason":"..."}`)
 	require.Contains(t, prompt, "repo-local test files such as `*_test.go`")
-	require.Contains(t, prompt, "Prefer `.agentopt/harness/*.json`, repo-local test assets, and `.codex/skills/agentopt-test-harness/SKILL.md` before `AGENTS.md`.")
-	require.Contains(t, prompt, "Only recommend `AGENTS.md` changes when the missing behavior is a cross-cutting workflow rule")
 }
 
 func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {

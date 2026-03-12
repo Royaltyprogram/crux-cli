@@ -30,8 +30,6 @@ Do not use canned recommendation categories. Generate recommendations directly f
 - When repeated verification, regression checking, or acceptance-criteria drift appears in the sessions, prefer installing a repo-local test harness over adding more prose defaults.
 - If the session looks like a one-off edit or there is no clear reusable harness/workflow improvement, return `{"recommendations":[],"no_recommendation_reason":"..."}`.
 - When a reusable harness is needed, prefer change plans that help the local coding agent create concrete repo-local test assets plus a reusable harness skill for future tasks.
-- Prefer `.agentopt/harness/*.json`, repo-local test assets, and `.codex/skills/agentopt-test-harness/SKILL.md` before `AGENTS.md`.
-- Only recommend `AGENTS.md` changes when the missing behavior is a cross-cutting workflow rule that cannot live in the harness skill or repo-local tests.
 - Recommendations must target the coding-agent system or harness, such as:
   - test harness creation
   - harness execution defaults
@@ -68,7 +66,7 @@ Do not use canned recommendation categories. Generate recommendations directly f
   - `assertions`
   - `anti_goals`
 - `test_commands` may stay high-level placeholders when the main value is the abstract contract and the local coding agent still needs to write the concrete tests later.
-- If you target repo-local test files or `.codex/skills/agentopt-test-harness/SKILL.md` in `change_plan`, keep the change abstract enough that the local coding agent can fill in stack-specific details during apply.
+- If you target repo-local test files in `change_plan`, keep the change abstract enough that the local coding agent can fill in stack-specific details during apply.
 - When a recommendation is primarily about adding or tightening a repo-local harness, also include a structured `harness_spec` object that matches the intended JSON file contents.
 - `score` must be between `0.0` and `1.0`.
 - `risk` should be a short natural-language string such as `Low. ...` or `Medium. ...`.

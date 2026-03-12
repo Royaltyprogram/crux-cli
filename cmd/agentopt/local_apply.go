@@ -601,9 +601,6 @@ func validateAppliedStep(filePath string, preview response.PatchPreviewItem) err
 			return err
 		}
 		content := string(data)
-		if allowsAbstractMaterializationTarget(filePath) {
-			return validateMaterializedTextTarget(filePath, content)
-		}
 		if preview.Operation == "text_replace" {
 			if content != preview.ContentPreview {
 				return fmt.Errorf("applied file %s does not match approved content", filePath)
@@ -630,49 +627,6 @@ func validateAppliedStep(filePath string, preview response.PatchPreviewItem) err
 		}
 	}
 	return nil
-}
-
-func allowsAbstractMaterializationTarget(filePath string) bool {
-	return isAllowedRepoTestTarget(filePath) || isAgentoptTestHarnessSkillTarget(filePath)
-}
-
-func validateMaterializedTextTarget(filePath, content string) error {
-	if strings.TrimSpace(content) == "" {
-		return fmt.Errorf("applied file %s is empty after materialized apply", filePath)
-	}
-	if isAllowedRepoTestTarget(filePath) && !looksLikeConcreteTestAsset(filePath, content) {
-		return fmt.Errorf("applied file %s does not look like a concrete test asset", filePath)
-	}
-	return nil
-}
-
-func looksLikeConcreteTestAsset(filePath, content string) bool {
-	lowerPath := strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(filePath))))
-	lowerContent := strings.ToLower(content)
-
-	switch {
-	case strings.HasSuffix(lowerPath, "_test.go"):
-		return strings.Contains(content, "func Test") ||
-			strings.Contains(content, "func Benchmark") ||
-			strings.Contains(content, "func Fuzz")
-	case strings.HasSuffix(lowerPath, ".test.ts"),
-		strings.HasSuffix(lowerPath, ".test.tsx"),
-		strings.HasSuffix(lowerPath, ".test.js"),
-		strings.HasSuffix(lowerPath, ".test.jsx"),
-		strings.HasSuffix(lowerPath, ".spec.ts"),
-		strings.HasSuffix(lowerPath, ".spec.tsx"),
-		strings.HasSuffix(lowerPath, ".spec.js"),
-		strings.HasSuffix(lowerPath, ".spec.jsx"),
-		strings.Contains(lowerPath, "/__tests__/"):
-		return strings.Contains(lowerContent, "test(") ||
-			strings.Contains(lowerContent, "it(") ||
-			strings.Contains(lowerContent, "describe(")
-	case strings.HasSuffix(lowerPath, ".py"):
-		return strings.Contains(lowerContent, "def test_") ||
-			strings.Contains(lowerContent, "class test")
-	default:
-		return true
-	}
 }
 
 func sameJSONValue(left, right any) bool {
