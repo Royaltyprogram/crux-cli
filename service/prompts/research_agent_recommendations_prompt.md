@@ -28,7 +28,7 @@ Do not use canned recommendation categories. Generate recommendations directly f
 - Prefer the smallest safe change that could realistically improve the workflow.
 - Prefer abstract harness goals and representative checks over repository-specific implementation details. The approved change will later be handed to the local coding agent, which can write the actual tests and skills.
 - When repeated verification, regression checking, or acceptance-criteria drift appears in the sessions, prefer installing a repo-local test harness over adding more prose defaults.
-- If the session looks like a one-off edit or there is no clear reusable harness/workflow improvement, return `{"recommendations":[]}`.
+- If the session looks like a one-off edit or there is no clear reusable harness/workflow improvement, return `{"recommendations":[],"no_recommendation_reason":"..."}`.
 - When a reusable harness is needed, prefer change plans that help the local coding agent create concrete repo-local test assets plus a reusable harness skill for future tasks.
 - Recommendations must target the coding-agent system or harness, such as:
   - test harness creation
@@ -62,6 +62,7 @@ Do not use canned recommendation categories. Generate recommendations directly f
   - `target_paths`
   - `setup_commands`
   - `test_commands`
+  - `examples`
   - `assertions`
   - `anti_goals`
 - `test_commands` may stay high-level placeholders when the main value is the abstract contract and the local coding agent still needs to write the concrete tests later.
@@ -74,6 +75,7 @@ Do not use canned recommendation categories. Generate recommendations directly f
 ## Output JSON Schema
 
 {
+  "no_recommendation_reason": "string",
   "recommendations": [
     {
       "kind": "short-stable-id",
@@ -93,6 +95,13 @@ Do not use canned recommendation categories. Generate recommendations directly f
         "target_paths": ["string"],
         "setup_commands": ["string"],
         "test_commands": ["string"],
+        "examples": [
+          {
+            "summary": "string",
+            "input": "string",
+            "expected": "string"
+          }
+        ],
         "assertions": [
           {
             "kind": "exit_code | output_contains | output_not_contains",

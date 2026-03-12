@@ -168,22 +168,23 @@ type Recommendation struct {
 }
 
 type RecommendationResearchStatus struct {
-	ProjectID           string
-	State               string
-	Summary             string
-	Provider            string
-	Model               string
-	MinimumSessions     int
-	SessionCount        int
-	RawQueryCount       int
-	RecommendationCount int
-	TriggerSessionID    string
-	LastError           string
-	TriggeredAt         *time.Time
-	StartedAt           *time.Time
-	CompletedAt         *time.Time
-	LastSuccessfulAt    *time.Time
-	LastDurationMS      int
+	ProjectID              string
+	State                  string
+	Summary                string
+	NoRecommendationReason string
+	Provider               string
+	Model                  string
+	MinimumSessions        int
+	SessionCount           int
+	RawQueryCount          int
+	RecommendationCount    int
+	TriggerSessionID       string
+	LastError              string
+	TriggeredAt            *time.Time
+	StartedAt              *time.Time
+	CompletedAt            *time.Time
+	LastSuccessfulAt       *time.Time
+	LastDurationMS         int
 }
 
 type ChangePlanStep struct {
@@ -202,8 +203,15 @@ type HarnessSpec struct {
 	TargetPaths   []string
 	SetupCommands []string
 	TestCommands  []string
+	Examples      []HarnessExample
 	Assertions    []HarnessAssertion
 	AntiGoals     []string
+}
+
+type HarnessExample struct {
+	Summary  string
+	Input    string
+	Expected string
 }
 
 type HarnessAssertion struct {
@@ -1056,9 +1064,25 @@ func cloneHarnessSpec(input *HarnessSpec) *HarnessSpec {
 		TargetPaths:   cloneStringSlice(input.TargetPaths),
 		SetupCommands: cloneStringSlice(input.SetupCommands),
 		TestCommands:  cloneStringSlice(input.TestCommands),
+		Examples:      cloneHarnessExamples(input.Examples),
 		Assertions:    cloneHarnessAssertions(input.Assertions),
 		AntiGoals:     cloneStringSlice(input.AntiGoals),
 	}
+}
+
+func cloneHarnessExamples(input []HarnessExample) []HarnessExample {
+	if len(input) == 0 {
+		return []HarnessExample{}
+	}
+	out := make([]HarnessExample, 0, len(input))
+	for _, item := range input {
+		out = append(out, HarnessExample{
+			Summary:  item.Summary,
+			Input:    item.Input,
+			Expected: item.Expected,
+		})
+	}
+	return out
 }
 
 func cloneHarnessAssertions(input []HarnessAssertion) []HarnessAssertion {

@@ -2093,7 +2093,7 @@ func (s *AnalyticsService) refreshRecommendationsLocked(project *Project, trigge
 	}
 
 	startedAt := time.Now()
-	rawCandidates, err := s.researchAgent.AnalyzeProject(project, sessions, s.AnalyticsStore.configSnapshots[project.ID])
+	analysis, err := s.researchAgent.AnalyzeProject(project, sessions, s.AnalyticsStore.configSnapshots[project.ID])
 	completedAt := time.Now().UTC()
 	status.CompletedAt = cloneTime(&completedAt)
 	status.LastDurationMS = int(time.Since(startedAt) / time.Millisecond)
@@ -2104,8 +2104,8 @@ func (s *AnalyticsService) refreshRecommendationsLocked(project *Project, trigge
 		s.setRecommendationResearchStatusLocked(project.ID, status)
 		return s.currentRecommendationsLocked(project.ID)
 	}
-	candidates := make([]*Recommendation, 0, len(rawCandidates))
-	for _, candidate := range rawCandidates {
+	candidates := make([]*Recommendation, 0, len(analysis.Recommendations))
+	for _, candidate := range analysis.Recommendations {
 		candidates = append(candidates, s.newRecommendationLocked(project, candidate))
 	}
 
@@ -2116,10 +2116,16 @@ func (s *AnalyticsService) refreshRecommendationsLocked(project *Project, trigge
 	}
 	s.AnalyticsStore.projectRecommendations[project.ID] = ids
 	status.RecommendationCount = len(ids)
+	status.NoRecommendationReason = ""
 	status.LastError = ""
 	if len(ids) == 0 {
 		status.State = "no_recommendations"
-		status.Summary = fmt.Sprintf("Recommendation research finished in %s but did not produce any actionable suggestions.", humanizeDurationMS(status.LastDurationMS))
+		status.NoRecommendationReason = strings.TrimSpace(analysis.NoRecommendationReason)
+		if status.NoRecommendationReason != "" {
+			status.Summary = fmt.Sprintf("Recommendation research finished in %s and intentionally skipped reusable suggestions: %s", humanizeDurationMS(status.LastDurationMS), status.NoRecommendationReason)
+		} else {
+			status.Summary = fmt.Sprintf("Recommendation research finished in %s but did not produce any actionable suggestions.", humanizeDurationMS(status.LastDurationMS))
+		}
 	} else {
 		status.State = "succeeded"
 		status.Summary = fmt.Sprintf("Recommendation research finished in %s and produced %d suggestion(s).", humanizeDurationMS(status.LastDurationMS), len(ids))
@@ -2280,9 +2286,22 @@ func toHarnessSpecResp(spec *HarnessSpec) *response.HarnessSpecResp {
 		TargetPaths:   cloneStringSlice(spec.TargetPaths),
 		SetupCommands: cloneStringSlice(spec.SetupCommands),
 		TestCommands:  cloneStringSlice(spec.TestCommands),
+		Examples:      toHarnessExampleResp(spec.Examples),
 		Assertions:    toHarnessAssertionResp(spec.Assertions),
 		AntiGoals:     cloneStringSlice(spec.AntiGoals),
 	}
+}
+
+func toHarnessExampleResp(items []HarnessExample) []response.HarnessExampleResp {
+	out := make([]response.HarnessExampleResp, 0, len(items))
+	for _, item := range items {
+		out = append(out, response.HarnessExampleResp{
+			Summary:  item.Summary,
+			Input:    item.Input,
+			Expected: item.Expected,
+		})
+	}
+	return out
 }
 
 func toHarnessAssertionResp(items []HarnessAssertion) []response.HarnessAssertionResp {
@@ -2618,21 +2637,22 @@ func cloneRecommendationResearchStatusResp(status *RecommendationResearchStatus)
 		return nil
 	}
 	return &response.RecommendationResearchStatusResp{
-		State:               status.State,
-		Summary:             status.Summary,
-		Provider:            status.Provider,
-		Model:               status.Model,
-		MinimumSessions:     status.MinimumSessions,
-		SessionCount:        status.SessionCount,
-		RawQueryCount:       status.RawQueryCount,
-		RecommendationCount: status.RecommendationCount,
-		TriggerSessionID:    status.TriggerSessionID,
-		LastError:           status.LastError,
-		TriggeredAt:         cloneTime(status.TriggeredAt),
-		StartedAt:           cloneTime(status.StartedAt),
-		CompletedAt:         cloneTime(status.CompletedAt),
-		LastSuccessfulAt:    cloneTime(status.LastSuccessfulAt),
-		LastDurationMS:      status.LastDurationMS,
+		State:                  status.State,
+		Summary:                status.Summary,
+		NoRecommendationReason: status.NoRecommendationReason,
+		Provider:               status.Provider,
+		Model:                  status.Model,
+		MinimumSessions:        status.MinimumSessions,
+		SessionCount:           status.SessionCount,
+		RawQueryCount:          status.RawQueryCount,
+		RecommendationCount:    status.RecommendationCount,
+		TriggerSessionID:       status.TriggerSessionID,
+		LastError:              status.LastError,
+		TriggeredAt:            cloneTime(status.TriggeredAt),
+		StartedAt:              cloneTime(status.StartedAt),
+		CompletedAt:            cloneTime(status.CompletedAt),
+		LastSuccessfulAt:       cloneTime(status.LastSuccessfulAt),
+		LastDurationMS:         status.LastDurationMS,
 	}
 }
 

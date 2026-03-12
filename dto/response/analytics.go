@@ -167,6 +167,12 @@ type HarnessAssertionResp struct {
 	NotContains string `json:"not_contains,omitempty"`
 }
 
+type HarnessExampleResp struct {
+	Summary  string `json:"summary,omitempty"`
+	Input    string `json:"input,omitempty"`
+	Expected string `json:"expected,omitempty"`
+}
+
 type HarnessSpecResp struct {
 	Version       int                    `json:"version"`
 	Name          string                 `json:"name"`
@@ -174,6 +180,7 @@ type HarnessSpecResp struct {
 	TargetPaths   []string               `json:"target_paths,omitempty"`
 	SetupCommands []string               `json:"setup_commands,omitempty"`
 	TestCommands  []string               `json:"test_commands"`
+	Examples      []HarnessExampleResp   `json:"examples,omitempty"`
 	Assertions    []HarnessAssertionResp `json:"assertions,omitempty"`
 	AntiGoals     []string               `json:"anti_goals,omitempty"`
 }
@@ -431,21 +438,22 @@ type AuditListResp struct {
 }
 
 type RecommendationResearchStatusResp struct {
-	State               string     `json:"state"`
-	Summary             string     `json:"summary"`
-	Provider            string     `json:"provider"`
-	Model               string     `json:"model"`
-	MinimumSessions     int        `json:"minimum_sessions"`
-	SessionCount        int        `json:"session_count"`
-	RawQueryCount       int        `json:"raw_query_count"`
-	RecommendationCount int        `json:"recommendation_count"`
-	TriggerSessionID    string     `json:"trigger_session_id"`
-	LastError           string     `json:"last_error"`
-	TriggeredAt         *time.Time `json:"triggered_at"`
-	StartedAt           *time.Time `json:"started_at"`
-	CompletedAt         *time.Time `json:"completed_at"`
-	LastSuccessfulAt    *time.Time `json:"last_successful_at"`
-	LastDurationMS      int        `json:"last_duration_ms"`
+	State                  string     `json:"state"`
+	Summary                string     `json:"summary"`
+	NoRecommendationReason string     `json:"no_recommendation_reason,omitempty"`
+	Provider               string     `json:"provider"`
+	Model                  string     `json:"model"`
+	MinimumSessions        int        `json:"minimum_sessions"`
+	SessionCount           int        `json:"session_count"`
+	RawQueryCount          int        `json:"raw_query_count"`
+	RecommendationCount    int        `json:"recommendation_count"`
+	TriggerSessionID       string     `json:"trigger_session_id"`
+	LastError              string     `json:"last_error"`
+	TriggeredAt            *time.Time `json:"triggered_at"`
+	StartedAt              *time.Time `json:"started_at"`
+	CompletedAt            *time.Time `json:"completed_at"`
+	LastSuccessfulAt       *time.Time `json:"last_successful_at"`
+	LastDurationMS         int        `json:"last_duration_ms"`
 }
 
 type DashboardOverviewResp struct {

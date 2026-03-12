@@ -54,12 +54,23 @@ func TestAnalyticsStorePersistenceRoundTrip(t *testing.T) {
 			Name:         "approval-regression",
 			Goal:         "approval flow should stay green",
 			TestCommands: []string{"go test ./... -run TestApproval -count=1"},
+			Examples: []HarnessExample{{
+				Summary:  "approve valid request",
+				Input:    "valid approval payload",
+				Expected: "request succeeds",
+			}},
 			Assertions: []HarnessAssertion{{
 				Kind:   "exit_code",
 				Equals: 0,
 			}},
 		},
 		CreatedAt: now,
+	}
+	store.recommendationResearch["project_1"] = &RecommendationResearchStatus{
+		ProjectID:              "project_1",
+		State:                  "no_recommendations",
+		Summary:                "no reusable harness recommendation",
+		NoRecommendationReason: "single one-off edits",
 	}
 	store.harnessRuns["harness_1"] = &HarnessRun{
 		ID:          "harness_1",
@@ -90,6 +101,9 @@ func TestAnalyticsStorePersistenceRoundTrip(t *testing.T) {
 	require.NotNil(t, loaded.projects["project_1"].LastIngestedAt)
 	require.NotNil(t, loaded.recommendations["rec_1"].HarnessSpec)
 	require.Equal(t, "approval-regression", loaded.recommendations["rec_1"].HarnessSpec.Name)
+	require.Len(t, loaded.recommendations["rec_1"].HarnessSpec.Examples, 1)
+	require.Equal(t, "approve valid request", loaded.recommendations["rec_1"].HarnessSpec.Examples[0].Summary)
+	require.Equal(t, "single one-off edits", loaded.recommendationResearch["project_1"].NoRecommendationReason)
 	require.Contains(t, loaded.harnessRuns, "harness_1")
 	require.Equal(t, "passed", loaded.harnessRuns["harness_1"].Status)
 }

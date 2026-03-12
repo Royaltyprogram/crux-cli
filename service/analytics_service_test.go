@@ -488,6 +488,70 @@ func TestAnalyticsServiceWaitsForMinimumSessionsBeforeGeneratingRecommendations(
 	require.Equal(t, "succeeded", overview.ResearchStatus.State)
 }
 
+func TestAnalyzeProjectCapturesStructuredNoRecommendationReason(t *testing.T) {
+	ctx := context.Background()
+	conf := newResearchStubConfig(t, `{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"recommendations\":[],\"no_recommendation_reason\":\"recent sessions are one-off edits and do not justify a reusable harness yet\"}"
+        }
+      ]
+    }
+  ]
+}`)
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
+	})
+
+	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+		OrgID:      "org-no-rec",
+		UserID:     "user-no-rec",
+		DeviceName: "macbook",
+	})
+	require.NoError(t, err)
+
+	projectResp, err := svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-no-rec",
+		AgentID:     agentResp.AgentID,
+		ProjectID:   "project-no-rec",
+		Name:        "no-rec",
+		RepoHash:    "no-rec-hash",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+
+	ingestResp, err := svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID: projectResp.ProjectID,
+		SessionID: "session-no-rec",
+		Tool:      "codex",
+		RawQueries: []string{
+			"Rename a variable in the current file.",
+			"Keep the edit tiny and do not touch anything else.",
+		},
+		Timestamp: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, ingestResp.RecommendationCount)
+	require.NotNil(t, ingestResp.ResearchStatus)
+	require.Equal(t, "no_recommendations", ingestResp.ResearchStatus.State)
+	require.Equal(t, "recent sessions are one-off edits and do not justify a reusable harness yet", ingestResp.ResearchStatus.NoRecommendationReason)
+
+	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: projectResp.ProjectID})
+	require.NoError(t, err)
+	require.Empty(t, recommendations.Items)
+}
+
 func TestRegisterProjectReusesExistingProjectAndPreservesSignals(t *testing.T) {
 	ctx := context.Background()
 	conf := newResearchStubConfig(t, defaultResearchStubResponse())
@@ -903,7 +967,7 @@ func TestAnalyzeProjectCapturesHarnessSpecAndPersistsHarnessRuns(t *testing.T) {
       "content": [
         {
           "type": "output_text",
-          "text": "{\"recommendations\":[{\"kind\":\"harness-seed\",\"title\":\"Install approval regression harness\",\"summary\":\"The uploaded sessions show repeated approval-flow verification drift before implementation.\",\"reason\":\"The user keeps re-stating the approval checks and exact tests on each task.\",\"explanation\":\"A repo-local harness spec can make the desired regression contract executable instead of prose-only.\",\"expected_benefit\":\"Less repeated steering around approval regressions.\",\"risk\":\"Low. Reviewable harness files only.\",\"expected_impact\":\"Faster validation and narrower patches.\",\"score\":0.88,\"evidence\":[\"repeated approval checks\"],\"harness_spec\":{\"version\":1,\"name\":\"approval-regression\",\"goal\":\"approval flow should stay green end-to-end\",\"target_paths\":[\"service/\",\"cmd/agentopt/\"],\"setup_commands\":[\"go test ./service -run TestSmoke -count=1\"],\"test_commands\":[\"go test ./cmd/agentopt -run TestApproval -count=1\"],\"assertions\":[{\"kind\":\"exit_code\",\"equals\":0}],\"anti_goals\":[\"do not broaden patch scope\"]},\"change_plan\":[{\"type\":\"text_replace\",\"action\":\"text_replace\",\"target_file\":\".agentopt/harness/default.json\",\"summary\":\"Install the repo-local harness spec.\",\"content_preview\":\"{\\n  \\\"version\\\": 1\\n}\"}]}]}"
+          "text": "{\"recommendations\":[{\"kind\":\"harness-seed\",\"title\":\"Install approval regression harness\",\"summary\":\"The uploaded sessions show repeated approval-flow verification drift before implementation.\",\"reason\":\"The user keeps re-stating the approval checks and exact tests on each task.\",\"explanation\":\"A repo-local harness spec can make the desired regression contract executable instead of prose-only.\",\"expected_benefit\":\"Less repeated steering around approval regressions.\",\"risk\":\"Low. Reviewable harness files only.\",\"expected_impact\":\"Faster validation and narrower patches.\",\"score\":0.88,\"evidence\":[\"repeated approval checks\"],\"harness_spec\":{\"version\":1,\"name\":\"approval-regression\",\"goal\":\"approval flow should stay green end-to-end\",\"target_paths\":[\"service/\",\"cmd/agentopt/\"],\"setup_commands\":[\"go test ./service -run TestSmoke -count=1\"],\"test_commands\":[\"go test ./cmd/agentopt -run TestApproval -count=1\"],\"examples\":[{\"summary\":\"approve valid request\",\"input\":\"valid approval payload\",\"expected\":\"request succeeds\"}],\"assertions\":[{\"kind\":\"exit_code\",\"equals\":0}],\"anti_goals\":[\"do not broaden patch scope\"]},\"change_plan\":[{\"type\":\"text_replace\",\"action\":\"text_replace\",\"target_file\":\".agentopt/harness/default.json\",\"summary\":\"Install the repo-local harness spec.\",\"content_preview\":\"{\\n  \\\"version\\\": 1\\n}\"}]}]}"
         }
       ]
     }
@@ -958,6 +1022,8 @@ func TestAnalyzeProjectCapturesHarnessSpecAndPersistsHarnessRuns(t *testing.T) {
 	require.NotNil(t, recommendations.Items[0].HarnessSpec)
 	require.Equal(t, "approval-regression", recommendations.Items[0].HarnessSpec.Name)
 	require.Equal(t, []string{"service/", "cmd/agentopt/"}, recommendations.Items[0].HarnessSpec.TargetPaths)
+	require.Len(t, recommendations.Items[0].HarnessSpec.Examples, 1)
+	require.Equal(t, "approve valid request", recommendations.Items[0].HarnessSpec.Examples[0].Summary)
 	require.Equal(t, ".agentopt/harness/agentopt-default.json", recommendations.Items[0].ChangePlan[0].TargetFile)
 
 	runResp, err := svc.ReportHarnessRun(ctx, &request.HarnessRunReq{
