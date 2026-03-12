@@ -90,8 +90,9 @@ func TestNewEchoAppliesConfiguredCORSHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 	engine := NewHttpEngine(Options{
 		Router: echo,
@@ -124,8 +125,9 @@ func TestNewEchoRateLimitsAPIWhenConfigured(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 	engine := NewHttpEngine(Options{
 		Router: echo,

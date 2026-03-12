@@ -16,23 +16,24 @@ import (
 
 type AnalyticsService struct {
 	Options
-	researchAgent *CloudResearchAgent
+	researchAgent             *CloudResearchAgent
+	evaluationAgent           *CloudEvaluationAgent
+	recommendationMinSessions int
 }
 
 const sharedWorkspaceName = "Shared workspace"
-
-const (
-	minimumPostApplySessionsForDecision = 2
-	rollbackTokensPerQueryRegression    = 0.15
-	rollbackLatencyRegression           = 0.25
-	rollbackLatencyMinIncreaseMS        = 500
-	rollbackToolErrorRegression         = 0.5
-)
+const defaultRecommendationMinSessions = 10
 
 func NewAnalyticsService(opt Options) *AnalyticsService {
+	recommendationMinSessions := opt.RecommendationMinSessions
+	if recommendationMinSessions <= 0 {
+		recommendationMinSessions = defaultRecommendationMinSessions
+	}
 	return &AnalyticsService{
-		Options:       opt,
-		researchAgent: NewCloudResearchAgent(opt.Config),
+		Options:                   opt,
+		researchAgent:             NewCloudResearchAgent(opt.Config),
+		evaluationAgent:           NewCloudEvaluationAgent(opt.Config),
+		recommendationMinSessions: recommendationMinSessions,
 	}
 }
 
@@ -661,14 +662,26 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 
 	var recommendations []*Recommendation
 	if activeExperiment := s.findActiveExperimentLocked(project.ID); activeExperiment != nil {
+		s.setRecommendationResearchStatusLocked(project.ID, RecommendationResearchStatus{
+			ProjectID:           project.ID,
+			State:               "deferred_active_experiment",
+			Summary:             "Recommendation refresh is deferred while an active experiment is still being measured.",
+			Provider:            s.researchAgent.Provider,
+			Model:               s.researchAgent.Model,
+			MinimumSessions:     s.recommendationMinSessions,
+			SessionCount:        len(s.AnalyticsStore.sessionSummaries[project.ID]),
+			RawQueryCount:       len(collectRawQueries(s.AnalyticsStore.sessionSummaries[project.ID])),
+			RecommendationCount: len(s.currentRecommendationsLocked(project.ID)),
+			TriggerSessionID:    sessionID,
+		})
 		s.evaluateExperimentsLocked(project, recordedAt)
 		if s.findActiveExperimentLocked(project.ID) != nil {
 			recommendations = s.currentRecommendationsLocked(project.ID)
 		} else {
-			recommendations = s.refreshRecommendationsLocked(project)
+			recommendations = s.refreshRecommendationsLocked(project, sessionID)
 		}
 	} else {
-		recommendations = s.refreshRecommendationsLocked(project)
+		recommendations = s.refreshRecommendationsLocked(project, sessionID)
 	}
 	ids := make([]string, 0, len(recommendations))
 	for _, item := range recommendations {
@@ -686,6 +699,7 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		RecommendationCount:     len(ids),
 		LatestRecommendationIDs: ids,
 		RecordedAt:              recordedAt,
+		ResearchStatus:          cloneRecommendationResearchStatusResp(s.AnalyticsStore.recommendationResearch[project.ID]),
 	}, nil
 }
 
@@ -810,6 +824,7 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		totalPendingReview     int
 		totalApprovedQueue     int
 		lastIngestedAt         *time.Time
+		researchStatus         *RecommendationResearchStatus
 	)
 
 	for _, projectID := range projectIDs {
@@ -830,6 +845,9 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 			if rec != nil && rec.Status == "active" {
 				totalActiveRecs++
 			}
+		}
+		if candidate := s.AnalyticsStore.recommendationResearch[projectID]; isRecommendationResearchStatusNewer(candidate, researchStatus) {
+			researchStatus = candidate
 		}
 	}
 
@@ -899,6 +917,7 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		ResearchProvider:          s.researchAgent.Provider,
 		ResearchMode:              s.researchAgent.Mode,
 		LastIngestedAt:            lastIngestedAt,
+		ResearchStatus:            cloneRecommendationResearchStatusResp(researchStatus),
 	}, nil
 }
 
@@ -1172,6 +1191,7 @@ func (s *AnalyticsService) DashboardProjectInsights(ctx context.Context, req *re
 		AvgToolWallTimeMS:          int(math.Round(safeDiv(float64(totalToolWallTimeMS), float64(maxInt(totalFunctionCalls, 1))))),
 		SessionsWithFunctionCalls:  sessionsWithFunctionCalls,
 		SessionsWithToolErrors:     sessionsWithToolErrors,
+		ResearchStatus:             cloneRecommendationResearchStatusResp(s.AnalyticsStore.recommendationResearch[req.ProjectID]),
 	}, nil
 }
 
@@ -1568,6 +1588,11 @@ func (s *AnalyticsService) ImpactSummary(ctx context.Context, req *request.Impac
 			ExperimentID:                    op.ExperimentID,
 			RecommendationID:                op.RecommendationID,
 			Status:                          op.Status,
+			EvaluationMode:                  experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationMode }),
+			EvaluationModel:                 experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationModel }),
+			EvaluationDecision:              experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationDecision }),
+			EvaluationConfidence:            experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationConfidence }),
+			EvaluationSummary:               experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationSummary }),
 			AppliedAt:                       op.AppliedAt,
 			SessionsBefore:                  len(before),
 			SessionsAfter:                   len(after),
@@ -1739,7 +1764,8 @@ func (s *AnalyticsService) evaluateExperimentsLocked(project *Project, observedA
 		beforeStats := summarizeSessions(before)
 		afterStats := summarizeSessions(after)
 
-		nextStatus, decision, reason := evaluateExperimentOutcome(beforeStats, afterStats, len(after))
+		qualitative := s.maybeReviewExperimentLocked(project, experiment, before, after, beforeStats, afterStats, len(after), observedAt)
+		nextStatus, decision, reason := qualitativeOutcome(qualitative)
 		experiment.Decision = decision
 		experiment.DecisionReason = reason
 
@@ -1758,51 +1784,59 @@ func (s *AnalyticsService) evaluateExperimentsLocked(project *Project, observedA
 	}
 }
 
-func evaluateExperimentOutcome(before, after sessionSummaryStats, afterCount int) (string, string, string) {
-	if afterCount < minimumPostApplySessionsForDecision {
-		return "measuring", "observe", fmt.Sprintf(
-			"waiting for %d post-apply sessions (%d collected)",
-			minimumPostApplySessionsForDecision,
-			afterCount,
-		)
+func qualitativeOutcome(review experimentEvaluation) (string, string, string) {
+	reason := strings.TrimSpace(review.Summary)
+	if reason == "" {
+		reason = "The qualitative review did not provide a decision yet."
 	}
-	if before.QueryCount == 0 {
-		return "completed", "keep", "baseline query count is unavailable; keeping the change after the measurement window"
-	}
-
-	tokenRegression := relativeChange(after.AvgTokensPerQuery, before.AvgTokensPerQuery)
-	latencyRegression := relativeChange(after.AvgFirstResponseLatencyMS, before.AvgFirstResponseLatencyMS)
-	latencyDelta := after.AvgFirstResponseLatencyMS - before.AvgFirstResponseLatencyMS
-	toolErrorRegression := after.AvgToolErrorsPerSession - before.AvgToolErrorsPerSession
-
-	switch {
-	case tokenRegression >= rollbackTokensPerQueryRegression:
-		return "rollback_requested", "rollback", fmt.Sprintf(
-			"tokens per query regressed by %.0f%% after %d post-apply sessions",
-			tokenRegression*100,
-			afterCount,
-		)
-	case latencyRegression >= rollbackLatencyRegression && latencyDelta >= rollbackLatencyMinIncreaseMS:
-		return "rollback_requested", "rollback", fmt.Sprintf(
-			"first-response latency regressed by %.0f%% after %d post-apply sessions",
-			latencyRegression*100,
-			afterCount,
-		)
-	case toolErrorRegression >= rollbackToolErrorRegression && after.AvgToolErrorsPerSession >= 1:
-		return "rollback_requested", "rollback", fmt.Sprintf(
-			"tool errors per session increased from %.2f to %.2f after rollout",
-			before.AvgToolErrorsPerSession,
-			after.AvgToolErrorsPerSession,
-		)
+	switch review.Decision {
+	case "keep":
+		return "completed", "keep", reason
+	case "rollback":
+		return "rollback_requested", "rollback", reason
 	default:
-		return "completed", "keep", fmt.Sprintf(
-			"measurement window completed with %d post-apply sessions and no severe regressions",
-			afterCount,
-		)
+		return "measuring", "observe", reason
 	}
 }
 
-func (s *AnalyticsService) refreshRecommendationsLocked(project *Project) []*Recommendation {
+func (s *AnalyticsService) refreshRecommendationsLocked(project *Project, triggerSessionID string) []*Recommendation {
+	sessions := s.AnalyticsStore.sessionSummaries[project.ID]
+	rawQueries := collectRawQueries(sessions)
+	status := RecommendationResearchStatus{
+		ProjectID:           project.ID,
+		Provider:            s.researchAgent.Provider,
+		Model:               s.researchAgent.Model,
+		MinimumSessions:     s.recommendationMinSessions,
+		SessionCount:        len(sessions),
+		RawQueryCount:       len(rawQueries),
+		TriggerSessionID:    triggerSessionID,
+		RecommendationCount: len(s.currentRecommendationsLocked(project.ID)),
+	}
+	triggeredAt := time.Now().UTC()
+	status.TriggeredAt = cloneTime(&triggeredAt)
+	if len(sessions) < s.recommendationMinSessions {
+		status.State = "waiting_for_min_sessions"
+		status.Summary = fmt.Sprintf("Collected %d of %d sessions needed before fetching new recommendations.", len(sessions), s.recommendationMinSessions)
+		s.setRecommendationResearchStatusLocked(project.ID, status)
+		return s.currentRecommendationsLocked(project.ID)
+	}
+	if strings.TrimSpace(s.researchAgent.apiKey) == "" {
+		status.State = "disabled"
+		status.Summary = "OpenAI-backed recommendation research is disabled on this server, so no new suggestions will be fetched."
+		s.setRecommendationResearchStatusLocked(project.ID, status)
+		return s.currentRecommendationsLocked(project.ID)
+	}
+	if len(rawQueries) == 0 {
+		status.State = "missing_raw_queries"
+		status.Summary = "Uploaded sessions are missing raw query evidence, so the server cannot fetch targeted recommendations yet."
+		s.setRecommendationResearchStatusLocked(project.ID, status)
+		return s.currentRecommendationsLocked(project.ID)
+	}
+	status.State = "running"
+	status.Summary = fmt.Sprintf("Fetching recommendation suggestions from %s across %d uploaded sessions.", s.researchAgent.Provider, len(sessions))
+	status.StartedAt = cloneTime(&triggeredAt)
+	s.setRecommendationResearchStatusLocked(project.ID, status)
+
 	previousIDs := s.AnalyticsStore.projectRecommendations[project.ID]
 	for _, id := range previousIDs {
 		if rec, ok := s.AnalyticsStore.recommendations[id]; ok && rec.Status == "active" {
@@ -1810,8 +1844,18 @@ func (s *AnalyticsService) refreshRecommendationsLocked(project *Project) []*Rec
 		}
 	}
 
-	sessions := s.AnalyticsStore.sessionSummaries[project.ID]
-	rawCandidates := s.researchAgent.AnalyzeProject(project, sessions, s.AnalyticsStore.configSnapshots[project.ID])
+	startedAt := time.Now()
+	rawCandidates, err := s.researchAgent.AnalyzeProject(project, sessions, s.AnalyticsStore.configSnapshots[project.ID])
+	completedAt := time.Now().UTC()
+	status.CompletedAt = cloneTime(&completedAt)
+	status.LastDurationMS = int(time.Since(startedAt) / time.Millisecond)
+	if err != nil {
+		status.State = "failed"
+		status.Summary = fmt.Sprintf("Recommendation research failed after %s while waiting for %s.", humanizeDurationMS(status.LastDurationMS), s.researchAgent.Provider)
+		status.LastError = err.Error()
+		s.setRecommendationResearchStatusLocked(project.ID, status)
+		return s.currentRecommendationsLocked(project.ID)
+	}
 	candidates := make([]*Recommendation, 0, len(rawCandidates))
 	for _, candidate := range rawCandidates {
 		candidates = append(candidates, s.newRecommendationLocked(project, candidate))
@@ -1823,6 +1867,17 @@ func (s *AnalyticsService) refreshRecommendationsLocked(project *Project) []*Rec
 		s.AnalyticsStore.recommendations[candidate.ID] = candidate
 	}
 	s.AnalyticsStore.projectRecommendations[project.ID] = ids
+	status.RecommendationCount = len(ids)
+	status.LastError = ""
+	if len(ids) == 0 {
+		status.State = "no_recommendations"
+		status.Summary = fmt.Sprintf("Recommendation research finished in %s but did not produce any actionable suggestions.", humanizeDurationMS(status.LastDurationMS))
+	} else {
+		status.State = "succeeded"
+		status.Summary = fmt.Sprintf("Recommendation research finished in %s and produced %d suggestion(s).", humanizeDurationMS(status.LastDurationMS), len(ids))
+		status.LastSuccessfulAt = cloneTime(&completedAt)
+	}
+	s.setRecommendationResearchStatusLocked(project.ID, status)
 
 	return candidates
 }
@@ -1856,6 +1911,7 @@ func (s *AnalyticsService) newRecommendationLocked(project *Project, tpl researc
 		Evidence:         cloneStringSlice(tpl.Evidence),
 		ChangePlan:       cloneChangePlanSteps(tpl.Steps),
 		SettingsUpdates:  cloneAnyMap(tpl.Settings),
+		RawSuggestion:    tpl.RawSuggestion,
 		CreatedAt:        time.Now().UTC(),
 	}
 }
@@ -1958,6 +2014,7 @@ func toRecommendationResp(rec *Recommendation) response.RecommendationResp {
 		Evidence:         cloneStringSlice(rec.Evidence),
 		ChangePlan:       toChangePlanResp(rec.ChangePlan),
 		SettingsUpdates:  cloneAnyMap(rec.SettingsUpdates),
+		RawSuggestion:    rec.RawSuggestion,
 		CreatedAt:        rec.CreatedAt,
 	}
 }
@@ -2058,25 +2115,31 @@ func (s *AnalyticsService) toExperimentSummaryLocked(experiment *Experiment) res
 	}
 
 	return response.ExperimentSummaryResp{
-		ExperimentID:      experiment.ID,
-		ProjectID:         experiment.ProjectID,
-		RecommendationID:  experiment.RecommendationID,
-		ApplyID:           experiment.ApplyID,
-		Status:            experiment.Status,
-		Decision:          experiment.Decision,
-		DecisionReason:    experiment.DecisionReason,
-		TargetMetric:      experiment.TargetMetric,
-		RequestedBy:       experiment.RequestedBy,
-		Scope:             experiment.Scope,
-		BaselineSessions:  experiment.BaselineSessions,
-		BaselineQueries:   experiment.BaselineQueries,
-		PostApplySessions: postApplySessions,
-		PostApplyQueries:  postApplyQueries,
-		CreatedAt:         experiment.CreatedAt,
-		ApprovedAt:        experiment.ApprovedAt,
-		AppliedAt:         experiment.AppliedAt,
-		LastObservedAt:    lastObservedAt,
-		ResolvedAt:        experiment.ResolvedAt,
+		ExperimentID:         experiment.ID,
+		ProjectID:            experiment.ProjectID,
+		RecommendationID:     experiment.RecommendationID,
+		ApplyID:              experiment.ApplyID,
+		Status:               experiment.Status,
+		Decision:             experiment.Decision,
+		DecisionReason:       experiment.DecisionReason,
+		EvaluationMode:       experiment.EvaluationMode,
+		EvaluationModel:      experiment.EvaluationModel,
+		EvaluationDecision:   experiment.EvaluationDecision,
+		EvaluationConfidence: experiment.EvaluationConfidence,
+		EvaluationSummary:    experiment.EvaluationSummary,
+		TargetMetric:         experiment.TargetMetric,
+		RequestedBy:          experiment.RequestedBy,
+		Scope:                experiment.Scope,
+		BaselineSessions:     experiment.BaselineSessions,
+		BaselineQueries:      experiment.BaselineQueries,
+		PostApplySessions:    postApplySessions,
+		PostApplyQueries:     postApplyQueries,
+		CreatedAt:            experiment.CreatedAt,
+		ApprovedAt:           experiment.ApprovedAt,
+		AppliedAt:            experiment.AppliedAt,
+		EvaluatedAt:          experiment.EvaluatedAt,
+		LastObservedAt:       lastObservedAt,
+		ResolvedAt:           experiment.ResolvedAt,
 	}
 }
 
@@ -2103,6 +2166,10 @@ func (s *AnalyticsService) markExperimentMeasuringLocked(experimentID string, ap
 	if experiment.AppliedAt == nil {
 		experiment.AppliedAt = &appliedAt
 	}
+	experiment.EvaluationDecision = ""
+	experiment.EvaluationConfidence = ""
+	experiment.EvaluationSummary = ""
+	experiment.EvaluatedAt = nil
 	experiment.ResolvedAt = nil
 }
 
@@ -2126,6 +2193,28 @@ func (s *AnalyticsService) markExperimentResolvedLocked(experimentID, status, de
 	experiment.Decision = decision
 	experiment.DecisionReason = firstNonEmpty(reason, experiment.DecisionReason)
 	experiment.ResolvedAt = &resolvedAt
+}
+
+func (s *AnalyticsService) maybeReviewExperimentLocked(project *Project, experiment *Experiment, before, after []*SessionSummary, beforeStats, afterStats sessionSummaryStats, afterCount int, observedAt time.Time) experimentEvaluation {
+	if experiment == nil || afterCount == 0 {
+		return experimentEvaluation{}
+	}
+
+	review := s.evaluationAgent.ReviewExperiment(project, before, after, beforeStats, afterStats)
+	experiment.EvaluationMode = review.Mode
+	experiment.EvaluationModel = review.Model
+	experiment.EvaluationDecision = review.Decision
+	experiment.EvaluationConfidence = review.Confidence
+	experiment.EvaluationSummary = review.Summary
+	experiment.EvaluatedAt = &observedAt
+	return review
+}
+
+func experimentField(experiment *Experiment, pick func(*Experiment) string) string {
+	if experiment == nil || pick == nil {
+		return ""
+	}
+	return pick(experiment)
 }
 
 func countDevicesByOrg(devices map[string]*Agent, orgID string) int {
@@ -2199,21 +2288,80 @@ func safeDiv(a, b float64) float64 {
 	return round(a / b)
 }
 
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := value.UTC()
+	return &cloned
+}
+
+func cloneRecommendationResearchStatusResp(status *RecommendationResearchStatus) *response.RecommendationResearchStatusResp {
+	if status == nil {
+		return nil
+	}
+	return &response.RecommendationResearchStatusResp{
+		State:               status.State,
+		Summary:             status.Summary,
+		Provider:            status.Provider,
+		Model:               status.Model,
+		MinimumSessions:     status.MinimumSessions,
+		SessionCount:        status.SessionCount,
+		RawQueryCount:       status.RawQueryCount,
+		RecommendationCount: status.RecommendationCount,
+		TriggerSessionID:    status.TriggerSessionID,
+		LastError:           status.LastError,
+		TriggeredAt:         cloneTime(status.TriggeredAt),
+		StartedAt:           cloneTime(status.StartedAt),
+		CompletedAt:         cloneTime(status.CompletedAt),
+		LastSuccessfulAt:    cloneTime(status.LastSuccessfulAt),
+		LastDurationMS:      status.LastDurationMS,
+	}
+}
+
+func isRecommendationResearchStatusNewer(candidate, current *RecommendationResearchStatus) bool {
+	if candidate == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	candidateAt := derefTime(candidate.TriggeredAt, time.Time{})
+	currentAt := derefTime(current.TriggeredAt, time.Time{})
+	if candidateAt.Equal(currentAt) {
+		return candidate.ProjectID > current.ProjectID
+	}
+	return candidateAt.After(currentAt)
+}
+
+func (s *AnalyticsService) setRecommendationResearchStatusLocked(projectID string, status RecommendationResearchStatus) {
+	status.ProjectID = projectID
+	s.AnalyticsStore.recommendationResearch[projectID] = &status
+}
+
+func humanizeDurationMS(value int) string {
+	if value <= 0 {
+		return "under 1s"
+	}
+	if value < 1000 {
+		return fmt.Sprintf("%dms", value)
+	}
+	if value < 60000 {
+		return fmt.Sprintf("%.1fs", float64(value)/1000)
+	}
+	minutes := value / 60000
+	seconds := (value % 60000) / 1000
+	if seconds == 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return fmt.Sprintf("%dm %ds", minutes, seconds)
+}
+
 func derefTime(value *time.Time, fallback time.Time) time.Time {
 	if value == nil {
 		return fallback
 	}
 	return *value
-}
-
-func relativeChange(after, before float64) float64 {
-	if before == 0 {
-		if after == 0 {
-			return 0
-		}
-		return 1
-	}
-	return round((after - before) / before)
 }
 
 func maxInt(a, b int) int {

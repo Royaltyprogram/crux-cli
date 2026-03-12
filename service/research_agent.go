@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -19,10 +21,8 @@ const (
 	defaultOpenAIResponsesModel   = "gpt-5.4"
 	defaultResearchSampleSize     = 10
 	defaultResearchRequestTimeout = 45 * time.Second
-	defaultInstructionHeading     = "## AgentOpt Research Findings"
+	defaultResearchEvidenceLimit  = 5
 	defaultCodexInstructionTarget = "~/.codex/AGENTS.md"
-	defaultMCPConfigTarget        = ".mcp.json"
-	defaultCodexSkillTarget       = "~/.codex/skills/agentopt-repo-discovery/SKILL.md"
 )
 
 type CloudResearchAgent struct {
@@ -49,6 +49,34 @@ type researchRecommendation struct {
 	Evidence        []string
 	Steps           []ChangePlanStep
 	Settings        map[string]any
+	RawSuggestion   string
+}
+
+type researchRecommendationPayload struct {
+	Recommendations []json.RawMessage `json:"recommendations"`
+}
+
+type researchRecommendationItemPayload struct {
+	Kind            string                          `json:"kind"`
+	Title           string                          `json:"title"`
+	Summary         string                          `json:"summary"`
+	Reason          string                          `json:"reason"`
+	Explanation     string                          `json:"explanation"`
+	ExpectedBenefit string                          `json:"expected_benefit"`
+	Risk            string                          `json:"risk"`
+	ExpectedImpact  string                          `json:"expected_impact"`
+	Score           float64                         `json:"score"`
+	Evidence        []string                        `json:"evidence"`
+	ChangePlan      []researchChangePlanStepPayload `json:"change_plan"`
+}
+
+type researchChangePlanStepPayload struct {
+	Type            string         `json:"type"`
+	Action          string         `json:"action"`
+	TargetFile      string         `json:"target_file"`
+	Summary         string         `json:"summary"`
+	SettingsUpdates map[string]any `json:"settings_updates"`
+	ContentPreview  string         `json:"content_preview"`
 }
 
 type instructionPattern struct {
@@ -56,11 +84,6 @@ type instructionPattern struct {
 	Label       string
 	Terms       []string
 	Instruction string
-}
-
-type matchedInstructionPattern struct {
-	Pattern instructionPattern
-	Count   int
 }
 
 type researchSessionSnapshot struct {
@@ -76,6 +99,13 @@ type researchSessionSnapshot struct {
 	FunctionCallCount      int
 	ToolErrorCount         int
 	ToolWallTimeMS         int
+}
+
+type researchInteractionSample struct {
+	TimestampLabel     string
+	Tool               string
+	Queries            []string
+	AssistantResponses []string
 }
 
 type researchUsageSummary struct {
@@ -138,11 +168,6 @@ func NewCloudResearchAgent(conf *configs.Config) *CloudResearchAgent {
 	model := firstNonEmptyString(strings.TrimSpace(openAIConf.ResponsesModel), defaultOpenAIResponsesModel)
 	provider := "openai"
 	mode := "responses-api"
-	if apiKey == "" {
-		provider = "local"
-		mode = "instruction-fallback"
-		model = "personal-usage-mvp"
-	}
 	clientOptions := []option.RequestOption{}
 	if apiKey != "" {
 		clientOptions = append(clientOptions, option.WithAPIKey(apiKey))
@@ -150,6 +175,10 @@ func NewCloudResearchAgent(conf *configs.Config) *CloudResearchAgent {
 		if baseURL := strings.TrimSpace(openAIConf.BaseURL); baseURL != "" {
 			clientOptions = append(clientOptions, option.WithBaseURL(baseURL))
 		}
+	} else {
+		provider = "disabled"
+		mode = "disabled"
+		model = ""
 	}
 	return &CloudResearchAgent{
 		Provider:   provider,
@@ -166,83 +195,32 @@ func NewCloudResearchAgentPlaceholder(conf *configs.Config) *CloudResearchAgent 
 	return NewCloudResearchAgent(conf)
 }
 
-func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) []researchRecommendation {
+func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) ([]researchRecommendation, error) {
+	_ = snapshots
+
 	rawQueries := collectRawQueries(sessions)
 	rawQueries = normalizeQueriesForResearchPrompt(rawQueries)
 	if len(rawQueries) == 0 {
-		return nil
+		return nil, nil
+	}
+	if strings.TrimSpace(a.apiKey) == "" {
+		return nil, nil
 	}
 
 	usageSummary := buildResearchUsageSummary(sessions, rawQueries)
 	sampledQueries := sampleRawQueries(rawQueries, minInt(a.sampleSize, len(rawQueries)), a.randSource)
-	contentPreview, generationMode := a.buildInstructionPreview(project, sampledQueries, rawQueries, usageSummary)
-	patternCounts := countInstructionPatternMatches(rawQueries)
-	latestSnapshot := latestConfigSnapshot(snapshots)
-
-	evidence := []string{
-		fmt.Sprintf("sessions=%d", len(sessions)),
-		fmt.Sprintf("raw_query_count=%d", len(rawQueries)),
-		fmt.Sprintf("sampled_raw_queries=%d", len(sampledQueries)),
-		fmt.Sprintf("avg_tokens_per_query=%d", usageSummary.AvgTokensPerQuery),
-		fmt.Sprintf("avg_first_response_latency_ms=%d", usageSummary.AvgFirstResponseLatencyMS),
-		fmt.Sprintf("total_function_calls=%d", usageSummary.TotalFunctionCalls),
-		fmt.Sprintf("total_tool_errors=%d", usageSummary.TotalToolErrors),
-		"selection=random",
-		"target_file=" + defaultCodexInstructionTarget,
-		"generation_mode=" + generationMode,
+	interactionSamples := buildResearchInteractionSamples(sessions, defaultResearchEvidenceLimit)
+	recommendations, err := a.generateRecommendations(project, sampledQueries, interactionSamples, usageSummary)
+	if err != nil {
+		return nil, err
 	}
-	if latestSnapshot != nil {
-		evidence = append(evidence,
-			fmt.Sprintf("snapshot_profile=%s", latestSnapshot.ProfileID),
-			fmt.Sprintf("snapshot_instruction_files=%d", len(latestSnapshot.InstructionFiles)),
-			fmt.Sprintf("snapshot_enabled_mcp_count=%d", latestSnapshot.EnabledMCPCount),
-		)
-	}
-
-	recommendations := []researchRecommendation{{
-		Kind:            "instruction-custom-rules",
-		Title:           instructionRecommendationTitle(project),
-		Summary:         "Recent usage history was analyzed to highlight repeated inefficiencies before the local coding agent decides what instruction to add.",
-		Reason:          buildInstructionReason(sampledQueries, usageSummary),
-		Explanation:     "The research agent samples recent raw queries, adds latency and token context, asks OpenAI for abstract workflow findings, and leaves the final instruction edit to the local Codex agent.",
-		ExpectedBenefit: "Surface high-friction defaults without forcing the research agent to author the final Codex global instruction wording.",
-		Risk:            "Low. The plan is a reviewable append to the Codex global instruction file.",
-		ExpectedImpact:  "Lower setup churn, less repeated prompt steering, and clearer evidence about where the workflow wastes time.",
-		Score:           instructionRecommendationScore(len(sampledQueries), float64(usageSummary.AvgTokensPerQuery)),
-		Evidence:        evidence,
-		Steps: []ChangePlanStep{{
-			Type:           "text_append",
-			Action:         "append_block",
-			TargetFile:     defaultCodexInstructionTarget,
-			Summary:        "Append a research findings block to the Codex global instruction file.",
-			ContentPreview: contentPreview,
-		}},
-	}}
-
-	if configRecommendation, ok := buildInstructionFileRecommendation(latestSnapshot, patternCounts); ok {
-		recommendations = append(recommendations, configRecommendation)
-	}
-	if skillRecommendation, ok := buildSkillRecommendation(latestSnapshot, patternCounts, usageSummary); ok {
-		recommendations = append(recommendations, skillRecommendation)
-	}
-	if mcpRecommendation, ok := buildMCPRecommendation(latestSnapshot, patternCounts, usageSummary); ok {
-		recommendations = append(recommendations, mcpRecommendation)
-	}
-
 	sort.Slice(recommendations, func(i, j int) bool {
 		if recommendations[i].Score == recommendations[j].Score {
-			return recommendations[i].Kind < recommendations[j].Kind
+			return recommendations[i].Title < recommendations[j].Title
 		}
 		return recommendations[i].Score > recommendations[j].Score
 	})
-	return recommendations
-}
-
-func instructionRecommendationTitle(project *Project) string {
-	if project != nil && strings.TrimSpace(project.Name) != "" {
-		return "Highlight workflow inefficiencies for " + project.Name
-	}
-	return "Highlight workflow inefficiencies"
+	return recommendations, nil
 }
 
 func collectRawQueries(sessions []*SessionSummary) []string {
@@ -259,176 +237,17 @@ func collectRawQueries(sessions []*SessionSummary) []string {
 	return out
 }
 
-func latestConfigSnapshot(snapshots []*ConfigSnapshot) *ConfigSnapshot {
-	var latest *ConfigSnapshot
-	for _, snapshot := range snapshots {
-		if snapshot == nil {
-			continue
-		}
-		if latest == nil || snapshot.CapturedAt.After(latest.CapturedAt) {
-			latest = snapshot
-		}
-	}
-	return latest
-}
-
-func buildInstructionFileRecommendation(snapshot *ConfigSnapshot, patternCounts map[string]int) (researchRecommendation, bool) {
-	if snapshot == nil || len(snapshot.InstructionFiles) == 0 {
-		return researchRecommendation{}, false
-	}
-
-	workflowFriction := patternCounts["repo_discovery"] + patternCounts["verification"] + patternCounts["contract_review"] + patternCounts["root_cause"]
-	if workflowFriction < 2 {
-		return researchRecommendation{}, false
-	}
-
-	nextFiles := append([]string(nil), snapshot.InstructionFiles...)
-	nextFiles = appendMissingString(nextFiles, "AGENTS.md")
-	nextFiles = appendMissingString(nextFiles, defaultCodexInstructionTarget)
-	if len(nextFiles) == len(snapshot.InstructionFiles) {
-		return researchRecommendation{}, false
-	}
-
-	targetFile := targetConfigFileForTool(snapshot.Tool)
-	return researchRecommendation{
-		Kind:            "config-personal-instruction-files",
-		Title:           "Load personal instruction findings by default",
-		Summary:         "The current config only loads part of the instruction context, so the agent keeps asking for repo discovery and verification guidance again.",
-		Reason:          fmt.Sprintf("Recent sessions hit %d workflow-friction prompts while the latest profile loads %d instruction file(s).", workflowFriction, len(snapshot.InstructionFiles)),
-		Explanation:     "This recommendation connects the global AgentOpt findings file into the coding-agent config so learned workflow guidance stays active without repeating the same steering prompts.",
-		ExpectedBenefit: "Less repeated prompt steering for discovery, diagnosis, and verification across future sessions.",
-		Risk:            "Low. Single-file config merge that only updates the instruction file list.",
-		ExpectedImpact:  "Lower setup churn and fewer repeated control-flow recap prompts.",
-		Score:           instructionFilesRecommendationScore(workflowFriction, len(snapshot.InstructionFiles)),
-		Evidence: []string{
-			fmt.Sprintf("workflow_friction_prompts=%d", workflowFriction),
-			fmt.Sprintf("current_instruction_files=%d", len(snapshot.InstructionFiles)),
-			"current_instruction_file_list=" + strings.Join(snapshot.InstructionFiles, ","),
-			"target_file=" + targetFile,
-		},
-		Steps: []ChangePlanStep{{
-			Type:       "config_merge",
-			Action:     "merge_patch",
-			TargetFile: targetFile,
-			Summary:    "Update the instruction file list so the agent loads both workspace and personal findings by default.",
-			SettingsUpdates: map[string]any{
-				"instruction_files": nextFiles,
-			},
-		}},
-	}, true
-}
-
-func buildSkillRecommendation(snapshot *ConfigSnapshot, patternCounts map[string]int, usageSummary researchUsageSummary) (researchRecommendation, bool) {
-	if snapshot == nil || strings.ToLower(strings.TrimSpace(snapshot.Tool)) != "codex" {
-		return researchRecommendation{}, false
-	}
-
-	repoDiscoveryPressure := patternCounts["repo_discovery"] + patternCounts["verification"] + patternCounts["contract_review"]
-	if repoDiscoveryPressure < 3 {
-		return researchRecommendation{}, false
-	}
-	if strings.TrimSpace(bundledRepoDiscoverySkill) == "" {
-		return researchRecommendation{}, false
-	}
-
-	return researchRecommendation{
-		Kind:            "skill-repo-discovery-baseline",
-		Title:           "Install a Codex repo-discovery skill",
-		Summary:         "The user keeps spending early turns on repo discovery and verification setup, so that workflow should become a reusable Codex skill instead of a repeated prompt pattern.",
-		Reason:          fmt.Sprintf("Recent sessions hit %d repo-discovery or verification prompts with %d ms average first-response latency.", repoDiscoveryPressure, usageSummary.AvgFirstResponseLatencyMS),
-		Explanation:     "Installing a small Codex skill turns recurring repo-orientation behavior into a stable workflow the agent can reuse before proposing edits.",
-		ExpectedBenefit: "Faster control-flow mapping and more consistent verification plans in unfamiliar repositories.",
-		Risk:            "Low. Single-file skill install into the local Codex skills directory.",
-		ExpectedImpact:  "Less repeated repo-discovery prompting before the first useful patch.",
-		Score:           skillRecommendationScore(repoDiscoveryPressure, usageSummary.AvgFirstResponseLatencyMS),
-		Evidence: []string{
-			fmt.Sprintf("repo_discovery_prompts=%d", repoDiscoveryPressure),
-			fmt.Sprintf("avg_first_response_latency_ms=%d", usageSummary.AvgFirstResponseLatencyMS),
-			"target_file=" + defaultCodexSkillTarget,
-		},
-		Steps: []ChangePlanStep{{
-			Type:           "skill_install",
-			Action:         "text_replace",
-			TargetFile:     defaultCodexSkillTarget,
-			Summary:        "Install the AgentOpt repo-discovery skill into the local Codex skills directory.",
-			ContentPreview: bundledRepoDiscoverySkill,
-		}},
-	}, true
-}
-
-func buildMCPRecommendation(snapshot *ConfigSnapshot, patternCounts map[string]int, usageSummary researchUsageSummary) (researchRecommendation, bool) {
-	if snapshot == nil {
-		return researchRecommendation{}, false
-	}
-
-	repoDiscoveryPressure := patternCounts["repo_discovery"] + patternCounts["contract_review"]
-	if repoDiscoveryPressure < 2 {
-		return researchRecommendation{}, false
-	}
-
-	currentServers := snapshotStringList(snapshot.Settings, "mcp_servers")
-	if len(currentServers) == 0 && snapshot.EnabledMCPCount >= 2 {
-		return researchRecommendation{}, false
-	}
-	desiredServers := append([]string(nil), currentServers...)
-	desiredServers = appendMissingString(desiredServers, "filesystem")
-	desiredServers = appendMissingString(desiredServers, "git")
-
-	if len(desiredServers) == len(currentServers) && snapshot.EnabledMCPCount >= 2 {
-		return researchRecommendation{}, false
-	}
-
-	return researchRecommendation{
-		Kind:            "mcp-repo-discovery-baseline",
-		Title:           "Add baseline MCP servers for repo discovery",
-		Summary:         "The usage history shows repeated repo discovery turns, but the current MCP baseline is too thin to support that workflow.",
-		Reason:          fmt.Sprintf("Recent sessions hit %d repo-discovery prompts with %d MCP server(s) enabled in the latest snapshot.", repoDiscoveryPressure, snapshot.EnabledMCPCount),
-		Explanation:     "This recommendation enables a small MCP baseline for file-system and git context so the agent can inspect the workspace state with less manual prompting.",
-		ExpectedBenefit: "Reduce repeated file-location and contract-comparison prompts before the real task begins.",
-		Risk:            "Low. Reviewable JSON merge that only updates the baseline MCP server list.",
-		ExpectedImpact:  "Faster repo discovery and fewer exploratory turns before edits.",
-		Score:           mcpRecommendationScore(repoDiscoveryPressure, snapshot.EnabledMCPCount, usageSummary.TotalToolWallTimeMS),
-		Evidence: []string{
-			fmt.Sprintf("repo_discovery_prompts=%d", repoDiscoveryPressure),
-			fmt.Sprintf("enabled_mcp_count=%d", snapshot.EnabledMCPCount),
-			fmt.Sprintf("total_tool_wall_time_ms=%d", usageSummary.TotalToolWallTimeMS),
-			"current_mcp_servers=" + strings.Join(currentServers, ","),
-			"target_file=" + defaultMCPConfigTarget,
-		},
-		Steps: []ChangePlanStep{{
-			Type:       "config_merge",
-			Action:     "merge_patch",
-			TargetFile: defaultMCPConfigTarget,
-			Summary:    "Install a baseline MCP server list for filesystem and git context.",
-			SettingsUpdates: map[string]any{
-				"mcp_servers": desiredServers,
-			},
-		}},
-	}, true
-}
-
-func (a *CloudResearchAgent) buildInstructionPreview(project *Project, sampledQueries, rawQueries []string, usageSummary researchUsageSummary) (string, string) {
-	markdown, err := a.generateInstructionMarkdown(project, sampledQueries, usageSummary)
-	if err == nil && strings.TrimSpace(markdown) != "" {
-		return wrapInstructionMarkdown(markdown), "openai_responses_api"
-	}
-	return buildFallbackInstructionContent(rawQueries, usageSummary), "local_fallback"
-}
-
-func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampledQueries []string, usageSummary researchUsageSummary) (string, error) {
-	if strings.TrimSpace(a.apiKey) == "" {
-		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
-	}
+func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) ([]researchRecommendation, error) {
 	if len(sampledQueries) == 0 {
-		return "", fmt.Errorf("no sampled queries available")
+		return nil, fmt.Errorf("no sampled queries available")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultResearchRequestTimeout)
 	defer cancel()
 
-	prompt, err := buildInstructionPrompt(project, sampledQueries, usageSummary)
+	prompt, err := buildRecommendationsPrompt(project, sampledQueries, interactionSamples, usageSummary)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	resp, err := a.client.Responses.New(ctx, responses.ResponseNewParams{
@@ -438,13 +257,13 @@ func (a *CloudResearchAgent) generateInstructionMarkdown(project *Project, sampl
 		},
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return normalizeInstructionMarkdown(resp.OutputText()), nil
+	return parseResearchRecommendations(resp.OutputText())
 }
 
-func buildInstructionPrompt(project *Project, sampledQueries []string, usageSummary researchUsageSummary) (string, error) {
-	return renderResearchAgentInstructionPrompt(project, sampledQueries, usageSummary)
+func buildRecommendationsPrompt(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (string, error) {
+	return renderResearchAgentRecommendationsPrompt(project, sampledQueries, interactionSamples, usageSummary)
 }
 
 func sampleRawQueries(queries []string, limit int, rng *rand.Rand) []string {
@@ -464,58 +283,125 @@ func sampleRawQueries(queries []string, limit int, rng *rand.Rand) []string {
 	return append([]string(nil), pool[:limit]...)
 }
 
-func wrapInstructionMarkdown(markdown string) string {
-	lines := []string{
-		"",
-		defaultInstructionHeading,
-	}
-	if trimmed := strings.TrimSpace(markdown); trimmed != "" {
-		lines = append(lines, strings.Split(trimmed, "\n")...)
-	}
-	return strings.Join(lines, "\n") + "\n"
-}
+func parseResearchRecommendations(raw string) ([]researchRecommendation, error) {
+	cleaned := strings.TrimSpace(raw)
+	cleaned = strings.TrimPrefix(cleaned, "```json")
+	cleaned = strings.TrimPrefix(cleaned, "```")
+	cleaned = strings.TrimSuffix(cleaned, "```")
+	cleaned = strings.TrimSpace(cleaned)
 
-func normalizeInstructionMarkdown(markdown string) string {
-	rawLines := strings.Split(strings.ReplaceAll(markdown, "\r\n", "\n"), "\n")
-	lines := make([]string, 0, len(rawLines))
-	for _, line := range rawLines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	var payload researchRecommendationPayload
+	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
+		return nil, err
+	}
+
+	items := make([]researchRecommendation, 0, len(payload.Recommendations))
+	for _, rawItem := range payload.Recommendations {
+		var item researchRecommendationItemPayload
+		if err := json.Unmarshal(rawItem, &item); err != nil {
 			continue
 		}
-		line = strings.TrimPrefix(line, defaultInstructionHeading)
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+		rec, ok := sanitizeResearchRecommendation(item, formatResearchSuggestion(rawItem))
+		if ok {
+			items = append(items, rec)
 		}
-		if !strings.HasPrefix(line, "- ") {
-			line = "- " + strings.TrimLeft(line, "-* ")
-		}
-		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n")
+	if len(items) == 0 {
+		return nil, fmt.Errorf("no valid recommendations returned")
+	}
+	return items, nil
 }
 
-func buildFallbackInstructionContent(rawQueries []string, usageSummary researchUsageSummary) string {
-	matches := topInstructionPatterns(matchInstructionPatterns(rawQueries), 3)
-	lines := []string{
-		"",
-		defaultInstructionHeading,
-		"- Repeated prompt steering suggests the workflow still depends on manual setup instead of strong defaults.",
+func sanitizeResearchRecommendation(item researchRecommendationItemPayload, rawSuggestion string) (researchRecommendation, bool) {
+	steps := make([]ChangePlanStep, 0, len(item.ChangePlan))
+	for _, step := range item.ChangePlan {
+		if strings.TrimSpace(step.Action) == "" || strings.TrimSpace(step.TargetFile) == "" {
+			continue
+		}
+		steps = append(steps, ChangePlanStep{
+			Type:            strings.TrimSpace(step.Type),
+			Action:          strings.TrimSpace(step.Action),
+			TargetFile:      strings.TrimSpace(step.TargetFile),
+			Summary:         strings.TrimSpace(step.Summary),
+			SettingsUpdates: cloneAnyMap(step.SettingsUpdates),
+			ContentPreview:  strings.TrimSpace(step.ContentPreview),
+		})
 	}
-	for _, match := range matches {
-		lines = append(lines, "- "+match.Pattern.Instruction)
+	if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Summary) == "" || len(steps) == 0 {
+		return researchRecommendation{}, false
 	}
-	if usageSummary.AvgTokensPerQuery >= 2500 {
-		lines = append(lines, "- Token usage per query is high enough that too much context is likely being rebuilt instead of reused.")
+
+	kind := sanitizeResearchRecommendationID(strings.TrimSpace(item.Kind))
+	if kind == "" {
+		kind = sanitizeResearchRecommendationID(strings.TrimSpace(item.Title))
 	}
-	if usageSummary.AvgFirstResponseLatencyMS >= 2000 {
-		lines = append(lines, "- First-response latency is high enough to suggest too much discovery happens before the first useful answer.")
+	if kind == "" {
+		kind = "llm-generated-recommendation"
 	}
-	if usageSummary.TotalToolErrors > 0 {
-		lines = append(lines, "- Tool-call errors are recurring, which suggests execution steps are being attempted without enough preflight or constraint awareness.")
+
+	score := item.Score
+	if score < 0 {
+		score = 0
 	}
-	return strings.Join(lines, "\n") + "\n"
+	if score > 1 {
+		score = 1
+	}
+
+	evidence := make([]string, 0, len(item.Evidence))
+	for _, entry := range item.Evidence {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		evidence = append(evidence, entry)
+	}
+
+	return researchRecommendation{
+		Kind:            kind,
+		Title:           strings.TrimSpace(item.Title),
+		Summary:         strings.TrimSpace(item.Summary),
+		Reason:          strings.TrimSpace(item.Reason),
+		Explanation:     strings.TrimSpace(item.Explanation),
+		ExpectedBenefit: strings.TrimSpace(item.ExpectedBenefit),
+		Risk:            strings.TrimSpace(item.Risk),
+		ExpectedImpact:  strings.TrimSpace(item.ExpectedImpact),
+		Score:           round(score),
+		Evidence:        evidence,
+		Steps:           steps,
+		RawSuggestion:   strings.TrimSpace(rawSuggestion),
+	}, true
+}
+
+func formatResearchSuggestion(raw json.RawMessage) string {
+	cleaned := strings.TrimSpace(string(raw))
+	if cleaned == "" {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(cleaned), "", "  "); err != nil {
+		return cleaned
+	}
+	return buf.String()
+}
+
+func sanitizeResearchRecommendationID(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case !lastDash:
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func normalizeQueriesForResearchPrompt(queries []string) []string {
@@ -617,26 +503,6 @@ func countInstructionPatternMatches(queries []string) map[string]int {
 	return counts
 }
 
-func matchInstructionPatterns(queries []string) []matchedInstructionPattern {
-	out := make([]matchedInstructionPattern, 0, len(personalInstructionPatterns))
-	for _, pattern := range personalInstructionPatterns {
-		count := 0
-		for _, query := range queries {
-			if queryMatchesPattern(query, pattern.Terms) {
-				count++
-			}
-		}
-		if count == 0 {
-			continue
-		}
-		out = append(out, matchedInstructionPattern{
-			Pattern: pattern,
-			Count:   count,
-		})
-	}
-	return out
-}
-
 func queryMatchesPattern(query string, terms []string) bool {
 	query = strings.ToLower(strings.TrimSpace(query))
 	for _, term := range terms {
@@ -645,122 +511,6 @@ func queryMatchesPattern(query string, terms []string) bool {
 		}
 	}
 	return false
-}
-
-func topInstructionPatterns(items []matchedInstructionPattern, limit int) []matchedInstructionPattern {
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Count == items[j].Count {
-			return items[i].Pattern.Label < items[j].Pattern.Label
-		}
-		return items[i].Count > items[j].Count
-	})
-	if limit > 0 && len(items) > limit {
-		return append([]matchedInstructionPattern(nil), items[:limit]...)
-	}
-	return append([]matchedInstructionPattern(nil), items...)
-}
-
-func buildInstructionReason(sampledQueries []string, usageSummary researchUsageSummary) string {
-	if len(sampledQueries) == 0 {
-		return "No sampled raw queries were available for instruction synthesis."
-	}
-	return fmt.Sprintf(
-		"Synthesized from %d randomly sampled raw queries across %d uploaded sessions, with %d ms average first-response latency and %d average tokens per query.",
-		len(sampledQueries),
-		usageSummary.SessionCount,
-		usageSummary.AvgFirstResponseLatencyMS,
-		usageSummary.AvgTokensPerQuery,
-	)
-}
-
-func instructionRecommendationScore(sampleCount int, avgTokensPerQuery float64) float64 {
-	score := 0.68 + 0.01*float64(sampleCount)
-	if avgTokensPerQuery >= 2500 {
-		score += 0.07
-	}
-	if score > 0.93 {
-		score = 0.93
-	}
-	return round(score)
-}
-
-func instructionFilesRecommendationScore(workflowFriction, currentInstructionFiles int) float64 {
-	score := 0.50 + 0.02*float64(minInt(workflowFriction, 4))
-	if currentInstructionFiles <= 1 {
-		score += 0.03
-	}
-	if score > 0.67 {
-		score = 0.67
-	}
-	return round(score)
-}
-
-func mcpRecommendationScore(repoDiscoveryPressure, enabledMCPCount, toolWallTimeMS int) float64 {
-	score := 0.49 + 0.02*float64(minInt(repoDiscoveryPressure, 4))
-	if enabledMCPCount <= 1 {
-		score += 0.04
-	}
-	if toolWallTimeMS >= 1500 {
-		score += 0.03
-	}
-	if score > 0.64 {
-		score = 0.64
-	}
-	return round(score)
-}
-
-func skillRecommendationScore(repoDiscoveryPressure, avgFirstResponseLatencyMS int) float64 {
-	score := 0.54 + 0.02*float64(minInt(repoDiscoveryPressure, 4))
-	if avgFirstResponseLatencyMS >= 1800 {
-		score += 0.04
-	}
-	if score > 0.68 {
-		score = 0.68
-	}
-	return round(score)
-}
-
-func targetConfigFileForTool(tool string) string {
-	switch strings.ToLower(strings.TrimSpace(tool)) {
-	case "claude", "claude-code":
-		return ".claude/settings.local.json"
-	default:
-		return ".codex/config.json"
-	}
-}
-
-func snapshotStringList(settings map[string]any, key string) []string {
-	raw, ok := settings[key]
-	if !ok {
-		return nil
-	}
-	switch typed := raw.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
-				out = append(out, text)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func appendMissingString(items []string, value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return items
-	}
-	for _, item := range items {
-		if strings.EqualFold(strings.TrimSpace(item), value) {
-			return items
-		}
-	}
-	return append(items, value)
 }
 
 func minInt(a, b int) int {
@@ -842,4 +592,53 @@ func buildResearchUsageSummary(sessions []*SessionSummary, rawQueries []string) 
 	summary.AvgFirstResponseLatencyMS = int(round(safeDiv(float64(totalLatencyMS), float64(maxInt(knownLatencySessions, 1)))))
 	summary.AvgSessionDurationMS = int(round(safeDiv(float64(totalDurationMS), float64(maxInt(knownDurationSessions, 1)))))
 	return summary
+}
+
+func buildResearchInteractionSamples(sessions []*SessionSummary, limit int) []researchInteractionSample {
+	if limit <= 0 || len(sessions) == 0 {
+		return nil
+	}
+
+	pool := append([]*SessionSummary(nil), sessions...)
+	sort.Slice(pool, func(i, j int) bool {
+		return pool[i].Timestamp.After(pool[j].Timestamp)
+	})
+
+	items := make([]researchInteractionSample, 0, minInt(limit, len(pool)))
+	for _, session := range pool {
+		if session == nil {
+			continue
+		}
+		queries := normalizeQueriesForResearchPrompt(session.RawQueries)
+		if len(queries) > 3 {
+			queries = append([]string(nil), queries[:3]...)
+		}
+
+		responses := make([]string, 0, len(session.AssistantResponses))
+		for _, response := range session.AssistantResponses {
+			response = strings.TrimSpace(response)
+			if response == "" {
+				continue
+			}
+			responses = append(responses, response)
+			if len(responses) >= 2 {
+				break
+			}
+		}
+
+		if len(queries) == 0 && len(responses) == 0 {
+			continue
+		}
+
+		items = append(items, researchInteractionSample{
+			TimestampLabel:     session.Timestamp.UTC().Format(time.RFC3339),
+			Tool:               firstNonEmptyString(strings.TrimSpace(session.Tool), "unknown"),
+			Queries:            append([]string(nil), queries...),
+			AssistantResponses: responses,
+		})
+		if len(items) >= limit {
+			break
+		}
+	}
+	return items
 }

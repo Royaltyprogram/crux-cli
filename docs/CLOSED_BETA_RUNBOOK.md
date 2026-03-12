@@ -19,7 +19,7 @@ Start the local development server:
 ```bash
 make generate
 make install-codex-runner
-make run
+OPENAI_API_KEY_FILE=secrets/agentopt-openai-api-key make run
 ```
 
 Open `http://127.0.0.1:8082/` and sign in with the local demo account:
@@ -35,9 +35,8 @@ go run ./cmd/agentopt connect --repo-path .
 go run ./cmd/agentopt workspace
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
-go run ./cmd/agentopt collect
-go run ./cmd/agentopt autoupload enable --interval 30m
-go run ./cmd/agentopt autoupload status
+go run ./cmd/agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s
+go run ./cmd/agentopt daemon status
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt impact
 ```
@@ -46,23 +45,23 @@ Notes:
 
 - In the MVP, every connected repository rolls into one shared workspace per organization.
 - `agentopt connect` updates that shared workspace.
-- `agentopt collect` uploads recent session data immediately and skips unchanged snapshots by default.
-- `agentopt autoupload enable` installs a background collector on macOS via `launchd`.
+- `agentopt daemon enable --bootstrap-recent 10` uploads recent local sessions once during onboarding, then installs background collection plus automatic local sync on macOS via `launchd`.
 - `pending`, `history`, `sync`, and `impact` all read from the same rollout stream.
 
 If you want a beta machine to keep uploading usage data without manual CLI runs, install background uploads once:
 
 ```bash
-agentopt autoupload enable --interval 30m
-agentopt autoupload status
-agentopt autoupload disable
+agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s
+agentopt daemon status
+agentopt daemon disable
 ```
 
 Notes:
 
 - The current background installer targets macOS `launchd`.
-- Prefer the installed `agentopt` command for `autoupload`; do not rely on `go run` for long-lived beta machine setup.
-- The background job runs `agentopt collect` on each interval.
+- Prefer the installed `agentopt` command for `daemon`; do not rely on `go run` for long-lived beta machine setup.
+- The daemon can bootstrap existing local sessions once, then installs one scheduled collector job plus one long-running sync watcher.
+- Keep `agentopt collect` for one-off manual uploads when you do not want background automation.
 
 For beta users who should install from GitHub Releases instead of an unpacked bundle:
 
@@ -269,4 +268,4 @@ Run this before handing the build to beta users:
 8. `GET /healthz` and `GET /readyz` respond successfully in the target environment.
 9. A seeded beta user can log in on the dashboard and issue a CLI token.
 10. A beta machine can complete `agentopt login`, `agentopt connect`, and `agentopt collect`.
-11. If background uploads are part of the beta flow, `agentopt autoupload enable --interval 30m` and `agentopt autoupload status` both succeed on the target macOS machine.
+11. If background automation is part of the beta flow, `agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s` and `agentopt daemon status` both succeed on the target macOS machine.

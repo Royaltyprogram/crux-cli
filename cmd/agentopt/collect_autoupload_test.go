@@ -175,79 +175,7 @@ func TestRunCollectSkipsUnchangedSnapshotAndHandlesMissingSessions(t *testing.T)
 	require.Equal(t, 0, postCount)
 }
 
-func TestRunAutouploadEnableStatusDisable(t *testing.T) {
-	root := t.TempDir()
-	home := filepath.Join(root, "home")
-	t.Setenv("AGENTOPT_HOME", filepath.Join(root, ".agentopt"))
-	t.Setenv("HOME", home)
-
-	launchctlLog := filepath.Join(root, "launchctl.log")
-	launchctlStub := filepath.Join(root, "launchctl-stub.sh")
-	require.NoError(t, os.WriteFile(launchctlStub, []byte(`#!/bin/sh
-set -eu
-printf '%s %s
-' "$1" "$*" >> "$AGENTOPT_LAUNCHCTL_LOG"
-exit 0
-`), 0o755))
-	t.Setenv("AGENTOPT_LAUNCHCTL_BIN", launchctlStub)
-	t.Setenv("AGENTOPT_LAUNCHCTL_LOG", launchctlLog)
-
-	require.NoError(t, saveState(state{
-		ServerURL:   "http://127.0.0.1:8082",
-		APIToken:    "token-autoupload",
-		OrgID:       "org-1",
-		UserID:      "user-1",
-		WorkspaceID: "project-1",
-	}))
-
-	enableOutput := captureStdout(t, func() {
-		require.NoError(t, runAutoupload([]string{"enable", "--interval", "45m", "--recent", "2", "--snapshot-mode", "skip"}))
-	})
-
-	var enabled autouploadStatusResp
-	require.NoError(t, json.Unmarshal([]byte(enableOutput), &enabled))
-	require.True(t, enabled.Enabled)
-	require.True(t, enabled.Loaded)
-	require.NotNil(t, enabled.Metadata)
-	require.Equal(t, 2700, enabled.Metadata.IntervalSeconds)
-	require.Equal(t, 2, enabled.Metadata.Recent)
-	require.Equal(t, "skip", enabled.Metadata.SnapshotMode)
-	require.FileExists(t, enabled.Metadata.PlistPath)
-	require.FileExists(t, enabled.Metadata.ScriptPath)
-
-	scriptData, err := os.ReadFile(enabled.Metadata.ScriptPath)
-	require.NoError(t, err)
-	require.Contains(t, string(scriptData), "collect")
-	require.Contains(t, string(scriptData), "--snapshot-mode")
-	require.Contains(t, string(scriptData), "skip")
-
-	statusOutput := captureStdout(t, func() {
-		require.NoError(t, runAutoupload([]string{"status"}))
-	})
-	var status autouploadStatusResp
-	require.NoError(t, json.Unmarshal([]byte(statusOutput), &status))
-	require.True(t, status.Enabled)
-	require.True(t, status.Loaded)
-	require.NotNil(t, status.Metadata)
-	require.Equal(t, enabled.Metadata.Label, status.Metadata.Label)
-
-	disableOutput := captureStdout(t, func() {
-		require.NoError(t, runAutoupload([]string{"disable"}))
-	})
-	var disabled autouploadDisableResp
-	require.NoError(t, json.Unmarshal([]byte(disableOutput), &disabled))
-	require.True(t, disabled.Disabled)
-	require.NoFileExists(t, enabled.Metadata.PlistPath)
-	require.NoFileExists(t, enabled.Metadata.ScriptPath)
-
-	logData, err := os.ReadFile(launchctlLog)
-	require.NoError(t, err)
-	require.Contains(t, string(logData), "load")
-	require.Contains(t, string(logData), "list")
-	require.Contains(t, string(logData), "unload")
-}
-
-func TestResolveAutouploadBaseCommandPrefersInstalledAgentopt(t *testing.T) {
+func TestResolveBackgroundBaseCommandPrefersInstalledAgentopt(t *testing.T) {
 	root, err := os.MkdirTemp(".", ".agentopt-bin-*")
 	require.NoError(t, err)
 	root, err = filepath.Abs(root)
@@ -265,7 +193,7 @@ func TestResolveAutouploadBaseCommandPrefersInstalledAgentopt(t *testing.T) {
 	originalPath := os.Getenv("PATH")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+originalPath)
 
-	command, err := resolveAutouploadBaseCommand()
+	command, err := resolveBackgroundBaseCommand()
 	require.NoError(t, err)
 	require.Equal(t, agentoptPath, command.Program)
 	require.Empty(t, command.Args)

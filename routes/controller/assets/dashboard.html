@@ -130,6 +130,18 @@
         <div class="loop-focus-card" id="loopFocusCard"></div>
       </div>
 
+      <!-- ── Rollout Lifecycle ── -->
+
+      <div class="lifecycle-section" id="lifecycleSection" data-empty="true">
+        <div class="section-header">
+          <div class="section-kicker">Rollout lifecycle</div>
+          <div class="section-title" id="lifecycleTitle">Current change pipeline</div>
+          <div class="section-desc" id="lifecycleDesc">Track the full journey of each optimization from suggestion to outcome.</div>
+        </div>
+        <div class="lifecycle-stepper" id="lifecycleStepper"></div>
+        <div class="lifecycle-grid" id="lifecycleGrid"></div>
+      </div>
+
       <!-- ── Active Suggestion (always visible at top) ── -->
 
       <div class="active-suggestion-section" id="activeSuggestionSection">
@@ -242,21 +254,21 @@
               <div class="section-header compact">
                 <div class="section-kicker">Data coverage</div>
                 <div class="section-title">Fill missing model and latency signals</div>
-                <div class="section-desc" id="coverageActionSummary">Run a local collect once to backfill recent sessions, then enable autoupload to keep these signals current.</div>
+                <div class="section-desc" id="coverageActionSummary">Enable the daemon with bootstrap to backfill existing local sessions once, then keep these signals current and auto-apply approved changes.</div>
               </div>
               <div class="command-block">
                 <div class="command-block-head">
-                  <span class="command-label">Backfill recent sessions</span>
+                  <span class="command-label">One-time manual backfill</span>
                   <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="coverageBackfillCmd" data-copy-label="backfill command">Copy</button>
                 </div>
                 <div class="command-shell" id="coverageBackfillCmd">agentopt collect --recent 30 --snapshot-mode skip</div>
               </div>
               <div class="command-block">
                 <div class="command-block-head">
-                  <span class="command-label">Keep coverage fresh</span>
-                  <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="coverageAutouploadCmd" data-copy-label="autoupload command">Copy</button>
+                  <span class="command-label">Bootstrap + keep coverage fresh</span>
+                  <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="coverageDaemonCmd" data-copy-label="daemon command">Copy</button>
                 </div>
-                <div class="command-shell" id="coverageAutouploadCmd">agentopt autoupload enable --recent 5 --snapshot-mode changed</div>
+                <div class="command-shell" id="coverageDaemonCmd">agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s</div>
               </div>
             </div>
           </div>

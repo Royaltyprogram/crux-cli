@@ -184,15 +184,16 @@ func TestMockDashboardApprovalTriggersLocalSyncAndRollback(t *testing.T) {
 func startMockAgentoptServer(t *testing.T) string {
 	t.Helper()
 
-	conf := &configs.Config{}
+	conf := newMockResearchConfig(t)
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 	healthSvc := service.NewHealthService(service.Options{
 		Config:         conf,
@@ -212,6 +213,40 @@ func startMockAgentoptServer(t *testing.T) string {
 	server := httptest.NewServer(echo)
 	t.Cleanup(server.Close)
 	return server.URL
+}
+
+func newMockResearchConfig(t *testing.T) *configs.Config {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		require.Equal(t, "Bearer test-openai-key", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"recommendations\":[{\"kind\":\"llm-workflow-review\",\"title\":\"Reduce repeated workflow recap before implementation\",\"summary\":\"The uploaded raw queries show too much control-flow recap before the actual patch work starts.\",\"reason\":\"Recent raw queries repeatedly ask for current behavior summaries and exact verification planning before implementation begins.\",\"explanation\":\"A small instruction update can push the coding agent to orient on the relevant files and define verification earlier.\",\"expected_benefit\":\"Less repeated steering and faster implementation starts.\",\"risk\":\"Low. Reviewable instruction update only.\",\"expected_impact\":\"Fewer exploratory turns and clearer first useful responses.\",\"score\":0.82,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add a reusable workflow-defaults block for Codex.\",\"content_preview\":\"## AgentOpt Research Findings\\n- Locate the concrete files first.\\n- Summarize only the relevant control flow.\\n- List targeted verification before proposing the patch.\\n\"}]}]}"
+        }
+      ]
+    }
+  ]
+}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	return &configs.Config{
+		OpenAI: configs.OpenAI{
+			APIKey:         "test-openai-key",
+			BaseURL:        server.URL + "/v1",
+			ResponsesModel: "gpt-5.4",
+		},
+	}
 }
 
 func newDashboardClient(t *testing.T) *http.Client {

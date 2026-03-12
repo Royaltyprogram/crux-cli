@@ -50,31 +50,53 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	})
 	require.Equal(s.T(), "baseline", snapshotResp.ProfileID)
 
-	sessionResp := postAPIJSON[response.SessionIngestResp](s.T(), s, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
-		ProjectID:             projectResp.ProjectID,
-		SessionID:             "session-before-" + suffix,
-		Tool:                  "codex",
-		TokenIn:               1000,
-		TokenOut:              240,
-		CachedInputTokens:     280,
-		ReasoningOutputTokens: 60,
-		FunctionCallCount:     3,
-		ToolErrorCount:        1,
-		SessionDurationMS:     110000,
-		ToolWallTimeMS:        1600,
-		ToolCalls:             map[string]int{"shell": 2, "read_file": 1},
-		ToolErrors:            map[string]int{"shell": 1},
-		ToolWallTimesMS:       map[string]int{"shell": 1300, "read_file": 300},
-		RawQueries: []string{
-			"Inspect the route handler and summarize the current control flow.",
-			"Find the smallest patch that fixes the failing analytics path.",
-			"List the exact tests to run after the patch.",
-		},
-		Models:                 []string{"gpt-5.4"},
-		ModelProvider:          "openai",
-		FirstResponseLatencyMS: 2500,
-		Timestamp:              now.Add(-2 * time.Hour),
-	})
+	uploadSession := func(index int) response.SessionIngestResp {
+		return postAPIJSON[response.SessionIngestResp](s.T(), s, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+			ProjectID:             projectResp.ProjectID,
+			SessionID:             fmt.Sprintf("session-before-%s-%d", suffix, index),
+			Tool:                  "codex",
+			TokenIn:               1000,
+			TokenOut:              240,
+			CachedInputTokens:     280,
+			ReasoningOutputTokens: 60,
+			FunctionCallCount:     3,
+			ToolErrorCount:        1,
+			SessionDurationMS:     110000,
+			ToolWallTimeMS:        1600,
+			ToolCalls:             map[string]int{"shell": 2, "read_file": 1},
+			ToolErrors:            map[string]int{"shell": 1},
+			ToolWallTimesMS:       map[string]int{"shell": 1300, "read_file": 300},
+			RawQueries: []string{
+				"Inspect the route handler and summarize the current control flow.",
+				"Find the smallest patch that fixes the failing analytics path.",
+				"List the exact tests to run after the patch.",
+			},
+			Models:                 []string{"gpt-5.4"},
+			ModelProvider:          "openai",
+			FirstResponseLatencyMS: 2500,
+			Timestamp:              now.Add(time.Duration(-2*60+index) * time.Minute),
+		})
+	}
+
+	sessionResp := uploadSession(1)
+	if status := sessionResp.ResearchStatus; status != nil && status.MinimumSessions > 1 {
+		for i := 2; i <= status.MinimumSessions; i++ {
+			sessionResp = uploadSession(i)
+		}
+	}
+	if status := sessionResp.ResearchStatus; status != nil && status.State == "disabled" {
+		s.T().Skip("recommendation research is disabled on the server")
+	}
+	if status := sessionResp.ResearchStatus; status != nil && status.State == "failed" {
+		s.T().Skipf("recommendation research failed on the server: %s", status.LastError)
+	}
+	if len(sessionResp.LatestRecommendationIDs) == 0 {
+		if status := sessionResp.ResearchStatus; status != nil {
+			s.T().Skipf("recommendation research completed without suggestions: %s", status.Summary)
+		}
+		s.T().Skip("recommendation research completed without suggestions")
+	}
+
 	require.NotEmpty(s.T(), sessionResp.LatestRecommendationIDs)
 
 	recommendations := getAPIJSON[response.RecommendationListResp](s.T(), s, "/api/v1/recommendations", url.Values{

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -228,7 +229,7 @@ func collectSessionsOnce(st state, client *apiClient, filePath, tool, codexHome 
 
 func uploadSessionSummaries(st state, client *apiClient, reqs []request.SessionSummaryReq, tool string) ([]response.SessionIngestResp, error) {
 	items := make([]response.SessionIngestResp, 0, len(reqs))
-	for _, req := range reqs {
+	for idx, req := range reqs {
 		req.ProjectID = st.workspaceID()
 		if req.Tool == "" {
 			req.Tool = tool
@@ -236,14 +237,45 @@ func uploadSessionSummaries(st state, client *apiClient, reqs []request.SessionS
 		if req.Timestamp.IsZero() {
 			req.Timestamp = time.Now().UTC()
 		}
+		fmt.Fprintf(os.Stderr, "[%d/%d] Uploading session %s\n", idx+1, len(reqs), firstNonEmpty(strings.TrimSpace(req.SessionID), "pending-id"))
+		fmt.Fprintln(os.Stderr, "    The server may spend a while fetching recommendations after this upload.")
 
 		var uploaded response.SessionIngestResp
 		if err := client.doJSON(http.MethodPost, "/api/v1/session-summaries", req, &uploaded); err != nil {
 			return nil, err
 		}
+		if uploaded.ResearchStatus != nil {
+			fmt.Fprintf(os.Stderr, "    %s\n", formatResearchStatusSummary(uploaded.ResearchStatus))
+		}
 		items = append(items, uploaded)
 	}
 	return items, nil
+}
+
+func formatResearchStatusSummary(status *response.RecommendationResearchStatusResp) string {
+	if status == nil {
+		return "Upload recorded."
+	}
+	summary := strings.TrimSpace(status.Summary)
+	if summary != "" {
+		return summary
+	}
+	switch strings.TrimSpace(status.State) {
+	case "waiting_for_min_sessions":
+		return fmt.Sprintf("Collected %d of %d sessions needed before fetching recommendations.", status.SessionCount, status.MinimumSessions)
+	case "disabled":
+		return "Recommendation research is disabled on the server."
+	case "running":
+		return "The server is fetching recommendations now."
+	case "succeeded":
+		return fmt.Sprintf("Fetched %d recommendation(s).", status.RecommendationCount)
+	case "no_recommendations":
+		return "Finished analyzing sessions but did not produce recommendations."
+	case "failed":
+		return firstNonEmpty(strings.TrimSpace(status.LastError), "Recommendation research failed.")
+	default:
+		return "Upload recorded."
+	}
 }
 
 func isNoLocalSessionError(err error) bool {

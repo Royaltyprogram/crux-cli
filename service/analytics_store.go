@@ -36,25 +36,27 @@ type AnalyticsStore struct {
 	sessionSummaries       map[string][]*SessionSummary
 	recommendations        map[string]*Recommendation
 	projectRecommendations map[string][]string
+	recommendationResearch map[string]*RecommendationResearchStatus
 	experiments            map[string]*Experiment
 	applyOperations        map[string]*ApplyOperation
 	audits                 []*AuditEvent
 }
 
 type analyticsStoreState struct {
-	Seq                    uint64                       `json:"seq"`
-	Organizations          map[string]*Organization     `json:"organizations"`
-	Users                  map[string]*User             `json:"users"`
-	AccessTokens           map[string]*AccessToken      `json:"access_tokens"`
-	Agents                 map[string]*Agent            `json:"agents"`
-	Projects               map[string]*Project          `json:"projects"`
-	ConfigSnapshots        map[string][]*ConfigSnapshot `json:"config_snapshots"`
-	SessionSummaries       map[string][]*SessionSummary `json:"session_summaries"`
-	Recommendations        map[string]*Recommendation   `json:"recommendations"`
-	ProjectRecommendations map[string][]string          `json:"project_recommendations"`
-	Experiments            map[string]*Experiment       `json:"experiments"`
-	ApplyOperations        map[string]*ApplyOperation   `json:"apply_operations"`
-	Audits                 []*AuditEvent                `json:"audits"`
+	Seq                    uint64                                   `json:"seq"`
+	Organizations          map[string]*Organization                 `json:"organizations"`
+	Users                  map[string]*User                         `json:"users"`
+	AccessTokens           map[string]*AccessToken                  `json:"access_tokens"`
+	Agents                 map[string]*Agent                        `json:"agents"`
+	Projects               map[string]*Project                      `json:"projects"`
+	ConfigSnapshots        map[string][]*ConfigSnapshot             `json:"config_snapshots"`
+	SessionSummaries       map[string][]*SessionSummary             `json:"session_summaries"`
+	Recommendations        map[string]*Recommendation               `json:"recommendations"`
+	ProjectRecommendations map[string][]string                      `json:"project_recommendations"`
+	RecommendationResearch map[string]*RecommendationResearchStatus `json:"recommendation_research"`
+	Experiments            map[string]*Experiment                   `json:"experiments"`
+	ApplyOperations        map[string]*ApplyOperation               `json:"apply_operations"`
+	Audits                 []*AuditEvent                            `json:"audits"`
 }
 
 type Organization struct {
@@ -158,7 +160,27 @@ type Recommendation struct {
 	Evidence         []string
 	ChangePlan       []ChangePlanStep
 	SettingsUpdates  map[string]any
+	RawSuggestion    string
 	CreatedAt        time.Time
+}
+
+type RecommendationResearchStatus struct {
+	ProjectID           string
+	State               string
+	Summary             string
+	Provider            string
+	Model               string
+	MinimumSessions     int
+	SessionCount        int
+	RawQueryCount       int
+	RecommendationCount int
+	TriggerSessionID    string
+	LastError           string
+	TriggeredAt         *time.Time
+	StartedAt           *time.Time
+	CompletedAt         *time.Time
+	LastSuccessfulAt    *time.Time
+	LastDurationMS      int
 }
 
 type ChangePlanStep struct {
@@ -179,22 +201,28 @@ type PatchPreview struct {
 }
 
 type Experiment struct {
-	ID               string
-	ProjectID        string
-	RecommendationID string
-	ApplyID          string
-	RequestedBy      string
-	Scope            string
-	TargetMetric     string
-	Status           string
-	Decision         string
-	DecisionReason   string
-	BaselineSessions int
-	BaselineQueries  int
-	CreatedAt        time.Time
-	ApprovedAt       *time.Time
-	AppliedAt        *time.Time
-	ResolvedAt       *time.Time
+	ID                   string
+	ProjectID            string
+	RecommendationID     string
+	ApplyID              string
+	RequestedBy          string
+	Scope                string
+	TargetMetric         string
+	Status               string
+	Decision             string
+	DecisionReason       string
+	EvaluationMode       string
+	EvaluationModel      string
+	EvaluationDecision   string
+	EvaluationConfidence string
+	EvaluationSummary    string
+	BaselineSessions     int
+	BaselineQueries      int
+	CreatedAt            time.Time
+	ApprovedAt           *time.Time
+	AppliedAt            *time.Time
+	EvaluatedAt          *time.Time
+	ResolvedAt           *time.Time
 }
 
 type ApplyOperation struct {
@@ -258,6 +286,7 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 		sessionSummaries:       make(map[string][]*SessionSummary),
 		recommendations:        make(map[string]*Recommendation),
 		projectRecommendations: make(map[string][]string),
+		recommendationResearch: make(map[string]*RecommendationResearchStatus),
 		experiments:            make(map[string]*Experiment),
 		applyOperations:        make(map[string]*ApplyOperation),
 		audits:                 make([]*AuditEvent, 0, 32),
@@ -511,6 +540,11 @@ func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 			return nil, err
 		}
 	}
+	for _, projectID := range sortedKeys(s.recommendationResearch) {
+		if err := appendRecord("recommendation_research", "", projectID, s.recommendationResearch[projectID]); err != nil {
+			return nil, err
+		}
+	}
 	for _, id := range sortedKeys(s.experiments) {
 		if err := appendRecord("experiment", "", id, s.experiments[id]); err != nil {
 			return nil, err
@@ -655,6 +689,12 @@ func (s *AnalyticsStore) applyLoadedRecord(recordType, scopeID, recordID string,
 			return err
 		}
 		s.projectRecommendations[recordID] = append([]string(nil), item...)
+	case "recommendation_research":
+		var item RecommendationResearchStatus
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return err
+		}
+		s.recommendationResearch[recordID] = &item
 	case "experiment":
 		var item Experiment
 		if err := json.Unmarshal(payload, &item); err != nil {
@@ -712,6 +752,7 @@ func (s *AnalyticsStore) resetInMemoryState() {
 	s.sessionSummaries = make(map[string][]*SessionSummary)
 	s.recommendations = make(map[string]*Recommendation)
 	s.projectRecommendations = make(map[string][]string)
+	s.recommendationResearch = make(map[string]*RecommendationResearchStatus)
 	s.experiments = make(map[string]*Experiment)
 	s.applyOperations = make(map[string]*ApplyOperation)
 	s.audits = make([]*AuditEvent, 0, 32)
@@ -729,6 +770,7 @@ func (s *AnalyticsStore) snapshotStateLocked() analyticsStoreState {
 		SessionSummaries:       s.sessionSummaries,
 		Recommendations:        s.recommendations,
 		ProjectRecommendations: s.projectRecommendations,
+		RecommendationResearch: s.recommendationResearch,
 		Experiments:            s.experiments,
 		ApplyOperations:        s.applyOperations,
 		Audits:                 s.audits,
@@ -746,6 +788,7 @@ func (s *AnalyticsStore) replaceStateLocked(state analyticsStoreState) error {
 	s.sessionSummaries = ensureNestedMap(state.SessionSummaries)
 	s.recommendations = ensureMap(state.Recommendations)
 	s.projectRecommendations = ensureStringSliceMap(state.ProjectRecommendations)
+	s.recommendationResearch = ensureMap(state.RecommendationResearch)
 	s.experiments = ensureMap(state.Experiments)
 	s.applyOperations = ensureMap(state.ApplyOperations)
 	if state.Audits == nil {

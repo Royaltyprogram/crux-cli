@@ -153,17 +153,17 @@ go run ./cmd/agentopt impact
 go run ./cmd/agentopt audit
 ```
 
-## 8-1. 백그라운드 업로드 설정
+## 8-1. 백그라운드 자동화 설정
 
-macOS에서는 launchd로 세션 업로드를 자동화할 수 있다.
+macOS에서는 launchd로 세션 업로드와 승인 후 자동 적용을 함께 자동화할 수 있다.
 
 ```bash
-go run ./cmd/agentopt autoupload enable --interval 30m
-go run ./cmd/agentopt autoupload status
-go run ./cmd/agentopt autoupload disable
+go run ./cmd/agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s
+go run ./cmd/agentopt daemon status
+go run ./cmd/agentopt daemon disable
 ```
 
-내부적으로는 `agentopt collect`를 주기 실행한다. 이 명령은 최근 세션 업로드를 수행하고, 스냅샷은 fingerprint가 바뀐 경우에만 다시 올린다.
+`--bootstrap-recent 10`을 주면 온보딩 시점에 최근 로컬 Codex 세션 10개를 먼저 올린 뒤, 내부적으로 `agentopt collect` 주기 실행과 `agentopt sync --watch` 상시 실행을 함께 설치한다. 따라서 세션은 자동 업로드되고, 웹에서 승인된 변경은 같은 머신에서 자동 적용된다.
 
 ## 8-2. 모의 approve -> local sync -> rollback 자동 테스트
 

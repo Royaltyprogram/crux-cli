@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ type envelope struct {
 }
 
 func TestAnalyticsRouteLifecycle(t *testing.T) {
-	conf := &configs.Config{}
+	conf := newRouteResearchConfig(t)
 	conf.App.APIToken = "route-token"
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
@@ -36,8 +37,9 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	echo, err := routes.NewEcho(conf, nil, store)
@@ -128,6 +130,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.NotEmpty(t, recResp.Items)
+	require.Contains(t, recResp.Items[0].RawSuggestion, "\"kind\": \"llm-workflow-review\"")
 
 	applyResp := postJSON[response.ApplyPlanResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/recommendations/apply", request.ApplyRecommendationReq{
 		RecommendationID: recResp.Items[0].ID,
@@ -292,6 +295,62 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NotEmpty(t, auditResp.Items)
 }
 
+func newRouteResearchConfig(t *testing.T) *configs.Config {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		require.Equal(t, "Bearer test-openai-key", r.Header.Get("Authorization"))
+
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		input, _ := payload["input"].(string)
+
+		body := `{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"recommendations\":[{\"kind\":\"llm-workflow-review\",\"title\":\"Reduce repeated workflow recap before implementation\",\"summary\":\"The uploaded raw queries show the user spending too many turns on control-flow recap and verification setup before the actual patch work starts.\",\"reason\":\"Recent raw queries repeatedly ask for current behavior summaries, exact checks, and narrow patch scope before implementation begins.\",\"explanation\":\"A small instruction update can push the coding agent to locate the concrete files first, summarize only the relevant control flow, and propose a verification plan by default.\",\"expected_benefit\":\"Less repeated steering and faster transition from orientation to implementation.\",\"risk\":\"Low. Reviewable instruction update only.\",\"expected_impact\":\"Fewer exploratory turns and clearer first useful responses.\",\"score\":0.82,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add a reusable workflow-defaults block for Codex.\",\"content_preview\":\"## Workflow Defaults\\n- Locate the concrete files first.\\n- Summarize only the relevant control flow.\\n- List targeted verification before proposing the patch.\\n\"}]}]}"
+        }
+      ]
+    }
+  ]
+}`
+		if strings.Contains(input, "Before Rollout Queries") {
+			body = `{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"decision\":\"observe\",\"confidence\":\"low\",\"summary\":\"The qualitative review does not show a strong enough workflow change yet, so the rollout should keep being observed.\"}"
+        }
+      ]
+    }
+  ]
+}`
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(body))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	return &configs.Config{
+		OpenAI: configs.OpenAI{
+			APIKey:         "test-openai-key",
+			BaseURL:        server.URL + "/v1",
+			ResponsesModel: "gpt-5.4",
+		},
+	}
+}
+
 func TestAnalyticsRouteLoginAndCLITokenFlow(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
@@ -300,8 +359,9 @@ func TestAnalyticsRouteLoginAndCLITokenFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	echo, err := routes.NewEcho(conf, nil, store)
@@ -382,8 +442,9 @@ func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	echo, err := routes.NewEcho(conf, nil, store)

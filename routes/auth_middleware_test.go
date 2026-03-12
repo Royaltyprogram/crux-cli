@@ -38,8 +38,9 @@ func TestRequireAPITokenProtectsAnalyticsAPI(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 	healthSvc := service.NewHealthService(service.Options{
 		Config:         conf,
@@ -145,8 +146,9 @@ func TestRequireAPITokenDisablesStaticTokenByDefaultInProd(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	engine := NewHttpEngine(Options{

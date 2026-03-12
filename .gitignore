@@ -20,11 +20,9 @@ log
 .idea
 output/
 .agentopt-dev/
-data/*.db
+data/
 
 configs/local.yaml
-data/ent
 wire_gen.go
 resources/bin
-data/agentopt-store.json
 node_modules/

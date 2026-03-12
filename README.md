@@ -24,6 +24,7 @@ Detailed codebase documentation:
 
 - [`docs/CODEBASE.md`](/Users/doyechan/Desktop/codes/aiops/docs/CODEBASE.md)
 - [`docs/CLOSED_BETA_RUNBOOK.md`](/Users/doyechan/Desktop/codes/aiops/docs/CLOSED_BETA_RUNBOOK.md)
+- [`docs/LOCAL_MANUAL_E2E.md`](/Users/doyechan/Desktop/codes/aiops/docs/LOCAL_MANUAL_E2E.md)
 
 ## What changed
 
@@ -35,7 +36,8 @@ Detailed codebase documentation:
 - `agentopt session` auto-collects the latest local Codex session from `~/.codex/sessions` when `--file` is omitted
 - `agentopt session --recent N` uploads the most recent `N` local Codex sessions in chronological order
 - `agentopt collect` uploads session data now and can skip unchanged snapshots by default
-- `agentopt autoupload enable --interval 30m` installs a macOS launchd job for background uploads
+- `agentopt daemon enable --bootstrap-recent 10` can upload existing local sessions once during onboarding, then keep background collection and approve -> auto-apply running
+- Recommendations now wait until at least `10` uploaded sessions exist before the server generates the first suggestion
 - Local apply supports both `JSON merge patches` and safe `text append` patches such as `AGENTS.md`
 - Local apply is executed through a `Codex SDK` runner while preflight, allowlist checks, backup, and rollback stay in the Go CLI
 
@@ -62,8 +64,7 @@ go run ./cmd/agentopt workspace
 go run ./cmd/agentopt snapshot --file examples/config-snapshot.json
 go run ./cmd/agentopt session
 go run ./cmd/agentopt session --recent 5
-go run ./cmd/agentopt collect --codex-home ~/.codex
-go run ./cmd/agentopt autoupload enable --interval 30m
+go run ./cmd/agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s
 go run ./cmd/agentopt recommendations
 go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID>
 go run ./cmd/agentopt preflight --apply-id <CHANGE_PLAN_ID>
@@ -81,8 +82,7 @@ For beta or production user machines, install the released CLI and run `agentopt
 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
 agentopt login --server http://127.0.0.1:8082
 agentopt connect --repo-path .
-agentopt collect --codex-home ~/.codex
-agentopt autoupload enable --interval 30m
+agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s
 ```
 
 Release installs use a prebuilt binary, so Go is not required. The installer also provisions a local Node.js runtime when needed for sync/apply. If your shell cannot find `agentopt`, add `~/.local/bin` to `PATH`.
@@ -117,7 +117,7 @@ go run .
 ```
 
 Supported secret file envs now include `JWT_SECRET_FILE`, `DB_DSN_FILE`, `APP_API_TOKEN_FILE`, and `AUTH_BOOTSTRAP_USERS_FILE`. File-based values override the plain env form when both are set.
-`OPENAI_API_KEY_FILE` is also supported for the cloud research agent.
+`OPENAI_API_KEY_FILE` is also supported for the cloud research and qualitative evaluation agents.
 
 Bootstrap users are now treated as managed closed beta identities: removing a user from the bootstrap file revokes their existing tokens, and rotating a bootstrap password revokes prior sessions so the new credential takes effect immediately.
 
@@ -136,15 +136,17 @@ go run ./cmd/agentopt sync --codex-reasoning-effort low
 AGENTOPT_CODEX_REASONING_EFFORT=low go run ./cmd/agentopt apply --recommendation-id <RECOMMENDATION_ID> --yes
 ```
 
-To keep local usage uploads running in the background on macOS, install the launchd job once:
+To keep both background uploads and automatic local apply running on macOS, install the combined daemon once:
 
 ```bash
-agentopt autoupload enable --interval 30m
-agentopt autoupload status
-agentopt autoupload disable
+agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s
+agentopt daemon status
+agentopt daemon disable
 ```
 
-`autoupload enable` runs `agentopt collect` on each interval. `collect` uploads recent session summaries every run and skips snapshot uploads unless the fingerprint changed, so the background job can poll without forcing duplicate manual commands.
+`daemon enable --bootstrap-recent 10` first uploads up to ten existing local Codex sessions during onboarding, then installs two local launchd jobs: one scheduled collector and one long-running `sync --watch` worker. In the MVP this is the shortest path to `seed usage history -> approve in web -> apply automatically on the same machine`.
+
+If you want a one-off manual upload without installing the daemon, keep using `agentopt collect --codex-home ~/.codex`.
 
 To rerun the mock dashboard approve -> local agent sync -> rollback flow without touching your real workspace:
 

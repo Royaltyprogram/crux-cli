@@ -8,35 +8,37 @@ import (
 	"text/template"
 )
 
-//go:embed prompts/research_agent_instruction_prompt.md
+//go:embed prompts/research_agent_recommendations_prompt.md
 var researchAgentPromptFS embed.FS
 
-var researchAgentInstructionPromptTemplate = template.Must(template.New("research_agent_instruction_prompt.md").ParseFS(
+var researchAgentRecommendationsPromptTemplate = template.Must(template.New("research_agent_recommendations_prompt.md").ParseFS(
 	researchAgentPromptFS,
-	"prompts/research_agent_instruction_prompt.md",
+	"prompts/research_agent_recommendations_prompt.md",
 ))
 
 type researchAgentInstructionPromptData struct {
-	ProjectName          string
-	SampledQueryCount    int
-	SampledQueriesPrompt string
-	UsageSummaryPrompt   string
-	RecentSessionsPrompt string
+	ProjectName               string
+	SampledQueryCount         int
+	SampledQueriesPrompt      string
+	InteractionEvidencePrompt string
+	UsageSummaryPrompt        string
+	RecentSessionsPrompt      string
 }
 
-func renderResearchAgentInstructionPrompt(project *Project, sampledQueries []string, usageSummary researchUsageSummary) (string, error) {
+func renderResearchAgentRecommendationsPrompt(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (string, error) {
 	data := researchAgentInstructionPromptData{
-		SampledQueryCount:    len(sampledQueries),
-		SampledQueriesPrompt: formatSampledQueriesForPrompt(sampledQueries),
-		UsageSummaryPrompt:   formatUsageSummaryForPrompt(usageSummary),
-		RecentSessionsPrompt: formatRecentSessionsForPrompt(usageSummary.RecentSessions),
+		SampledQueryCount:         len(sampledQueries),
+		SampledQueriesPrompt:      formatSampledQueriesForPrompt(sampledQueries),
+		InteractionEvidencePrompt: formatInteractionEvidenceForPrompt(interactionSamples),
+		UsageSummaryPrompt:        formatUsageSummaryForPrompt(usageSummary),
+		RecentSessionsPrompt:      formatRecentSessionsForPrompt(usageSummary.RecentSessions),
 	}
 	if project != nil {
 		data.ProjectName = strings.TrimSpace(project.Name)
 	}
 
 	var buf bytes.Buffer
-	if err := researchAgentInstructionPromptTemplate.Execute(&buf, data); err != nil {
+	if err := researchAgentRecommendationsPromptTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("render research agent prompt: %w", err)
 	}
 	return strings.TrimSpace(buf.String()), nil
@@ -94,6 +96,32 @@ func formatRecentSessionsForPrompt(recentSessions []researchSessionSnapshot) str
 			session.ToolErrorCount,
 			session.ToolWallTimeMS,
 		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatInteractionEvidenceForPrompt(samples []researchInteractionSample) string {
+	if len(samples) == 0 {
+		return "- none"
+	}
+
+	lines := make([]string, 0, len(samples)*6)
+	for idx, sample := range samples {
+		lines = append(lines, fmt.Sprintf("interaction_%d: %s | tool=%s", idx+1, sample.TimestampLabel, sample.Tool))
+		if len(sample.Queries) == 0 {
+			lines = append(lines, "  user_queries: none")
+		} else {
+			for queryIdx, query := range sample.Queries {
+				lines = append(lines, fmt.Sprintf("  user_query_%d: %s", queryIdx+1, strings.TrimSpace(query)))
+			}
+		}
+		if len(sample.AssistantResponses) == 0 {
+			lines = append(lines, "  assistant_responses: none")
+		} else {
+			for responseIdx, response := range sample.AssistantResponses {
+				lines = append(lines, fmt.Sprintf("  assistant_response_%d: %s", responseIdx+1, strings.TrimSpace(response)))
+			}
+		}
 	}
 	return strings.Join(lines, "\n")
 }

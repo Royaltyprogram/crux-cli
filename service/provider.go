@@ -7,13 +7,14 @@ import (
 )
 
 var ProviderSet = wire.NewSet(
-	wire.Struct(new(Options), "*"),
+	wire.Struct(new(Options), "Config", "AnalyticsStore"),
 	NewAnalyticsStore,
 	NewAnalyticsService,
 	NewHealthService,
 )
 
 type Options struct {
-	Config         *configs.Config
-	AnalyticsStore *AnalyticsStore
+	Config                    *configs.Config
+	AnalyticsStore            *AnalyticsStore
+	RecommendationMinSessions int
 }

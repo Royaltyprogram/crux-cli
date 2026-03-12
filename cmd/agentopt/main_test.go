@@ -297,6 +297,7 @@ func TestLoadApplyBackupAcceptsLegacyProjectID(t *testing.T) {
 func TestAPIClientAddsTokenHeader(t *testing.T) {
 	client := newAPIClient("http://example.com", "test-token")
 	require.Equal(t, "test-token", client.token)
+	require.Equal(t, defaultAPIClientTimeout, client.http.Timeout)
 }
 
 func TestRunVersionPrintsBuildMetadata(t *testing.T) {

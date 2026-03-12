@@ -2,7 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,17 +27,88 @@ func findRecommendationByKind(items []response.RecommendationResp, kind string) 
 	return nil
 }
 
+func newResearchStubConfig(t *testing.T, responseBody string) *configs.Config {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		require.Equal(t, "Bearer test-openai-key", r.Header.Get("Authorization"))
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		input, _ := payload["input"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		body := responseBody
+		if strings.Contains(input, "Before Rollout Queries") {
+			body = defaultEvaluationStubResponse(input)
+		}
+		_, err := w.Write([]byte(body))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	return &configs.Config{
+		OpenAI: configs.OpenAI{
+			APIKey:         "test-openai-key",
+			BaseURL:        server.URL + "/v1",
+			ResponsesModel: "gpt-5.4",
+		},
+	}
+}
+
+func defaultResearchStubResponse() string {
+	return `{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"recommendations\":[{\"kind\":\"llm-workflow-review\",\"title\":\"Reduce repeated workflow recap before implementation\",\"summary\":\"The uploaded raw queries show the user spending too many turns on control-flow recap and verification setup before the actual patch work starts.\",\"reason\":\"Recent raw queries repeatedly ask for current behavior summaries, exact checks, and narrow patch scope before implementation begins.\",\"explanation\":\"A small instruction update can push the coding agent to locate the concrete files first, summarize only the relevant control flow, and propose a verification plan by default.\",\"expected_benefit\":\"Less repeated steering and faster transition from orientation to implementation.\",\"risk\":\"Low. Reviewable instruction update only.\",\"expected_impact\":\"Fewer exploratory turns and clearer first useful responses.\",\"score\":0.82,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add a reusable workflow-defaults block for Codex.\",\"content_preview\":\"## Workflow Defaults\\n- Locate the concrete files first.\\n- Summarize only the relevant control flow.\\n- List targeted verification before proposing the patch.\\n\"}]}]}"
+        }
+      ]
+    }
+  ]
+}`
+}
+
+func defaultEvaluationStubResponse(input string) string {
+	lower := strings.ToLower(input)
+	decision := "observe"
+	confidence := "low"
+	summary := "The qualitative review does not show a strong enough workflow change yet, so the rollout should keep being observed."
+	if strings.Contains(lower, "made the workflow slower") || strings.Contains(lower, "larger tool trace after the rollout") {
+		decision = "rollback"
+		confidence = "high"
+		summary = "After the rollout the raw queries show worse workflow quality, including slowdown and rollback-oriented prompts."
+	}
+	return `{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"decision\":\"` + decision + `\",\"confidence\":\"` + confidence + `\",\"summary\":\"` + summary + `\"}"
+        }
+      ]
+    }
+  ]
+}`
+}
+
 func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -112,10 +188,11 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-z"})
 	require.NoError(t, err)
 	require.Len(t, recommendations.Items, 1)
-	require.Equal(t, "instruction-custom-rules", recommendations.Items[0].Kind)
+	require.Equal(t, "llm-workflow-review", recommendations.Items[0].Kind)
 	require.Len(t, recommendations.Items[0].ChangePlan, 1)
 	require.Equal(t, defaultCodexInstructionTarget, recommendations.Items[0].ChangePlan[0].TargetFile)
-	require.Contains(t, recommendations.Items[0].ChangePlan[0].ContentPreview, "AgentOpt Research Findings")
+	require.Contains(t, recommendations.Items[0].ChangePlan[0].ContentPreview, "## Workflow Defaults")
+	require.Contains(t, recommendations.Items[0].RawSuggestion, "\"kind\": \"llm-workflow-review\"")
 
 	planOld, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
 		RecommendationID: recommendations.Items[0].ID,
@@ -326,17 +403,101 @@ func TestAnalyticsServiceLifecycleAndOrdering(t *testing.T) {
 	require.Equal(t, "session.ingested", audits.Items[0].Type)
 }
 
-func TestRegisterProjectReusesExistingProjectAndPreservesSignals(t *testing.T) {
+func TestAnalyticsServiceWaitsForMinimumSessionsBeforeGeneratingRecommendations(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 3,
+	})
+
+	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+		OrgID:      "org-threshold",
+		UserID:     "user-threshold",
+		DeviceName: "threshold-device",
+	})
+	require.NoError(t, err)
+
+	projectResp, err := svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-threshold",
+		AgentID:     agentResp.AgentID,
+		ProjectID:   "project-threshold",
+		Name:        "threshold-workspace",
+		RepoHash:    "threshold-hash",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+
+	for i := 1; i <= 2; i++ {
+		ingestResp, err := svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+			ProjectID: projectResp.ProjectID,
+			SessionID: fmt.Sprintf("threshold-session-%d", i),
+			Tool:      "codex",
+			RawQueries: []string{
+				"Inspect the current flow before editing.",
+				"List the exact verification steps after the patch.",
+			},
+			AssistantResponses: []string{
+				"I will inspect the flow first and then propose a change.",
+			},
+			Timestamp: time.Now().UTC().Add(time.Duration(i) * time.Minute),
+		})
+		require.NoError(t, err)
+		require.Zero(t, ingestResp.RecommendationCount)
+		require.Empty(t, ingestResp.LatestRecommendationIDs)
+		require.NotNil(t, ingestResp.ResearchStatus)
+		require.Equal(t, "waiting_for_min_sessions", ingestResp.ResearchStatus.State)
+	}
+
+	ingestResp, err := svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID: projectResp.ProjectID,
+		SessionID: "threshold-session-3",
+		Tool:      "codex",
+		RawQueries: []string{
+			"Summarize the current flow before proposing changes.",
+			"Reduce repeated steering around verification planning.",
+		},
+		AssistantResponses: []string{
+			"I will inspect the current path and then suggest a minimal workflow change.",
+		},
+		Timestamp: time.Now().UTC().Add(3 * time.Minute),
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, ingestResp.RecommendationCount)
+	require.Len(t, ingestResp.LatestRecommendationIDs, 1)
+	require.NotNil(t, ingestResp.ResearchStatus)
+	require.Equal(t, "succeeded", ingestResp.ResearchStatus.State)
+	require.Equal(t, 1, ingestResp.ResearchStatus.RecommendationCount)
+	require.NotNil(t, ingestResp.ResearchStatus.CompletedAt)
+
+	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: projectResp.ProjectID})
+	require.NoError(t, err)
+	require.Len(t, recommendations.Items, 1)
+
+	overview, err := svc.DashboardOverview(ctx, &request.DashboardOverviewReq{OrgID: "org-threshold"})
+	require.NoError(t, err)
+	require.NotNil(t, overview.ResearchStatus)
+	require.Equal(t, "succeeded", overview.ResearchStatus.State)
+}
+
+func TestRegisterProjectReusesExistingProjectAndPreservesSignals(t *testing.T) {
+	ctx := context.Background()
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
+	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -403,15 +564,16 @@ func TestRegisterProjectReusesExistingProjectAndPreservesSignals(t *testing.T) {
 
 func TestAnalyticsServiceAuthWorkflow(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	loginResp, err := svc.Login(ctx, &request.LoginReq{
@@ -525,8 +687,9 @@ func TestAnalyticsServiceProdBootstrapAuthDisablesDefaultDemoUser(t *testing.T) 
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	_, err = svc.Login(ctx, &request.LoginReq{
@@ -546,15 +709,16 @@ func TestAnalyticsServiceProdBootstrapAuthDisablesDefaultDemoUser(t *testing.T) 
 
 func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -591,7 +755,7 @@ func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
 	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-auto"})
 	require.NoError(t, err)
 	require.Len(t, recommendations.Items, 1)
-	require.Equal(t, "instruction-custom-rules", recommendations.Items[0].Kind)
+	require.Equal(t, "llm-workflow-review", recommendations.Items[0].Kind)
 
 	plan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
 		RecommendationID: recommendations.Items[0].ID,
@@ -608,15 +772,28 @@ func TestCreateApplyPlanRequiresReviewForInstructionAppend(t *testing.T) {
 
 func TestAnalyzeProjectAddsConfigAndMCPRecommendationsFromSnapshot(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, `{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"recommendations\":[{\"kind\":\"config-defaults\",\"title\":\"Load workspace instructions by default\",\"summary\":\"The uploaded sessions suggest the agent is missing reusable workspace defaults.\",\"reason\":\"The raw queries keep asking for discovery and verification framing before edits begin.\",\"explanation\":\"A small config merge can load the instruction files automatically for future sessions.\",\"expected_benefit\":\"Less repeated setup prompting.\",\"risk\":\"Low. Single-file config merge only.\",\"expected_impact\":\"Faster task startup and less manual steering.\",\"score\":0.84,\"evidence\":[\"repeated discovery prompts\"],\"change_plan\":[{\"type\":\"config_merge\",\"action\":\"merge_patch\",\"target_file\":\".codex/config.json\",\"summary\":\"Load workspace instruction files by default.\",\"settings_updates\":{\"instruction_files\":[\"AGENTS.md\",\"~/.codex/AGENTS.md\"]}}]},{\"kind\":\"instruction-review\",\"title\":\"Add workflow defaults to Codex instructions\",\"summary\":\"The uploaded sessions suggest the agent should provide workflow defaults before patching.\",\"reason\":\"The user keeps asking for exact verification steps and narrow repo summaries.\",\"explanation\":\"A reusable instruction block can reduce repeated steering.\",\"expected_benefit\":\"Less repeated prompt steering.\",\"risk\":\"Low. Reviewable instruction append.\",\"expected_impact\":\"Clearer first useful responses.\",\"score\":0.72,\"evidence\":[\"repeated verification prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add workflow defaults to Codex instructions.\",\"content_preview\":\"## Workflow Defaults\\n- Locate the concrete files first.\\n- List targeted verification before proposing the patch.\\n\"}]}]}"
+        }
+      ]
+    }
+  ]
+}`)
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -667,24 +844,19 @@ func TestAnalyzeProjectAddsConfigAndMCPRecommendationsFromSnapshot(t *testing.T)
 
 	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-config"})
 	require.NoError(t, err)
-	require.Len(t, recommendations.Items, 4)
+	require.Len(t, recommendations.Items, 2)
 
-	configRecommendation := findRecommendationByKind(recommendations.Items, "config-personal-instruction-files")
+	configRecommendation := findRecommendationByKind(recommendations.Items, "config-defaults")
 	require.NotNil(t, configRecommendation)
 	require.Equal(t, ".codex/config.json", configRecommendation.ChangePlan[0].TargetFile)
 	require.Equal(t, "merge_patch", configRecommendation.ChangePlan[0].Action)
-	require.Equal(t, []string{"AGENTS.md", defaultCodexInstructionTarget}, configRecommendation.ChangePlan[0].SettingsUpdates["instruction_files"])
+	require.Equal(t, []any{"AGENTS.md", defaultCodexInstructionTarget}, configRecommendation.ChangePlan[0].SettingsUpdates["instruction_files"])
 
-	skillRecommendation := findRecommendationByKind(recommendations.Items, "skill-repo-discovery-baseline")
-	require.NotNil(t, skillRecommendation)
-	require.Equal(t, defaultCodexSkillTarget, skillRecommendation.ChangePlan[0].TargetFile)
-	require.Equal(t, "text_replace", skillRecommendation.ChangePlan[0].Action)
-	require.Contains(t, skillRecommendation.ChangePlan[0].ContentPreview, "Repo Discovery Baseline")
-
-	mcpRecommendation := findRecommendationByKind(recommendations.Items, "mcp-repo-discovery-baseline")
-	require.NotNil(t, mcpRecommendation)
-	require.Equal(t, defaultMCPConfigTarget, mcpRecommendation.ChangePlan[0].TargetFile)
-	require.Equal(t, []string{"filesystem", "git"}, mcpRecommendation.ChangePlan[0].SettingsUpdates["mcp_servers"])
+	instructionRecommendation := findRecommendationByKind(recommendations.Items, "instruction-review")
+	require.NotNil(t, instructionRecommendation)
+	require.Equal(t, defaultCodexInstructionTarget, instructionRecommendation.ChangePlan[0].TargetFile)
+	require.Equal(t, "append_block", instructionRecommendation.ChangePlan[0].Action)
+	require.Contains(t, instructionRecommendation.ChangePlan[0].ContentPreview, "## Workflow Defaults")
 
 	plan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
 		RecommendationID: configRecommendation.ID,
@@ -710,27 +882,28 @@ func TestAnalyzeProjectAddsConfigAndMCPRecommendationsFromSnapshot(t *testing.T)
 	})
 	require.NoError(t, err)
 
-	skillPlan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
-		RecommendationID: skillRecommendation.ID,
+	instructionPlan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
+		RecommendationID: instructionRecommendation.ID,
 		RequestedBy:      "user-config",
 		Scope:            "user",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "requires_review", skillPlan.PolicyMode)
-	require.Equal(t, "awaiting_review", skillPlan.Status)
+	require.Equal(t, "requires_review", instructionPlan.PolicyMode)
+	require.Equal(t, "awaiting_review", instructionPlan.Status)
 }
 
 func TestCreateApplyPlanBlocksWhenActiveExperimentExists(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -787,15 +960,16 @@ func TestCreateApplyPlanBlocksWhenActiveExperimentExists(t *testing.T) {
 
 func TestUploadSessionSummaryRequestsRollbackAfterSevereRegression(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -904,7 +1078,7 @@ func TestUploadSessionSummaryRequestsRollbackAfterSevereRegression(t *testing.T)
 	require.Equal(t, "rollback_requested", experiments.Items[0].Status)
 	require.Equal(t, "rollback", experiments.Items[0].Decision)
 	require.Equal(t, 2, experiments.Items[0].PostApplySessions)
-	require.Contains(t, experiments.Items[0].DecisionReason, "tokens per query regressed")
+	require.Contains(t, experiments.Items[0].DecisionReason, "workflow")
 
 	pending, err := svc.PendingApplies(ctx, &request.PendingApplyReq{ProjectID: "project-rollback", UserID: "user-rollback"})
 	require.NoError(t, err)
@@ -912,24 +1086,198 @@ func TestUploadSessionSummaryRequestsRollbackAfterSevereRegression(t *testing.T)
 	require.Equal(t, "rollback", pending.Items[0].Action)
 	require.Equal(t, "rollback_requested", pending.Items[0].Status)
 	require.Equal(t, plan.ExperimentID, pending.Items[0].ExperimentID)
-	require.Contains(t, pending.Items[0].Note, "tokens per query regressed")
+	require.Contains(t, pending.Items[0].Note, "workflow")
 
 	overview, err := svc.DashboardOverview(ctx, &request.DashboardOverviewReq{OrgID: "org-rollback"})
 	require.NoError(t, err)
 	require.Equal(t, 1, overview.ActiveExperimentCount)
 }
 
+func TestUploadSessionSummaryUsesQualitativeEvaluationAgentForRollback(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/responses", r.URL.Path)
+
+		var payload map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		input, _ := payload["input"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		if !strings.Contains(input, "Before Rollout Queries") {
+			_, err := w.Write([]byte(`{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"recommendations\":[{\"kind\":\"research-review\",\"title\":\"Reduce repeated approval-flow rediscovery\",\"summary\":\"The uploaded queries still spend too many early turns on approval-flow discovery before editing begins.\",\"reason\":\"The session repeatedly asks for approval-flow summaries and exact checks before implementation work starts.\",\"explanation\":\"A small instruction update can push the agent to front-load repo context and verification planning by default.\",\"expected_benefit\":\"Less repeated setup prompting.\",\"risk\":\"Low. Reviewable instruction append.\",\"expected_impact\":\"Faster first useful responses.\",\"score\":0.79,\"evidence\":[\"approval-flow discovery prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add approval-flow workflow defaults.\",\"content_preview\":\"## Workflow Defaults\\n- Locate approval-flow files first.\\n- List targeted verification before patching.\\n\"}]}]}"
+        }
+      ]
+    }
+  ]
+}`))
+			require.NoError(t, err)
+			return
+		}
+		require.Contains(t, input, "After Rollout Queries")
+		require.Contains(t, input, "Inspect the approval flow before editing.")
+		require.Contains(t, input, "Explain why the rollout now needs more repo rediscovery.")
+
+		_, err := w.Write([]byte(`{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"decision\":\"rollback\",\"confidence\":\"high\",\"summary\":\"After the rollout the user repeatedly asks for repo rediscovery and slowdown diagnosis, which indicates worse workflow quality despite stable metrics.\"}"
+        }
+      ]
+    }
+  ]
+}`))
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	conf := &configs.Config{
+		App: configs.App{
+			StorePath: filepath.Join(t.TempDir(), "agentopt-store.json"),
+		},
+		OpenAI: configs.OpenAI{
+			APIKey:         "test-openai-key",
+			BaseURL:        server.URL + "/v1",
+			ResponsesModel: "gpt-5.4",
+		},
+	}
+
+	store, err := NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	svc := NewAnalyticsService(Options{
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
+	})
+
+	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+		OrgID:      "org-qual",
+		UserID:     "user-qual",
+		DeviceName: "macbook",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.RegisterProject(ctx, &request.RegisterProjectReq{
+		OrgID:       "org-qual",
+		AgentID:     agentResp.AgentID,
+		ProjectID:   "project-qual",
+		Name:        "qual",
+		RepoHash:    "qual-hash",
+		DefaultTool: "codex",
+	})
+	require.NoError(t, err)
+
+	baselineAt := time.Now().UTC().Add(-2 * time.Hour)
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID:              "project-qual",
+		SessionID:              "session-qual-before",
+		Tool:                   "codex",
+		TokenIn:                1000,
+		TokenOut:               250,
+		FirstResponseLatencyMS: 1200,
+		RawQueries: []string{
+			"Inspect the approval flow before editing.",
+			"List the exact verification steps after the patch.",
+		},
+		Timestamp: baselineAt,
+	})
+	require.NoError(t, err)
+
+	recommendations, err := svc.ListRecommendations(ctx, &request.RecommendationListReq{ProjectID: "project-qual"})
+	require.NoError(t, err)
+	require.NotEmpty(t, recommendations.Items)
+
+	plan, err := svc.CreateApplyPlan(ctx, &request.ApplyRecommendationReq{
+		RecommendationID: recommendations.Items[0].ID,
+		RequestedBy:      "user-qual",
+		Scope:            "project",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ReviewChangePlan(ctx, &request.ReviewChangePlanReq{
+		ApplyID:    plan.ApplyID,
+		Decision:   "approve",
+		ReviewedBy: "user-qual",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ReportApplyResult(ctx, &request.ApplyResultReq{
+		ApplyID:     plan.ApplyID,
+		Success:     true,
+		Note:        "applied for qualitative review test",
+		AppliedFile: "AGENTS.md",
+		AppliedText: "AgentOpt guidance",
+	})
+	require.NoError(t, err)
+
+	postOne := time.Now().UTC().Add(time.Second)
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID:              "project-qual",
+		SessionID:              "session-qual-after-1",
+		Tool:                   "codex",
+		TokenIn:                980,
+		TokenOut:               240,
+		FirstResponseLatencyMS: 1250,
+		RawQueries: []string{
+			"Explain why the rollout now needs more repo rediscovery.",
+			"Inspect the larger trace after the rollout.",
+		},
+		Timestamp: postOne,
+	})
+	require.NoError(t, err)
+
+	postTwo := postOne.Add(time.Second)
+	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+		ProjectID:              "project-qual",
+		SessionID:              "session-qual-after-2",
+		Tool:                   "codex",
+		TokenIn:                990,
+		TokenOut:               245,
+		FirstResponseLatencyMS: 1280,
+		RawQueries: []string{
+			"Summarize why the new settings slowed the workflow down.",
+			"Check whether the rollout should be reverted.",
+		},
+		Timestamp: postTwo,
+	})
+	require.NoError(t, err)
+
+	experiments, err := svc.ListExperiments(ctx, &request.ExperimentListReq{ProjectID: "project-qual"})
+	require.NoError(t, err)
+	require.Len(t, experiments.Items, 1)
+	require.Equal(t, "rollback_requested", experiments.Items[0].Status)
+	require.Equal(t, "rollback", experiments.Items[0].Decision)
+	require.Equal(t, "responses-api", experiments.Items[0].EvaluationMode)
+	require.Equal(t, "rollback", experiments.Items[0].EvaluationDecision)
+	require.Equal(t, "high", experiments.Items[0].EvaluationConfidence)
+	require.Contains(t, experiments.Items[0].EvaluationSummary, "worse workflow quality")
+	require.Contains(t, experiments.Items[0].DecisionReason, "worse workflow quality")
+}
+
 func TestUploadSessionSummaryReplacesExistingSessionByID(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
@@ -1010,15 +1358,16 @@ func TestUploadSessionSummaryReplacesExistingSessionByID(t *testing.T) {
 
 func TestReportApplyResultTracksApplyAndRollbackLifecycle(t *testing.T) {
 	ctx := context.Background()
-	conf := &configs.Config{}
+	conf := newResearchStubConfig(t, defaultResearchStubResponse())
 	conf.App.StorePath = filepath.Join(t.TempDir(), "agentopt-store.json")
 
 	store, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
 
 	svc := NewAnalyticsService(Options{
-		Config:         conf,
-		AnalyticsStore: store,
+		Config:                    conf,
+		AnalyticsStore:            store,
+		RecommendationMinSessions: 1,
 	})
 
 	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{

@@ -68,6 +68,8 @@ type apiClient struct {
 	http    *http.Client
 }
 
+const defaultAPIClientTimeout = 90 * time.Second
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -117,8 +119,8 @@ func run(args []string) error {
 		return runAudit(args[1:])
 	case "sync":
 		return runSync(args[1:])
-	case "autoupload":
-		return runAutoupload(args[1:])
+	case "daemon":
+		return runDaemon(args[1:])
 	case "rollback":
 		return runRollback(args[1:])
 	case "apply":
@@ -158,7 +160,7 @@ func printUsage() {
   impact            list recommendation impact summaries for the shared workspace
   audit             list recent audit events for the current org and shared workspace
   sync              pull approved change plans and execute them locally
-  autoupload        install or inspect background local usage uploads
+  daemon            install or inspect background collect + auto-sync automation
   rollback          restore the local config backup for a previous apply
   apply             request a change plan and optionally approve/apply it locally
   review            approve or reject a requested change plan
@@ -994,7 +996,7 @@ func newAPIClient(baseURL, token string) *apiClient {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		http: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: defaultAPIClientTimeout,
 		},
 	}
 }
