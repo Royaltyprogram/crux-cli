@@ -8,15 +8,15 @@ import (
 	"text/template"
 )
 
-//go:embed prompts/research_agent_recommendations_prompt.md
+//go:embed prompts/research_agent_reports_prompt.md
 var researchAgentPromptFS embed.FS
 
-var researchAgentRecommendationsPromptTemplate = template.Must(template.New("research_agent_recommendations_prompt.md").ParseFS(
+var researchAgentReportsPromptTemplate = template.Must(template.New("research_agent_reports_prompt.md").ParseFS(
 	researchAgentPromptFS,
-	"prompts/research_agent_recommendations_prompt.md",
+	"prompts/research_agent_reports_prompt.md",
 ))
 
-type researchAgentInstructionPromptData struct {
+type researchAgentReportPromptData struct {
 	ProjectName               string
 	SampledQueryCount         int
 	SampledQueriesPrompt      string
@@ -25,8 +25,8 @@ type researchAgentInstructionPromptData struct {
 	RecentSessionsPrompt      string
 }
 
-func renderResearchAgentRecommendationsPrompt(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (string, error) {
-	data := researchAgentInstructionPromptData{
+func renderResearchAgentReportsPrompt(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (string, error) {
+	data := researchAgentReportPromptData{
 		SampledQueryCount:         len(sampledQueries),
 		SampledQueriesPrompt:      formatSampledQueriesForPrompt(sampledQueries),
 		InteractionEvidencePrompt: formatInteractionEvidenceForPrompt(interactionSamples),
@@ -38,7 +38,7 @@ func renderResearchAgentRecommendationsPrompt(project *Project, sampledQueries [
 	}
 
 	var buf bytes.Buffer
-	if err := researchAgentRecommendationsPromptTemplate.Execute(&buf, data); err != nil {
+	if err := researchAgentReportsPromptTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("render research agent prompt: %w", err)
 	}
 	return strings.TrimSpace(buf.String()), nil
@@ -119,9 +119,36 @@ func formatInteractionEvidenceForPrompt(samples []researchInteractionSample) str
 			lines = append(lines, "  assistant_responses: none")
 		} else {
 			for responseIdx, response := range sample.AssistantResponses {
-				lines = append(lines, fmt.Sprintf("  assistant_response_%d: %s", responseIdx+1, strings.TrimSpace(response)))
+				lines = append(lines, fmt.Sprintf("  assistant_response_%d: %s", responseIdx+1, formatPromptEvidenceText(response)))
+			}
+		}
+		if len(sample.ReasoningSummaries) == 0 {
+			lines = append(lines, "  reasoning_summaries: none")
+		} else {
+			for summaryIdx, summary := range sample.ReasoningSummaries {
+				lines = append(lines, fmt.Sprintf("  reasoning_summary_%d: %s", summaryIdx+1, formatPromptEvidenceText(summary)))
 			}
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatPromptEvidenceText(raw string) string {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), "\r\n", "\n")
+	raw = strings.Join(strings.Fields(raw), " ")
+	return truncatePromptEvidenceText(raw, 360)
+}
+
+func truncatePromptEvidenceText(raw string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(raw)
+	if len(runes) <= limit {
+		return raw
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }

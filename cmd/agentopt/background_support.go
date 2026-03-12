@@ -168,3 +168,16 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+func isWithinRoot(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if root == target {
+		return true
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}

@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,11 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Royaltyprogram/aiops/configs"
@@ -101,34 +98,14 @@ func run(args []string) error {
 		return runSnapshots(args[1:])
 	case "sessions":
 		return runSessions(args[1:])
-	case "recommendations":
-		return runRecommendations(args[1:])
+	case "reports":
+		return runReports(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "workspace":
 		return runWorkspace(args[1:])
-	case "history":
-		return runHistory(args[1:])
-	case "experiments":
-		return runExperiments(args[1:])
-	case "pending":
-		return runPending(args[1:])
-	case "impact":
-		return runImpact(args[1:])
 	case "audit":
 		return runAudit(args[1:])
-	case "sync":
-		return runSync(args[1:])
-	case "daemon":
-		return runDaemon(args[1:])
-	case "rollback":
-		return runRollback(args[1:])
-	case "apply":
-		return runApply(args[1:])
-	case "review":
-		return runReview(args[1:])
-	case "preflight":
-		return runPreflight(args[1:])
 	case "store-export":
 		return runStoreExport(args[1:])
 	case "store-import":
@@ -151,20 +128,10 @@ func printUsage() {
   collect           upload local usage data now and optionally keep collecting on an interval
   snapshots         list config snapshots for the shared workspace
   sessions          list recent session summaries for the shared workspace
-  recommendations   list active recommendations for the shared workspace
-  status            print org overview and shared workspace recommendations
+  reports           list active feedback reports for the shared workspace
+  status            print org overview and shared workspace feedback reports
   workspace         show the shared workspace connected to the current org
-  history           list apply history for the shared workspace
-  experiments       list experiment lifecycle records for the shared workspace
-  pending           list pending apply jobs visible to the current user and shared workspace
-  impact            list recommendation impact summaries for the shared workspace
   audit             list recent audit events for the current org and shared workspace
-  sync              pull approved change plans and execute them locally
-  daemon            install or inspect background collect + auto-sync automation
-  rollback          restore the local config backup for a previous apply
-  apply             request a change plan and optionally approve/apply it locally
-  review            approve or reject a requested change plan
-  preflight         validate a change plan against local guard rules
   store-export      export the runtime analytics store from the configured database
   store-import      import a runtime analytics store backup into the configured database`)
 }
@@ -429,8 +396,8 @@ func runSessions(args []string) error {
 	return prettyPrint(workspaceScopedItems(st, resp.Items))
 }
 
-func runRecommendations(args []string) error {
-	fs := flag.NewFlagSet("recommendations", flag.ContinueOnError)
+func runReports(args []string) error {
+	fs := flag.NewFlagSet("reports", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -440,8 +407,8 @@ func runRecommendations(args []string) error {
 		return err
 	}
 	client := newAPIClient(st.ServerURL, st.APIToken)
-	path := "/api/v1/recommendations?project_id=" + url.QueryEscape(st.workspaceID())
-	var resp response.RecommendationListResp
+	path := "/api/v1/reports?project_id=" + url.QueryEscape(st.workspaceID())
+	var resp response.ReportListResp
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
 	}
@@ -464,16 +431,16 @@ func runStatus(args []string) error {
 	if err := client.doJSON(http.MethodGet, "/api/v1/dashboard/overview?org_id="+url.QueryEscape(st.OrgID), nil, &overview); err != nil {
 		return err
 	}
-	var recs response.RecommendationListResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/recommendations?project_id="+url.QueryEscape(st.workspaceID()), nil, &recs); err != nil {
+	var recs response.ReportListResp
+	if err := client.doJSON(http.MethodGet, "/api/v1/reports?project_id="+url.QueryEscape(st.workspaceID()), nil, &recs); err != nil {
 		return err
 	}
 
 	payload := map[string]any{
-		"workspace_id":    st.workspaceID(),
-		"workspace_name":  sharedWorkspaceName,
-		"overview":        overview,
-		"recommendations": recs.Items,
+		"workspace_id":   st.workspaceID(),
+		"workspace_name": sharedWorkspaceName,
+		"overview":       overview,
+		"reports":        recs.Items,
 	}
 	return prettyPrint(payload)
 }
@@ -497,83 +464,6 @@ func runWorkspace(args []string) error {
 	return prettyPrint(resp)
 }
 
-func runHistory(args []string) error {
-	fs := flag.NewFlagSet("history", flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-
-	var resp response.ApplyHistoryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
-		return err
-	}
-	return prettyPrint(workspaceScopedItems(st, resp.Items))
-}
-
-func runExperiments(args []string) error {
-	fs := flag.NewFlagSet("experiments", flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-
-	var resp response.ExperimentListResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/experiments?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
-		return err
-	}
-	return prettyPrint(workspaceScopedItems(st, resp.Items))
-}
-
-func runPending(args []string) error {
-	fs := flag.NewFlagSet("pending", flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-
-	var resp response.PendingApplyResp
-	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.workspaceID()), url.QueryEscape(st.UserID))
-	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
-		return err
-	}
-	return prettyPrint(workspaceScopedItems(st, resp.Items))
-}
-
-func runImpact(args []string) error {
-	fs := flag.NewFlagSet("impact", flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-
-	var resp response.ImpactSummaryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/impact?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
-		return err
-	}
-	return prettyPrint(workspaceScopedItems(st, resp.Items))
-}
-
 func runAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -592,276 +482,6 @@ func runAudit(args []string) error {
 		return err
 	}
 	return prettyPrint(resp)
-}
-
-func runSync(args []string) error {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
-	targetConfig := fs.String("target-config", "", "override local config path for pending apply jobs")
-	reasoningEffort := fs.String("codex-reasoning-effort", os.Getenv("AGENTOPT_CODEX_REASONING_EFFORT"), "Codex reasoning effort for local apply (minimal, low, medium, high, xhigh)")
-	watch := fs.Bool("watch", false, "poll for pending apply jobs until interrupted")
-	interval := fs.Duration("interval", 15*time.Second, "poll interval in watch mode")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	resolvedReasoningEffort, err := parseCodexReasoningEffort(*reasoningEffort)
-	if err != nil {
-		return err
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-
-	if !*watch {
-		return runSyncOnce(st, client, *targetConfig, resolvedReasoningEffort)
-	}
-	if *interval <= 0 {
-		return errors.New("sync --interval must be greater than zero")
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	ticker := time.NewTicker(*interval)
-	defer ticker.Stop()
-
-	if err := runSyncOnce(st, client, *targetConfig, resolvedReasoningEffort); err != nil {
-		return err
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println(`{"watch":"stopped"}`)
-			return nil
-		case <-ticker.C:
-			if err := runSyncOnce(st, client, *targetConfig, resolvedReasoningEffort); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func runSyncOnce(st state, client *apiClient, targetConfig, reasoningEffort string) error {
-	path := fmt.Sprintf("/api/v1/applies/pending?project_id=%s&user_id=%s", url.QueryEscape(st.workspaceID()), url.QueryEscape(st.UserID))
-	var pending response.PendingApplyResp
-	if err := client.doJSON(http.MethodGet, path, nil, &pending); err != nil {
-		return err
-	}
-
-	results := make([]response.ApplyResultResp, 0, len(pending.Items))
-	failedApplyIDs := make([]string, 0)
-	for _, item := range pending.Items {
-		if item.Action == "rollback" || item.Status == "rollback_requested" {
-			localResult, err := executeLocalRollback(item.ApplyID)
-			if err != nil {
-				result, reportErr := reportApplyResult(client, request.ApplyResultReq{
-					ApplyID: item.ApplyID,
-					Success: false,
-					Note:    fmt.Sprintf("local rollback failed during sync: %v", err),
-				})
-				if reportErr != nil {
-					return fmt.Errorf("rollback %s failed locally: %v; failed to report result: %w", item.ApplyID, err, reportErr)
-				}
-				results = append(results, result)
-				failedApplyIDs = append(failedApplyIDs, item.ApplyID)
-				continue
-			}
-
-			result, err := reportApplyResult(client, request.ApplyResultReq{
-				ApplyID:         item.ApplyID,
-				Success:         true,
-				Note:            "rolled back by agentopt sync",
-				AppliedFile:     localResult.FilePath,
-				AppliedSettings: localResult.AppliedSettings,
-				AppliedText:     localResult.AppliedText,
-				RolledBack:      true,
-			})
-			if err != nil {
-				return err
-			}
-			if err := deleteApplyBackup(item.ApplyID); err != nil {
-				return err
-			}
-			results = append(results, result)
-			continue
-		}
-
-		localResult, err := executeLocalApply(st, item.ApplyID, item.PatchPreview, targetConfig, reasoningEffort)
-		if err != nil {
-			result, reportErr := reportApplyResult(client, request.ApplyResultReq{
-				ApplyID: item.ApplyID,
-				Success: false,
-				Note:    fmt.Sprintf("local apply failed during sync: %v", err),
-			})
-			if reportErr != nil {
-				return fmt.Errorf("apply %s failed locally: %v; failed to report result: %w", item.ApplyID, err, reportErr)
-			}
-			results = append(results, result)
-			failedApplyIDs = append(failedApplyIDs, item.ApplyID)
-			continue
-		}
-
-		result, err := reportApplyResult(client, request.ApplyResultReq{
-			ApplyID:         item.ApplyID,
-			Success:         true,
-			Note:            "applied by agentopt sync",
-			AppliedFile:     localResult.FilePath,
-			AppliedSettings: localResult.AppliedSettings,
-			AppliedText:     localResult.AppliedText,
-		})
-		if err != nil {
-			return err
-		}
-		results = append(results, result)
-	}
-
-	if err := prettyPrint(map[string]any{
-		"workspace_id":   st.workspaceID(),
-		"workspace_name": sharedWorkspaceName,
-		"pending_count":  len(pending.Items),
-		"failed_count":   len(failedApplyIDs),
-		"results":        results,
-	}); err != nil {
-		return err
-	}
-	if len(failedApplyIDs) > 0 {
-		return fmt.Errorf("sync completed with failed applies: %s", strings.Join(failedApplyIDs, ", "))
-	}
-	return nil
-}
-
-func runApply(args []string) error {
-	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
-	recommendationID := fs.String("recommendation-id", "", "recommendation id")
-	targetConfig := fs.String("target-config", "", "local config path override")
-	reasoningEffort := fs.String("codex-reasoning-effort", os.Getenv("AGENTOPT_CODEX_REASONING_EFFORT"), "Codex reasoning effort for local apply (minimal, low, medium, high, xhigh)")
-	yes := fs.Bool("yes", false, "apply immediately after preview")
-	scope := fs.String("scope", "user", "apply scope")
-	note := fs.String("note", "applied by agentopt CLI", "apply result note")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	resolvedReasoningEffort, err := parseCodexReasoningEffort(*reasoningEffort)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(*recommendationID) == "" {
-		return errors.New("apply requires --recommendation-id")
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-
-	var plan response.ApplyPlanResp
-	if err := client.doJSON(http.MethodPost, "/api/v1/recommendations/apply", request.ApplyRecommendationReq{
-		RecommendationID: *recommendationID,
-		RequestedBy:      st.UserID,
-		Scope:            *scope,
-	}, &plan); err != nil {
-		return err
-	}
-
-	if err := prettyPrint(plan); err != nil {
-		return err
-	}
-	if !*yes {
-		return nil
-	}
-
-	if plan.PolicyMode != "auto_approved" && plan.ApprovalStatus != "approved" {
-		if _, err := reviewChangePlan(client, plan.ApplyID, "approve", st.UserID, "approved by local cli"); err != nil {
-			return err
-		}
-	}
-
-	localResult, err := executeLocalApply(st, plan.ApplyID, plan.PatchPreview, *targetConfig, resolvedReasoningEffort)
-	if err != nil {
-		if _, reportErr := reportApplyResult(client, request.ApplyResultReq{
-			ApplyID: plan.ApplyID,
-			Success: false,
-			Note:    fmt.Sprintf("local apply failed: %v", err),
-		}); reportErr != nil {
-			return fmt.Errorf("local apply failed: %v; failed to report result: %w", err, reportErr)
-		}
-		return err
-	}
-
-	result, err := reportApplyResult(client, request.ApplyResultReq{
-		ApplyID:         plan.ApplyID,
-		Success:         true,
-		Note:            *note,
-		AppliedFile:     localResult.FilePath,
-		AppliedSettings: localResult.AppliedSettings,
-		AppliedText:     localResult.AppliedText,
-	})
-	if err != nil {
-		return err
-	}
-	return prettyPrint(result)
-}
-
-func runReview(args []string) error {
-	fs := flag.NewFlagSet("review", flag.ContinueOnError)
-	applyID := fs.String("apply-id", "", "change plan id")
-	decision := fs.String("decision", "approve", "approve or reject")
-	reviewedBy := fs.String("reviewed-by", "", "reviewer id override")
-	note := fs.String("note", "", "review note")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*applyID) == "" {
-		return errors.New("review requires --apply-id")
-	}
-
-	st, err := loadState()
-	if err != nil {
-		return err
-	}
-	reviewer := *reviewedBy
-	if strings.TrimSpace(reviewer) == "" {
-		reviewer = st.UserID
-	}
-
-	client := newAPIClient(st.ServerURL, st.APIToken)
-	resp, err := reviewChangePlan(client, *applyID, *decision, reviewer, *note)
-	if err != nil {
-		return err
-	}
-	return prettyPrint(resp)
-}
-
-func runPreflight(args []string) error {
-	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
-	applyID := fs.String("apply-id", "", "change plan id")
-	targetConfig := fs.String("target-config", "", "local config path override")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*applyID) == "" {
-		return errors.New("preflight requires --apply-id")
-	}
-
-	st, err := loadWorkspaceState()
-	if err != nil {
-		return err
-	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
-	item, err := fetchApplyHistoryItem(client, st.workspaceID(), *applyID)
-	if err != nil {
-		return err
-	}
-
-	result, err := preflightLocalApply(st, item.ApplyID, item.PatchPreview, *targetConfig)
-	if err != nil {
-		return err
-	}
-	return prettyPrint(result)
 }
 
 func runStoreExport(args []string) error {
@@ -939,58 +559,6 @@ func runStoreImport(args []string) error {
 	})
 }
 
-func parseCodexReasoningEffort(raw string) (string, error) {
-	value := strings.ToLower(strings.TrimSpace(raw))
-	if value == "" {
-		return "", nil
-	}
-	switch value {
-	case "minimal", "low", "medium", "high", "xhigh":
-		return value, nil
-	default:
-		return "", fmt.Errorf("invalid Codex reasoning effort %q: want minimal, low, medium, high, or xhigh", raw)
-	}
-}
-
-func runRollback(args []string) error {
-	fs := flag.NewFlagSet("rollback", flag.ContinueOnError)
-	applyID := fs.String("apply-id", "", "apply id to roll back")
-	note := fs.String("note", "rollback executed by agentopt CLI", "rollback note")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*applyID) == "" {
-		return errors.New("rollback requires --apply-id")
-	}
-
-	st, err := loadState()
-	if err != nil {
-		return err
-	}
-	localResult, err := executeLocalRollback(*applyID)
-	if err != nil {
-		return err
-	}
-
-	client := newAPIClient(st.ServerURL, st.APIToken)
-	var result response.ApplyResultResp
-	if err := client.doJSON(http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
-		ApplyID:         *applyID,
-		Success:         true,
-		Note:            *note,
-		AppliedFile:     localResult.FilePath,
-		AppliedSettings: localResult.AppliedSettings,
-		AppliedText:     localResult.AppliedText,
-		RolledBack:      true,
-	}, &result); err != nil {
-		return err
-	}
-	if err := deleteApplyBackup(*applyID); err != nil {
-		return err
-	}
-	return prettyPrint(result)
-}
-
 func newAPIClient(baseURL, token string) *apiClient {
 	return &apiClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -999,12 +567,6 @@ func newAPIClient(baseURL, token string) *apiClient {
 			Timeout: defaultAPIClientTimeout,
 		},
 	}
-}
-
-func reportApplyResult(client *apiClient, req request.ApplyResultReq) (response.ApplyResultResp, error) {
-	var resp response.ApplyResultResp
-	err := client.doJSON(http.MethodPost, "/api/v1/applies/result", req, &resp)
-	return resp, err
 }
 
 func (c *apiClient) doJSON(method, path string, body any, out any) error {
@@ -1301,30 +863,6 @@ func mergeMap(dst, src map[string]any) {
 	}
 }
 
-func reviewChangePlan(client *apiClient, applyID, decision, reviewedBy, note string) (response.ChangePlanReviewResp, error) {
-	var resp response.ChangePlanReviewResp
-	err := client.doJSON(http.MethodPost, "/api/v1/change-plans/review", request.ReviewChangePlanReq{
-		ApplyID:    applyID,
-		Decision:   decision,
-		ReviewedBy: reviewedBy,
-		ReviewNote: note,
-	}, &resp)
-	return resp, err
-}
-
-func fetchApplyHistoryItem(client *apiClient, workspaceID, applyID string) (response.ApplyHistoryItem, error) {
-	var resp response.ApplyHistoryResp
-	if err := client.doJSON(http.MethodGet, "/api/v1/applies?project_id="+url.QueryEscape(workspaceID), nil, &resp); err != nil {
-		return response.ApplyHistoryItem{}, err
-	}
-	for _, item := range resp.Items {
-		if item.ApplyID == applyID {
-			return item, nil
-		}
-	}
-	return response.ApplyHistoryItem{}, fmt.Errorf("apply %s not found in workspace history", applyID)
-}
-
 func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -1343,148 +881,6 @@ func firstNonEmpty(values ...string) string {
 
 func runtimePlatform() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
-}
-
-func resolveApplyTarget(previewPath, targetOverride string) (string, string, error) {
-	target := previewPath
-	source := "preview"
-	if strings.TrimSpace(targetOverride) != "" {
-		target = targetOverride
-		source = "override"
-	}
-	if expanded, ok, err := expandUserPath(target); err != nil {
-		return "", "", err
-	} else if ok {
-		return expanded, source, nil
-	}
-	if filepath.IsAbs(target) {
-		return filepath.Clean(target), source, nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", "", err
-	}
-	return filepath.Clean(filepath.Join(cwd, target)), source, nil
-}
-
-func expandUserPath(target string) (string, bool, error) {
-	if target == "~" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", false, err
-		}
-		return filepath.Clean(home), true, nil
-	}
-	prefix := "~" + string(os.PathSeparator)
-	if !strings.HasPrefix(target, prefix) {
-		return "", false, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", false, err
-	}
-	return filepath.Clean(filepath.Join(home, strings.TrimPrefix(target, prefix))), true, nil
-}
-
-func stepTargetOverride(raw string, index int) string {
-	parts := splitComma(raw)
-	switch len(parts) {
-	case 0:
-		return ""
-	case 1:
-		return parts[0]
-	default:
-		if index < len(parts) {
-			return parts[index]
-		}
-		return ""
-	}
-}
-
-func isAllowedOperation(operation string) bool {
-	switch operation {
-	case "", "merge_patch", "append_block", "text_append", "text_replace":
-		return true
-	default:
-		return false
-	}
-}
-
-func isAllowedTarget(previewPath, resolvedPath string) bool {
-	allowSkillTarget := isAllowedAgentoptSkillTarget(previewPath) || isAllowedAgentoptSkillTarget(resolvedPath)
-	allowedRelative := map[string]struct{}{
-		filepath.Clean(".codex/config.json"):          {},
-		filepath.Clean(".claude/settings.local.json"): {},
-		filepath.Clean(".mcp.json"):                   {},
-		filepath.Clean("AGENTS.md"):                   {},
-		filepath.Clean("~/.codex/AGENTS.md"):          {},
-		filepath.Clean("CLAUDE.md"):                   {},
-	}
-
-	if !filepath.IsAbs(previewPath) {
-		if _, ok := allowedRelative[filepath.Clean(previewPath)]; !ok && !allowSkillTarget {
-			return false
-		}
-	}
-
-	base := filepath.Base(resolvedPath)
-	allowedBase := map[string]struct{}{
-		"config.json":         {},
-		"settings.local.json": {},
-		".mcp.json":           {},
-		"AGENTS.md":           {},
-		"CLAUDE.md":           {},
-		"SKILL.md":            {},
-	}
-	if _, ok := allowedBase[base]; !ok {
-		return false
-	}
-	if base == "SKILL.md" && !allowSkillTarget {
-		return false
-	}
-
-	cwd, err := os.Getwd()
-	if err == nil && isWithinRoot(cwd, resolvedPath) {
-		return true
-	}
-	if root := os.Getenv("AGENTOPT_HOME"); strings.TrimSpace(root) != "" && isWithinRoot(root, resolvedPath) {
-		return true
-	}
-	home, err := os.UserHomeDir()
-	if err == nil && isWithinRoot(home, resolvedPath) {
-		return true
-	}
-	return false
-}
-
-func isAllowedAgentoptSkillTarget(target string) bool {
-	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
-	if cleaned == "" || !strings.HasSuffix(cleaned, "/SKILL.md") {
-		return false
-	}
-	switch {
-	case strings.HasPrefix(cleaned, ".codex/skills/agentopt-"):
-		return true
-	case strings.HasPrefix(cleaned, "~/.codex/skills/agentopt-"):
-		return true
-	case strings.Contains(cleaned, "/.codex/skills/agentopt-"):
-		return true
-	default:
-		return false
-	}
-}
-
-func isWithinRoot(root, target string) bool {
-	root = filepath.Clean(root)
-	target = filepath.Clean(target)
-	if root == target {
-		return true
-	}
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func inferEnabledMCPCount(settings map[string]any) int {

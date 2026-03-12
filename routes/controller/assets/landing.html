@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentOpt — AI Agent That Tunes Your Coding Agent</title>
+  <title>AgentOpt — Workflow Feedback For Coding Agents</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -161,15 +161,15 @@
       animation: pulse 2s ease-in-out infinite;
     }
 
-    .mock-suggestion {
+    .mock-report {
       border: 1px solid var(--line); border-radius: 14px;
       padding: 20px; margin-bottom: 16px;
     }
-    .mock-suggestion-header {
+    .mock-report-header {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 12px;
     }
-    .mock-suggestion-title { font-size: 15px; font-weight: 700; }
+    .mock-report-title { font-size: 15px; font-weight: 700; }
     .mock-pill {
       padding: 4px 10px; border-radius: 999px;
       font-size: 11px; font-weight: 700; white-space: nowrap;
@@ -467,7 +467,7 @@
       </a>
       <ul class="nav-links">
         <li><a href="#how-it-works" class="nav-link-text">How It Works</a></li>
-        <li><a href="#configures" class="nav-link-text">What It Tunes</a></li>
+        <li><a href="#configures" class="nav-link-text">What It Sees</a></li>
         <li><a href="#login" class="nav-cta">Sign In</a></li>
       </ul>
     </div>
@@ -479,10 +479,10 @@
       <span class="hero-badge-dot"></span>
       Closed Beta
     </div>
-    <h1>An AI agent that <em>tunes your coding agent</em> for you.</h1>
+    <h1>An AI system that <em>reviews how you use your coding agent</em>.</h1>
     <p class="hero-sub">
-      Suggests better <strong>instructions</strong>, <strong>skills</strong>, and <strong>MCP configs</strong> based on your real usage.
-      One change at a time. Auto-rollback if it doesn't help.
+      Watches real sessions, prompt patterns, tool use, responses, and reasoning summaries, then turns them into readable <strong>workflow feedback reports</strong>.
+      No auto-apply step. No hidden edits.
     </p>
     <div class="hero-actions">
       <a href="#login" class="btn btn-primary">Get Started</a>
@@ -504,34 +504,30 @@
       <div class="hero-visual-body">
         <div class="mock-agent-status">
           <span class="status-dot"></span>
-          Analyzed 30 sessions &mdash; 1 suggestion ready
+          Analyzed 30 sessions &mdash; 1 report ready
         </div>
 
-        <div class="mock-suggestion">
-          <div class="mock-suggestion-header">
-            <span class="mock-suggestion-title">Add shared instruction block</span>
-            <span class="mock-pill mock-pill--risk">Low risk</span>
+        <div class="mock-report">
+          <div class="mock-report-header">
+            <span class="mock-report-title">You keep restating scope before edits</span>
+            <span class="mock-pill mock-pill--risk">High confidence</span>
           </div>
           <div class="mock-diff">
-            <span class="line-ctx">  # AGENTS.md</span><br>
-            <span class="line-add">+ Always check existing tests before writing new ones.</span><br>
-            <span class="line-add">+ Run `git status` before any commit operation.</span>
+            <span class="line-ctx">  Observed pattern</span><br>
+            <span class="line-add">+ Repeated repo-orientation prompts before implementation.</span><br>
+            <span class="line-add">+ Verification asks arrive late instead of at the start.</span>
           </div>
           <div class="mock-impact">
             <div class="mock-impact-card">
-              <div class="mock-impact-label">Expected</div>
-              <div class="mock-impact-value mock-impact-value--good">-18%</div>
-              <div class="mock-impact-delta mock-impact-delta--good">token waste</div>
+              <div class="mock-impact-label">Likely effect</div>
+              <div class="mock-impact-value mock-impact-value--good">Fewer</div>
+              <div class="mock-impact-delta mock-impact-delta--good">setup turns</div>
             </div>
             <div class="mock-impact-card">
-              <div class="mock-impact-label">Safety</div>
-              <div class="mock-impact-value mock-impact-value--accent">Low risk</div>
-              <div class="mock-impact-delta">Easy to rollback</div>
+              <div class="mock-impact-label">Next step</div>
+              <div class="mock-impact-value mock-impact-value--accent">Start</div>
+              <div class="mock-impact-delta">with files and checks</div>
             </div>
-          </div>
-          <div class="mock-actions">
-            <div class="mock-btn mock-btn--approve">Approve</div>
-            <div class="mock-btn mock-btn--decline">Decline</div>
           </div>
         </div>
 
@@ -559,7 +555,7 @@
   <section class="section wrap" id="how-it-works">
     <div class="section-header">
       <div class="section-kicker">How It Works</div>
-      <h2 class="section-title">A continuous optimization loop</h2>
+      <h2 class="section-title">A continuous feedback loop</h2>
     </div>
 
     <div class="loop-container">
@@ -575,35 +571,28 @@
           <div class="loop-step-num loop-step-num--auto">2</div>
           <div class="loop-step-body">
             <h3>Research</h3>
-            <p>LLM finds patterns and researches better configs.</p>
+            <p>LLM finds patterns across prompts, responses, and tool usage.</p>
           </div>
         </div>
         <div class="loop-step">
           <div class="loop-step-num loop-step-num--auto">3</div>
           <div class="loop-step-body">
-            <h3>Suggest</h3>
-            <p>One change at a time. Shows exactly what and why.</p>
+            <h3>Report</h3>
+            <p>Writes a readable report about what is working and what is not.</p>
           </div>
         </div>
         <div class="loop-step">
           <div class="loop-step-num loop-step-num--user">4</div>
           <div class="loop-step-body">
-            <h3>You Approve</h3>
-            <p>See the exact change. One click to approve or decline.</p>
+            <h3>You Reflect</h3>
+            <p>Read the report and adjust prompts or habits manually.</p>
           </div>
         </div>
         <div class="loop-step">
           <div class="loop-step-num loop-step-num--agent">5</div>
           <div class="loop-step-body">
             <h3>Measure</h3>
-            <p>Tracks metrics after each change to see if it helped.</p>
-          </div>
-        </div>
-        <div class="loop-step">
-          <div class="loop-step-num loop-step-num--danger">6</div>
-          <div class="loop-step-body">
-            <h3>Auto-Rollback</h3>
-            <p>If metrics decline, reverts automatically.</p>
+            <p>Tracks whether future sessions show less friction and better task framing.</p>
           </div>
         </div>
       </div>
@@ -618,11 +607,11 @@
 
   <div class="wrap divider"><hr></div>
 
-  <!-- ── WHAT IT CONFIGURES ── -->
+  <!-- ── WHAT IT OBSERVES ── -->
   <section class="section wrap" id="configures">
     <div class="section-header">
-      <div class="section-kicker">What It Tunes</div>
-      <h2 class="section-title">The configs you've been tuning by hand</h2>
+      <div class="section-kicker">What It Sees</div>
+      <h2 class="section-title">The workflow signals behind each report</h2>
     </div>
 
     <div class="config-row">
@@ -631,8 +620,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1H5a2 2 0 00-2 2v14l3.5-2.5L10 17l3.5-2.5L17 17V3a2 2 0 00-2-2z"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Instructions</h3>
-          <p>AGENTS.md, .cursorrules</p>
+          <h3>Prompt habits</h3>
+          <p>Repeated asks, scoping, verification</p>
         </div>
       </div>
       <div class="config-item">
@@ -640,8 +629,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 1L1 6l9 4.5L19 6 10-1z"/><path d="M1 14l9 4.5L19 14"/><path d="M1 10l9 4.5L19 10"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Skills</h3>
-          <p>Prompt patterns</p>
+          <h3>Workflow patterns</h3>
+          <p>Discovery, diagnosis, validation</p>
         </div>
       </div>
       <div class="config-item">
@@ -649,8 +638,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="2" width="16" height="12" rx="2"/><path d="M6 18h6M9 14v4"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>MCP Servers</h3>
-          <p>Tool integrations</p>
+          <h3>Tool usage</h3>
+          <p>Calls, latency, failures</p>
         </div>
       </div>
       <div class="config-item">
@@ -658,8 +647,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="2.5"/><path d="M14.5 11.5a1.3 1.3 0 00.25 1.4 1.6 1.6 0 01-2.25 2.25 1.3 1.3 0 00-1.4-.25 1.3 1.3 0 00-.8 1.2V16.5a1.6 1.6 0 01-3.2 0v-.07a1.3 1.3 0 00-.85-1.2 1.3 1.3 0 00-1.4.25A1.6 1.6 0 012.6 13.2a1.3 1.3 0 00.25-1.4 1.3 1.3 0 00-1.2-.8H1.5a1.6 1.6 0 010-3.2h.07a1.3 1.3 0 001.2-.85 1.3 1.3 0 00-.25-1.4A1.6 1.6 0 014.77 3.3a1.3 1.3 0 001.4.25A1.3 1.3 0 007 2.35V1.5a1.6 1.6 0 013.2 0v.07a1.3 1.3 0 00.8 1.2 1.3 1.3 0 001.4-.25 1.6 1.6 0 012.25 2.25 1.3 1.3 0 00-.25 1.4 1.3 1.3 0 001.2.8h.9a1.6 1.6 0 010 3.2h-.07a1.3 1.3 0 00-1.18.81z"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Models</h3>
-          <p>Cost vs. quality</p>
+          <h3>Model behavior</h3>
+          <p>Latency, token cost, response mix</p>
         </div>
       </div>
     </div>
@@ -670,52 +659,52 @@
   <!-- ── BEFORE & AFTER ── -->
   <section class="section wrap" id="before-after">
     <div class="section-header">
-      <div class="section-kicker">Real Impact</div>
-      <h2 class="section-title">Every change is measured</h2>
+      <div class="section-kicker">Example Report</div>
+      <h2 class="section-title">A readable summary of how the agent is being used</h2>
     </div>
 
     <div class="ba-container">
       <div class="ba-card">
         <div class="ba-header">
-          <span class="ba-header-title">Example: Add test-checking instruction</span>
-          <span class="mock-pill mock-pill--improved">Improved</span>
+          <span class="ba-header-title">Example: Workflow feedback after repeated repo discovery</span>
+          <span class="mock-pill mock-pill--improved">High signal</span>
         </div>
         <div class="ba-body">
           <div class="ba-timeline">
             <div class="ba-step">
               <div class="ba-step-marker ba-step-marker--before">1</div>
               <div class="ba-step-content">
-                <h4>Before</h4>
-                <p>Agent keeps re-checking tests &mdash; ~3,200 tokens wasted per session.</p>
+                <h4>Observed pattern</h4>
+                <p>The user spends several early turns re-establishing file scope and verification intent.</p>
               </div>
             </div>
             <div class="ba-step">
               <div class="ba-step-marker ba-step-marker--suggest">2</div>
               <div class="ba-step-content">
-                <h4>AgentOpt suggests</h4>
-                <p>"Always check existing tests before writing new ones."</p>
+                <h4>Report says</h4>
+                <p>"Start with concrete file discovery and state verification upfront to reduce repeated orientation."</p>
               </div>
             </div>
             <div class="ba-step">
               <div class="ba-step-marker ba-step-marker--after">3</div>
               <div class="ba-step-content">
-                <h4>After (5 days)</h4>
-                <p><span class="highlight">-37% redundant queries</span>, <span class="highlight">-22% tokens</span></p>
+                <h4>What to monitor next</h4>
+                <p><span class="highlight">Fewer recap turns</span>, <span class="highlight">clearer first useful responses</span></p>
               </div>
             </div>
           </div>
           <div class="ba-metrics">
             <div class="ba-metric">
               <div class="ba-metric-value">-22%</div>
-              <div class="ba-metric-label">Tokens per session</div>
+              <div class="ba-metric-label">Token reduction signal</div>
             </div>
             <div class="ba-metric">
               <div class="ba-metric-value">-37%</div>
-              <div class="ba-metric-label">Redundant queries</div>
+              <div class="ba-metric-label">Repeated-query signal</div>
             </div>
             <div class="ba-metric">
               <div class="ba-metric-value">0%</div>
-              <div class="ba-metric-label">Rollback rate</div>
+              <div class="ba-metric-label">Auto-applied changes</div>
             </div>
           </div>
         </div>
@@ -728,12 +717,12 @@
   <!-- ── LOGIN ── -->
   <section class="login-section wrap" id="login">
     <div class="login-copy">
-      <h2>Let the agent tune your workspace</h2>
-      <p>Sign in to connect your coding agents. The optimization loop starts automatically.</p>
+      <h2>Turn usage into feedback reports</h2>
+      <p>Sign in to connect your coding agents. AgentOpt will observe sessions and publish readable workflow reports.</p>
       <ul class="login-features">
-        <li>One suggestion at a time, always reviewable</li>
-        <li>Before-and-after metrics on every change</li>
-        <li>Auto-rollback if it doesn't help</li>
+        <li>User-readable reports instead of auto-edited instructions</li>
+        <li>Prompt, tool, and response patterns summarized in one place</li>
+        <li>Nothing is pushed back into your local agent automatically</li>
       </ul>
     </div>
 
@@ -763,7 +752,7 @@
 
   <footer class="footer">
     <div class="footer-inner">
-      <span class="footer-copy">AgentOpt &middot; AI Agent That Tunes Your Coding Agent</span>
+      <span class="footer-copy">AgentOpt &middot; AI Workflow Feedback For Coding Agents</span>
       <ul class="footer-links">
         <li><a href="https://github.com/Royaltyprogram/aiops" target="_blank" rel="noopener">GitHub</a></li>
         <li><a href="/healthz">Status</a></li>
@@ -776,8 +765,7 @@
       sessionUser: "agentopt_session_user",
       sessionOrg: "agentopt_session_org",
       lastEmail: "agentopt_last_email",
-      activeTab: "agentopt_dashboard_tab",
-      applyScope: "agentopt_apply_scope"
+      activeTab: "agentopt_dashboard_tab"
     };
 
     const $ = (id) => document.getElementById(id);
@@ -870,9 +858,6 @@
         writeStorage(STORAGE_KEYS.sessionOrg, JSON.stringify(data.organization || {}));
         writeStorage(STORAGE_KEYS.lastEmail, email);
         writeStorage(STORAGE_KEYS.activeTab, "focus");
-        if (!readStorage(STORAGE_KEYS.applyScope)) {
-          writeStorage(STORAGE_KEYS.applyScope, "user");
-        }
 
         setStatus("Signed in. Opening the dashboard...");
         window.location.assign("/dashboard");

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"testing"
 	"time"
 
@@ -17,11 +16,59 @@ import (
 	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
-func waitForSuggestionResearch(
+func getAPIJSON[T any](t *testing.T, suite *APISuite, path string, query url.Values) T {
+	t.Helper()
+
+	status, body, err := suite.c.Get(suite.ctx, path, query)
+	require.NoError(t, err)
+
+	env, data, err := decodeEnvelope[T](body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, 0, env.Code)
+	require.NotNil(t, data)
+	return *data
+}
+
+func postAPIJSON[T any](t *testing.T, suite *APISuite, method, path string, body any) T {
+	t.Helper()
+
+	fullURL, err := suite.c.buildURL(path, nil)
+	require.NoError(t, err)
+
+	payload, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(suite.ctx, method, fullURL, bytes.NewReader(payload))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := suite.c.HTTP.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	raw := requireBodyBytes(t, resp)
+	env, data, err := decodeEnvelope[T](raw)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, 0, env.Code)
+	require.NotNil(t, data)
+	return *data
+}
+
+func requireBodyBytes(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return body
+}
+
+func waitForReportResearch(
 	t *testing.T,
 	suite *APISuite,
 	orgID, projectID string,
-) (*response.DashboardOverviewResp, *response.RecommendationListResp) {
+) (*response.DashboardOverviewResp, *response.ReportListResp) {
 	t.Helper()
 
 	deadline := time.Now().Add(10 * time.Second)
@@ -32,17 +79,17 @@ func waitForSuggestionResearch(
 		if status := overview.ResearchStatus; status != nil {
 			switch status.State {
 			case "disabled":
-				t.Skip("recommendation research is disabled on the server")
+				t.Skip("feedback report research is disabled on the server")
 			case "failed":
-				t.Skipf("recommendation research failed on the server: %s", status.LastError)
+				t.Skipf("feedback report research failed on the server: %s", status.LastError)
 			}
 		}
 
-		recommendations := getAPIJSON[response.RecommendationListResp](t, suite, "/api/v1/recommendations", url.Values{
+		reports := getAPIJSON[response.ReportListResp](t, suite, "/api/v1/reports", url.Values{
 			"project_id": []string{projectID},
 		})
-		if len(recommendations.Items) > 0 {
-			return &overview, &recommendations
+		if len(reports.Items) > 0 {
+			return &overview, &reports
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -51,18 +98,17 @@ func waitForSuggestionResearch(
 		"org_id": []string{orgID},
 	})
 	if status := overview.ResearchStatus; status != nil {
-		t.Skipf("recommendation research completed without suggestions: %s", status.Summary)
+		t.Skipf("feedback report research completed without a published report: %s", status.Summary)
 	}
-	t.Skip("recommendation research completed without suggestions")
+	t.Skip("feedback report research completed without a published report")
 	return nil, nil
 }
 
-func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
+func (s *APISuite) TestAnalyticsLifecycle_GeneratesFeedbackReports() {
 	now := time.Now().UTC()
 	suffix := fmt.Sprintf("%d", now.UnixNano())
 	orgID := "org-e2e-" + suffix
 	userID := "user-e2e-" + suffix
-	projectName := "workspace-" + suffix
 	projectHash := "hash-" + suffix
 
 	agentResp := postAPIJSON[response.AgentRegistrationResp](s.T(), s, http.MethodPost, "/api/v1/agents/register", request.RegisterAgentReq{
@@ -75,7 +121,7 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	projectResp := postAPIJSON[response.ProjectRegistrationResp](s.T(), s, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
 		OrgID:       orgID,
 		AgentID:     agentResp.AgentID,
-		Name:        projectName,
+		Name:        "workspace-" + suffix,
 		RepoHash:    projectHash,
 		DefaultTool: "codex",
 	})
@@ -90,262 +136,100 @@ func (s *APISuite) TestAnalyticsLifecycle_ApplyAndRollback() {
 	})
 	require.Equal(s.T(), "baseline", snapshotResp.ProfileID)
 
-	uploadSession := func(index int) response.SessionIngestResp {
+	uploadSession := func(id string, ts time.Time, rawQueries []string, tokenIn, tokenOut int) response.SessionIngestResp {
 		return postAPIJSON[response.SessionIngestResp](s.T(), s, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
-			ProjectID:             projectResp.ProjectID,
-			SessionID:             fmt.Sprintf("session-before-%s-%d", suffix, index),
-			Tool:                  "codex",
-			TokenIn:               1000,
-			TokenOut:              240,
-			CachedInputTokens:     280,
-			ReasoningOutputTokens: 60,
-			FunctionCallCount:     3,
-			ToolErrorCount:        1,
-			SessionDurationMS:     110000,
-			ToolWallTimeMS:        1600,
-			ToolCalls:             map[string]int{"shell": 2, "read_file": 1},
-			ToolErrors:            map[string]int{"shell": 1},
-			ToolWallTimesMS:       map[string]int{"shell": 1300, "read_file": 300},
-			RawQueries: []string{
-				"Inspect the route handler and summarize the current control flow.",
-				"Find the smallest patch that fixes the failing analytics path.",
-				"List the exact tests to run after the patch.",
-			},
+			ProjectID:              projectResp.ProjectID,
+			SessionID:              id,
+			Tool:                   "codex",
+			TokenIn:                tokenIn,
+			TokenOut:               tokenOut,
+			CachedInputTokens:      180,
+			ReasoningOutputTokens:  40,
+			FunctionCallCount:      2,
+			ToolErrorCount:         1,
+			SessionDurationMS:      90000,
+			ToolWallTimeMS:         1100,
+			ToolCalls:              map[string]int{"shell": 1, "read_file": 1},
+			ToolErrors:             map[string]int{"shell": 1},
+			ToolWallTimesMS:        map[string]int{"shell": 700, "read_file": 400},
+			RawQueries:             rawQueries,
 			Models:                 []string{"gpt-5.4"},
 			ModelProvider:          "openai",
-			FirstResponseLatencyMS: 2500,
-			Timestamp:              now.Add(time.Duration(-2*60+index) * time.Minute),
+			FirstResponseLatencyMS: 1800,
+			AssistantResponses: []string{
+				"The current workflow appears to spend extra turns on discovery before the patch.",
+			},
+			ReasoningSummaries: []string{
+				"Checking current control flow and test expectations before patching.",
+			},
+			Timestamp: ts,
 		})
 	}
 
-	sessionResp := uploadSession(1)
+	sessionResp := uploadSession(
+		"session-before-"+suffix,
+		now.Add(-2*time.Hour),
+		[]string{
+			"Inspect the route handler and summarize the current control flow.",
+			"Find the smallest patch that fixes the failing analytics path.",
+			"List the exact tests to run after the patch.",
+		},
+		1000,
+		240,
+	)
+	require.Equal(s.T(), "report-api.v1", sessionResp.SchemaVersion)
 	if status := sessionResp.ResearchStatus; status != nil && status.MinimumSessions > 1 {
 		for i := 2; i <= status.MinimumSessions; i++ {
-			sessionResp = uploadSession(i)
+			uploadSession(
+				fmt.Sprintf("session-before-%s-%d", suffix, i),
+				now.Add(time.Duration(-120+i)*time.Minute),
+				[]string{
+					"Compare the analytics and health controllers before editing the shared response contract.",
+					"Keep the patch minimal and list the targeted verification steps.",
+				},
+				850,
+				210,
+			)
 		}
 	}
-	_, recommendations := waitForSuggestionResearch(s.T(), s, orgID, projectResp.ProjectID)
 
-	applyResp := postAPIJSON[response.ApplyPlanResp](s.T(), s, http.MethodPost, "/api/v1/recommendations/apply", request.ApplyRecommendationReq{
-		RecommendationID: recommendations.Items[0].ID,
-		RequestedBy:      userID,
-		Scope:            "project",
-	})
-	require.Equal(s.T(), "awaiting_review", applyResp.Status)
+	overview, reports := waitForReportResearch(s.T(), s, orgID, projectResp.ProjectID)
+	require.Equal(s.T(), "report-api.v1", overview.SchemaVersion)
+	require.Equal(s.T(), "report-api.v1", reports.SchemaVersion)
+	require.NotNil(s.T(), overview.ResearchStatus)
+	require.Greater(s.T(), overview.TotalTokens, 0)
+	require.Greater(s.T(), overview.AvgTokensPerQuery, 0.0)
+	require.NotEmpty(s.T(), overview.ActionSummary)
+	require.NotEmpty(s.T(), overview.OutcomeSummary)
 
-	reviewResp := postAPIJSON[response.ChangePlanReviewResp](s.T(), s, http.MethodPost, "/api/v1/change-plans/review", request.ReviewChangePlanReq{
-		ApplyID:    applyResp.ApplyID,
-		Decision:   "approve",
-		ReviewedBy: userID,
-	})
-	require.Equal(s.T(), "approved_for_local_apply", reviewResp.Status)
+	require.NotEmpty(s.T(), reports.Items)
+	report := reports.Items[0]
+	require.NotEmpty(s.T(), report.Title)
+	require.NotEmpty(s.T(), report.Summary)
+	require.NotEmpty(s.T(), report.UserIntent)
+	require.NotEmpty(s.T(), report.ModelInterpretation)
+	require.NotEmpty(s.T(), report.RawSuggestion)
 
-	pendingResp := getAPIJSON[response.PendingApplyResp](s.T(), s, "/api/v1/applies/pending", url.Values{
+	sessionList := getAPIJSON[response.SessionSummaryListResp](s.T(), s, "/api/v1/session-summaries", url.Values{
 		"project_id": []string{projectResp.ProjectID},
-		"user_id":    []string{userID},
+		"limit":      []string{"5"},
 	})
-	require.Len(s.T(), pendingResp.Items, 1)
-	require.Equal(s.T(), applyResp.ApplyID, pendingResp.Items[0].ApplyID)
+	require.NotEmpty(s.T(), sessionList.Items)
+	require.Equal(s.T(), "openai", sessionList.Items[0].ModelProvider)
+	require.NotEmpty(s.T(), sessionList.Items[0].ReasoningSummaries)
 
-	applyResult := postAPIJSON[response.ApplyResultResp](s.T(), s, http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
-		ApplyID:     applyResp.ApplyID,
-		Success:     true,
-		Note:        "applied by e2e",
-		AppliedFile: "AGENTS.md",
-		AppliedText: "AgentOpt Research Findings",
-	})
-	require.Equal(s.T(), "applied", applyResult.Status)
-	require.False(s.T(), applyResult.RolledBack)
-
-	pendingAfterApply := getAPIJSON[response.PendingApplyResp](s.T(), s, "/api/v1/applies/pending", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-		"user_id":    []string{userID},
-	})
-	require.Empty(s.T(), pendingAfterApply.Items)
-
-	historyAfterApply := getAPIJSON[response.ApplyHistoryResp](s.T(), s, "/api/v1/applies", url.Values{
+	insights := getAPIJSON[response.DashboardProjectInsightsResp](s.T(), s, "/api/v1/dashboard/project-insights", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
-	require.NotEmpty(s.T(), historyAfterApply.Items)
-	require.Equal(s.T(), "applied", historyAfterApply.Items[0].Status)
-
-	postAPIJSON[response.SessionIngestResp](s.T(), s, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
-		ProjectID:             projectResp.ProjectID,
-		SessionID:             "session-after-" + suffix,
-		Tool:                  "codex",
-		TokenIn:               700,
-		TokenOut:              180,
-		CachedInputTokens:     120,
-		ReasoningOutputTokens: 30,
-		FunctionCallCount:     1,
-		SessionDurationMS:     50000,
-		ToolWallTimeMS:        180,
-		ToolCalls:             map[string]int{"shell": 1},
-		ToolErrors:            map[string]int{},
-		ToolWallTimesMS:       map[string]int{"shell": 180},
-		RawQueries: []string{
-			"Compare the analytics and health controllers before editing the shared response contract.",
-			"Keep the patch minimal and list the targeted verification steps.",
-		},
-		Models:                 []string{"gpt-5.4"},
-		ModelProvider:          "openai",
-		FirstResponseLatencyMS: 900,
-		Timestamp:              now.Add(2 * time.Hour),
-	})
-
-	impactResp := getAPIJSON[response.ImpactSummaryResp](s.T(), s, "/api/v1/impact", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.NotEmpty(s.T(), impactResp.Items)
-	require.Equal(s.T(), applyResp.ApplyID, impactResp.Items[0].ApplyID)
-	require.Greater(s.T(), impactResp.Items[0].SessionsAfter, 0)
-
-	overviewAfterApply := getAPIJSON[response.DashboardOverviewResp](s.T(), s, "/api/v1/dashboard/overview", url.Values{
-		"org_id": []string{orgID},
-	})
-	require.Greater(s.T(), overviewAfterApply.AvgTokensPerQuery, 0.0)
-	require.Greater(s.T(), overviewAfterApply.TotalTokens, 0)
-	require.Equal(s.T(), 1, overviewAfterApply.SuccessfulRolloutCount)
-	require.Equal(s.T(), 0, overviewAfterApply.FailedExecutionCount)
-	require.NotEmpty(s.T(), overviewAfterApply.ActionSummary)
-	require.NotEmpty(s.T(), overviewAfterApply.OutcomeSummary)
-
-	insightsAfterApply := getAPIJSON[response.DashboardProjectInsightsResp](s.T(), s, "/api/v1/dashboard/project-insights", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.NotEmpty(s.T(), insightsAfterApply.Days)
-	require.Equal(s.T(), projectResp.ProjectID, insightsAfterApply.ProjectID)
-	require.Equal(s.T(), 2, insightsAfterApply.KnownModelSessions)
-	require.Equal(s.T(), 2, insightsAfterApply.KnownProviderSessions)
-	require.Equal(s.T(), 2, insightsAfterApply.KnownLatencySessions)
-	require.Equal(s.T(), 2, insightsAfterApply.KnownDurationSessions)
-	require.Equal(s.T(), 1700, insightsAfterApply.AvgFirstResponseLatencyMS)
-	require.Equal(s.T(), 80000, insightsAfterApply.AvgSessionDurationMS)
-	require.Equal(s.T(), 400, insightsAfterApply.TotalCachedInputTokens)
-	require.Equal(s.T(), 90, insightsAfterApply.TotalReasoningOutputTokens)
-	require.Equal(s.T(), 4, insightsAfterApply.TotalFunctionCalls)
-	require.Equal(s.T(), 1, insightsAfterApply.TotalToolErrors)
-	require.Equal(s.T(), 1780, insightsAfterApply.TotalToolWallTimeMS)
-	require.Equal(s.T(), 445, insightsAfterApply.AvgToolWallTimeMS)
-	require.Equal(s.T(), 2, insightsAfterApply.SessionsWithFunctionCalls)
-	require.Equal(s.T(), 1, insightsAfterApply.SessionsWithToolErrors)
-	require.NotEmpty(s.T(), insightsAfterApply.Tools)
-	require.Equal(s.T(), "shell", insightsAfterApply.Tools[0].Tool)
-	require.Equal(s.T(), 3, insightsAfterApply.Tools[0].CallCount)
-	require.Equal(s.T(), 1, insightsAfterApply.Tools[0].ErrorCount)
-	require.Equal(s.T(), 1480, insightsAfterApply.Tools[0].WallTimeMS)
-	require.Equal(s.T(), 493, insightsAfterApply.Tools[0].AvgWallTimeMS)
-	sumDayCalls := 0
-	sumDayErrors := 0
-	sumDayToolWallTime := 0
-	sumDayDurations := 0
-	for _, day := range insightsAfterApply.Days {
-		sumDayCalls += day.FunctionCallCount
-		sumDayErrors += day.ToolErrorCount
-		sumDayToolWallTime += day.ToolWallTimeMS
-		sumDayDurations += day.DurationSessionCount
-	}
-	require.Equal(s.T(), insightsAfterApply.TotalFunctionCalls, sumDayCalls)
-	require.Equal(s.T(), insightsAfterApply.TotalToolErrors, sumDayErrors)
-	require.Equal(s.T(), insightsAfterApply.TotalToolWallTimeMS, sumDayToolWallTime)
-	require.Equal(s.T(), insightsAfterApply.KnownDurationSessions, sumDayDurations)
-	require.NotEmpty(s.T(), insightsAfterApply.Providers)
-	require.Equal(s.T(), "openai", insightsAfterApply.Providers[0].Provider)
-
-	rollbackResp := postAPIJSON[response.ApplyResultResp](s.T(), s, http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
-		ApplyID:     applyResp.ApplyID,
-		Success:     true,
-		Note:        "rolled back by e2e",
-		AppliedFile: "AGENTS.md",
-		RolledBack:  true,
-	})
-	require.Equal(s.T(), "rollback_confirmed", rollbackResp.Status)
-	require.True(s.T(), rollbackResp.RolledBack)
-
-	historyAfterRollback := getAPIJSON[response.ApplyHistoryResp](s.T(), s, "/api/v1/applies", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.NotEmpty(s.T(), historyAfterRollback.Items)
-	require.Equal(s.T(), "rollback_confirmed", historyAfterRollback.Items[0].Status)
-	require.True(s.T(), historyAfterRollback.Items[0].RolledBack)
-
-	overviewAfterRollback := getAPIJSON[response.DashboardOverviewResp](s.T(), s, "/api/v1/dashboard/overview", url.Values{
-		"org_id": []string{orgID},
-	})
-	require.Greater(s.T(), overviewAfterRollback.AvgQueriesPerSession, 0.0)
-	require.Greater(s.T(), overviewAfterRollback.TotalTokens, 0)
-	require.Equal(s.T(), 0, overviewAfterRollback.SuccessfulRolloutCount)
-	require.Equal(s.T(), 0, overviewAfterRollback.FailedExecutionCount)
-	require.NotEmpty(s.T(), overviewAfterRollback.ActionSummary)
-	require.NotEmpty(s.T(), overviewAfterRollback.OutcomeSummary)
+	require.Equal(s.T(), "report-api.v1", insights.SchemaVersion)
+	require.Equal(s.T(), projectResp.ProjectID, insights.ProjectID)
+	require.NotEmpty(s.T(), insights.Days)
+	require.Greater(s.T(), insights.TotalFunctionCalls, 0)
+	require.Greater(s.T(), insights.TotalToolWallTimeMS, 0)
+	require.NotEmpty(s.T(), insights.Tools)
 
 	auditResp := getAPIJSON[response.AuditListResp](s.T(), s, "/api/v1/audits", url.Values{
-		"org_id":     []string{orgID},
-		"project_id": []string{projectResp.ProjectID},
+		"org_id": []string{orgID},
 	})
 	require.NotEmpty(s.T(), auditResp.Items)
-}
-
-func postAPIJSON[T any](t *testing.T, s *APISuite, method, path string, payload any) T {
-	t.Helper()
-
-	body, err := json.Marshal(payload)
-	require.NoError(t, err)
-
-	fullURL, err := s.c.buildURL(path, nil)
-	require.NoError(t, err)
-
-	req, err := http.NewRequestWithContext(s.ctx, method, fullURL, bytes.NewReader(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-AgentOpt-Token", apiToken())
-
-	resp, err := s.c.HTTP.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	rawBody, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	env, data, err := decodeEnvelope[T](rawBody)
-	require.NoError(t, err)
-	require.Equal(t, 0, env.Code, env.Message)
-	require.NotNil(t, data)
-
-	return *data
-}
-
-func getAPIJSON[T any](t *testing.T, s *APISuite, path string, query url.Values) T {
-	t.Helper()
-
-	fullURL, err := s.c.buildURL(path, query)
-	require.NoError(t, err)
-
-	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, fullURL, nil)
-	require.NoError(t, err)
-	req.Header.Set("X-AgentOpt-Token", apiToken())
-
-	resp, err := s.c.HTTP.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	rawBody, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	env, data, err := decodeEnvelope[T](rawBody)
-	require.NoError(t, err)
-	require.Equal(t, 0, env.Code, env.Message)
-	require.NotNil(t, data)
-
-	return *data
-}
-
-func apiToken() string {
-	token, ok := os.LookupEnv("E2E_API_TOKEN")
-	if !ok || token == "" {
-		return "agentopt-dev-token"
-	}
-	return token
 }

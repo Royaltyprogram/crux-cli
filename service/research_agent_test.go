@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -29,17 +30,19 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 		require.Contains(t, seen.Input, "sample_query_1:")
 		require.Contains(t, seen.Input, "sample_query_10:")
 		require.Contains(t, seen.Input, "assistant_response_1:")
-		require.Contains(t, seen.Input, "\"recommendations\"")
+		require.Contains(t, seen.Input, "reasoning_summary_1:")
+		require.Contains(t, seen.Input, `"schema_version": "report-feedback.v1"`)
+		require.Contains(t, seen.Input, "\"reports\"")
 
 		w.Header().Set("Content-Type", "application/json")
 		_, err := w.Write([]byte(`{
-  "output": [
+ "output": [
     {
       "type": "message",
       "content": [
         {
           "type": "output_text",
-          "text": "{\"recommendations\":[{\"kind\":\"repo-orientation-defaults\",\"title\":\"Reduce repeated repo orientation before work starts\",\"summary\":\"Recent sessions spend too many early turns on repo discovery and control-flow recap before the real task begins.\",\"reason\":\"The uploaded raw queries repeatedly ask for control-flow summaries, file discovery, and verification planning before any implementation work starts.\",\"explanation\":\"The workflow appears to require too much manual orientation on each task, so the agent should load stronger default repository context before proposing edits.\",\"expected_benefit\":\"Less repeated repo discovery and faster first useful responses.\",\"risk\":\"Low. The change is limited to reviewable local agent instructions.\",\"expected_impact\":\"Fewer exploratory turns and less prompt steering at the start of each task.\",\"score\":0.86,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add a reusable repo-orientation instruction block for Codex.\",\"content_preview\":\"## Workflow Findings\\n- Start by locating the concrete files involved before summarizing control flow.\\n- Default to a targeted verification plan before proposing the patch.\\n\"}]}]}"
+          "text": "{\"schema_version\":\"report-feedback.v1\",\"reports\":[{\"kind\":\"repo-orientation-defaults\",\"title\":\"Reduce repeated repo orientation before work starts\",\"summary\":\"Recent sessions spend too many early turns on repo discovery and control-flow recap before the real task begins.\",\"user_intent\":\"The user wants a small, well-scoped fix with explicit verification before any broader changes.\",\"model_interpretation\":\"The model appears to read the request as a need to re-orient on repo structure and control flow before proposing a patch.\",\"reason\":\"The uploaded raw queries repeatedly ask for control-flow summaries, file discovery, and verification planning before any implementation work starts.\",\"explanation\":\"The workflow appears to require too much manual orientation on each task, so the user needs clearer repo-entry habits when starting a new task.\",\"expected_benefit\":\"Less repeated repo discovery and faster first useful responses.\",\"expected_impact\":\"Fewer exploratory turns and less prompt steering at the start of each task.\",\"confidence\":\"high\",\"strengths\":[\"asks for minimal patch scope\"],\"frictions\":[\"repeated control-flow recap\"],\"next_steps\":[\"start each task with the concrete files involved\"],\"score\":0.86,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"]}]}"
         }
       ]
     }
@@ -56,7 +59,7 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 			ResponsesModel: "gpt-5.4",
 		},
 	})
-	recs, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
+	reports, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
 		TokenIn:  1200,
 		TokenOut: 400,
 		RawQueries: []string{
@@ -68,7 +71,7 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 			"Keep the change minimal and do not refactor unrelated files.",
 			"Check whether the workspace sync path already handles this case.",
 			"Summarize the current control flow before proposing a fix.",
-			"Verify whether rollback covers this scenario.",
+			"Verify whether the report should call out this scenario.",
 			"Locate the files involved in the approval flow.",
 			"Check if there is already a helper for this behavior.",
 			"Explain why the regression appears only after sync.",
@@ -77,24 +80,28 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 			"I will inspect the route flow first, then propose a minimal patch and verification plan.",
 			"The approval flow spans the analytics service and dashboard renderer.",
 		},
+		ReasoningSummaries: []string{
+			"Checking repo structure before proposing the minimal patch.",
+		},
 	}}, nil)
 	require.NoError(t, err)
 
-	require.Len(t, recs, 1)
-	require.Equal(t, "repo-orientation-defaults", recs[0].Kind)
-	require.Equal(t, "Reduce repeated repo orientation before work starts", recs[0].Title)
-	require.Contains(t, recs[0].Evidence, "repeated control-flow recap")
-	require.Contains(t, recs[0].RawSuggestion, "\"kind\": \"repo-orientation-defaults\"")
-	require.Len(t, recs[0].Steps, 1)
-	require.Equal(t, defaultCodexInstructionTarget, recs[0].Steps[0].TargetFile)
-	require.Equal(t, "append_block", recs[0].Steps[0].Action)
-	require.Contains(t, recs[0].Steps[0].ContentPreview, "## Workflow Findings")
-	require.Contains(t, recs[0].Summary, "repo discovery")
+	require.Len(t, reports, 1)
+	require.Equal(t, "repo-orientation-defaults", reports[0].Kind)
+	require.Equal(t, "Reduce repeated repo orientation before work starts", reports[0].Title)
+	require.Contains(t, reports[0].UserIntent, "small, well-scoped fix")
+	require.Contains(t, reports[0].ModelInterpretation, "re-orient on repo structure")
+	require.Contains(t, reports[0].Evidence, "repeated control-flow recap")
+	require.Contains(t, reports[0].RawSuggestion, "\"kind\": \"repo-orientation-defaults\"")
+	require.Equal(t, "high", reports[0].Confidence)
+	require.Contains(t, reports[0].Frictions, "repeated control-flow recap")
+	require.Contains(t, reports[0].NextSteps, "start each task with the concrete files involved")
+	require.Contains(t, reports[0].Summary, "repo discovery")
 }
 
-func TestCloudResearchAgentAnalyzeProjectRequiresOpenAIForRecommendations(t *testing.T) {
+func TestCloudResearchAgentAnalyzeProjectRequiresOpenAIForReports(t *testing.T) {
 	agent := NewCloudResearchAgent(&configs.Config{})
-	recs, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
+	reports, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
 		RawQueries: []string{
 			"Inspect the analytics flow before editing it.",
 			"List the exact tests to run after the patch.",
@@ -102,11 +109,11 @@ func TestCloudResearchAgentAnalyzeProjectRequiresOpenAIForRecommendations(t *tes
 	}}, nil)
 	require.NoError(t, err)
 
-	require.Nil(t, recs)
+	require.Nil(t, reports)
 }
 
-func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
-	prompt, err := buildRecommendationsPrompt(&Project{Name: "demo-workspace"}, []string{
+func TestBuildReportsPromptLoadsTemplate(t *testing.T) {
+	prompt, err := buildReportsPrompt(&Project{Name: "demo-workspace"}, []string{
 		"Inspect the analytics route.",
 		"List the exact verification steps.",
 	}, []researchInteractionSample{{
@@ -118,6 +125,9 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 		},
 		AssistantResponses: []string{
 			"I will inspect the route flow before proposing changes.",
+		},
+		ReasoningSummaries: []string{
+			"Checking whether the user wants a control-flow recap before patching.",
 		},
 	}}, researchUsageSummary{
 		SessionCount:               2,
@@ -151,9 +161,10 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Contains(t, prompt, "coding-agent product researcher and harness designer")
+	require.Contains(t, prompt, "coding-agent product researcher and workflow analyst")
 	require.Contains(t, prompt, "You are not the coding agent serving the user's task directly.")
 	require.Contains(t, prompt, "## Requirements")
+	require.Contains(t, prompt, "report-feedback.v1")
 	require.Contains(t, prompt, "## Project")
 	require.Contains(t, prompt, "demo-workspace")
 	require.Contains(t, prompt, "## Usage Summary")
@@ -162,48 +173,63 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 	require.Contains(t, prompt, "tool=codex")
 	require.Contains(t, prompt, "## Query-Response Interaction Evidence")
 	require.Contains(t, prompt, "assistant_response_1: I will inspect the route flow before proposing changes.")
+	require.Contains(t, prompt, "reasoning_summary_1: Checking whether the user wants a control-flow recap before patching.")
 	require.Contains(t, prompt, "## Raw Queries (2)")
 	require.Contains(t, prompt, "sample_query_1: Inspect the analytics route.")
 	require.Contains(t, prompt, "sample_query_2: List the exact verification steps.")
 }
 
-func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
-	recs, err := parseResearchRecommendations(`{
-  "recommendations": [
+func TestParseResearchReportsRejectsInvalidEntries(t *testing.T) {
+	reports, err := parseResearchReports(`{
+  "schema_version": "report-feedback.v1",
+  "reports": [
     {
-      "kind": "empty-plan",
-      "title": "Missing plan",
-      "summary": "No plan here",
-      "change_plan": []
+      "kind": "empty-report",
+      "title": "Missing summary",
+      "summary": ""
     },
     {
       "kind": "valid",
       "title": "Keep verification local",
       "summary": "The user keeps asking for exact checks, so the default workflow should include them.",
+      "user_intent": "The user wants the patch path to stay narrow and verifiable.",
+      "model_interpretation": "The model seems to read the request as verification-first before implementation.",
       "reason": "Repeated verification prompts appear in raw queries.",
-      "explanation": "A reviewable instruction update can front-load verification behavior.",
+      "explanation": "The user needs a clearer checklist for how to drive verification prompts.",
       "expected_benefit": "Less repeated prompting about checks.",
-      "risk": "Low. Instruction-only update.",
       "expected_impact": "Faster convergence on the final patch.",
+      "confidence": "medium",
+      "strengths": ["asks for exact checks"],
+      "frictions": ["repeated verification prompts"],
+      "next_steps": ["state the target verification first"],
       "score": 1.2,
-      "evidence": ["repeated verification prompts"],
-      "change_plan": [
-        {
-          "type": "text_append",
-          "action": "append_block",
-          "target_file": "~/.codex/AGENTS.md",
-          "summary": "Add verification defaults.",
-          "content_preview": "## Verification Defaults"
-        }
-      ]
+      "evidence": ["repeated verification prompts"]
     }
   ]
 }`)
 	require.NoError(t, err)
-	require.Len(t, recs, 1)
-	require.Equal(t, "valid", recs[0].Kind)
-	require.Equal(t, 1.0, recs[0].Score)
-	require.Contains(t, recs[0].RawSuggestion, "\"title\": \"Keep verification local\"")
+	require.Len(t, reports, 1)
+	require.Equal(t, "valid", reports[0].Kind)
+	require.Contains(t, reports[0].UserIntent, "stay narrow and verifiable")
+	require.Contains(t, reports[0].ModelInterpretation, "verification-first")
+	require.Equal(t, 1.0, reports[0].Score)
+	require.Equal(t, "medium", reports[0].Confidence)
+	require.Contains(t, reports[0].RawSuggestion, "\"title\": \"Keep verification local\"")
+}
+
+func TestParseResearchReportsRejectsUnsupportedSchemaVersion(t *testing.T) {
+	_, err := parseResearchReports(`{
+  "schema_version": "report-feedback.v999",
+  "reports": [
+    {
+      "kind": "valid",
+      "title": "Keep verification local",
+      "summary": "The user keeps asking for exact checks."
+    }
+  ]
+}`)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported report feedback schema_version")
 }
 
 func TestNormalizeQueriesForResearchPromptStripsBoilerplate(t *testing.T) {
@@ -248,6 +274,43 @@ func TestSampleRawQueriesRespectsLimit(t *testing.T) {
 	require.Len(t, seen, 10)
 }
 
+func TestBuildResearchInteractionSamplesFiltersLowSignalReasoningSummaries(t *testing.T) {
+	items := buildResearchInteractionSamples([]*SessionSummary{{
+		Tool:      "codex",
+		Timestamp: mustParseResearchTime(t, "2026-03-10T08:00:00Z"),
+		RawQueries: []string{
+			"Inspect the analytics route and keep the patch minimal.",
+		},
+		AssistantResponses: []string{
+			"I will inspect the route flow first.",
+		},
+		ReasoningSummaries: []string{
+			"Checking for AGENTS instructions",
+			"Need to include a preamble before tool calls",
+			"Checking route flow before proposing the minimal patch",
+		},
+	}}, 5)
+
+	require.Len(t, items, 1)
+	require.Equal(t, []string{
+		"Checking route flow before proposing the minimal patch",
+	}, items[0].ReasoningSummaries)
+}
+
+func TestIsLowSignalReasoningSummary(t *testing.T) {
+	require.True(t, isLowSignalReasoningSummary("**Checking for AGENTS instructions**"))
+	require.True(t, isLowSignalReasoningSummary("Need to include a preamble before tool calls"))
+	require.False(t, isLowSignalReasoningSummary("Checking route flow before proposing the minimal patch"))
+}
+
 func deterministicRand() *rand.Rand {
 	return rand.New(rand.NewSource(1))
+}
+
+func mustParseResearchTime(t *testing.T, raw string) time.Time {
+	t.Helper()
+
+	ts, err := time.Parse(time.RFC3339, raw)
+	require.NoError(t, err)
+	return ts.UTC()
 }

@@ -14,7 +14,7 @@ var ProviderSet = wire.NewSet(
 )
 
 type Options struct {
-	Config                    *configs.Config
-	AnalyticsStore            *AnalyticsStore
-	RecommendationMinSessions int
+	Config            *configs.Config
+	AnalyticsStore    *AnalyticsStore
+	ReportMinSessions int
 }

@@ -145,10 +145,6 @@ VERSION_OUTPUT="$("$BIN_DIR/agentopt" version)"
   echo "install script did not create current symlink" >&2
   exit 1
 }
-[[ -f "$INSTALL_ROOT/current/tools/codex-runner/run.mjs" ]] || {
-  echo "installed bundle missing codex runner" >&2
-  exit 1
-}
 
 # Re-run install to verify idempotent upgrade behavior for the same version.
 AGENTOPT_VERSION="$VERSION_LABEL" \

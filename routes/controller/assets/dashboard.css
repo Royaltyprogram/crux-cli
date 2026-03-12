@@ -256,13 +256,13 @@
       animation: agent-pulse 2s ease-in-out infinite;
     }
 
-    .agent-status-bar[data-state="suggestion"] {
+    .agent-status-bar[data-state="report"] {
       background: linear-gradient(135deg, rgba(167, 82, 49, 0.08), rgba(167, 82, 49, 0.04));
       border-color: rgba(167, 82, 49, 0.14);
       color: var(--accent);
     }
 
-    .agent-status-bar[data-state="suggestion"] .agent-status-dot {
+    .agent-status-bar[data-state="report"] .agent-status-dot {
       background: var(--accent);
     }
 
@@ -407,9 +407,9 @@
       color: var(--ink);
     }
 
-    /* ── Active suggestion section ── */
+    /* ── Active report section ── */
 
-    .active-suggestion-section {
+    .active-report-section {
       margin-bottom: 28px;
       padding: 24px;
       border-radius: var(--radius-lg);
@@ -417,19 +417,19 @@
       border: 1px solid var(--line);
     }
 
-    .active-suggestion-section[data-empty="true"] {
+    .active-report-section[data-empty="true"] {
       display: none;
     }
 
-    .active-suggestion-section .section-header {
+    .active-report-section .section-header {
       margin-bottom: 12px;
     }
 
-    .active-suggestion-section .list {
+    .active-report-section .list {
       margin: 0;
     }
 
-    .active-suggestion-section .item:last-child {
+    .active-report-section .item:last-child {
       border-bottom: none;
       padding-bottom: 0;
     }
@@ -718,7 +718,7 @@
       line-height: 1.45;
     }
 
-    .rollout-badges {
+    .signal-badges {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       margin-bottom: 0;
     }
@@ -820,15 +820,7 @@
       background: var(--line-strong);
     }
 
-    .usage-flag.approval {
-      background: var(--warn);
-    }
-
-    .usage-flag.applied {
-      background: var(--good);
-    }
-
-    .usage-flag.rollback {
+    .usage-flag.report {
       background: var(--danger);
     }
 
@@ -1181,134 +1173,6 @@
       line-height: 1.45;
     }
 
-    /* ── Rollout lanes ── */
-
-    .rollout-lanes {
-      display: grid;
-      gap: 14px;
-    }
-
-    .rollout-lane {
-      display: grid;
-      gap: 10px;
-      padding: 14px 0;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .rollout-lane:first-child {
-      padding-top: 0;
-    }
-
-    .rollout-lane:last-child {
-      padding-bottom: 0;
-      border-bottom: none;
-    }
-
-    .rollout-lane-top {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .rollout-lane-title {
-      font-size: 14px;
-      font-weight: 700;
-      line-height: 1.45;
-    }
-
-    .rollout-lane-title small {
-      display: block;
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 400;
-      line-height: 1.5;
-    }
-
-    .rollout-stages {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0;
-    }
-
-    .rollout-stage {
-      padding: 12px 16px 12px 0;
-      border-radius: 0;
-      background: transparent;
-      border: none;
-      border-right: 1px solid var(--line);
-    }
-
-    .rollout-stage:last-child {
-      border-right: none;
-      padding-right: 0;
-    }
-
-    .rollout-stage:not(:first-child) {
-      padding-left: 16px;
-    }
-
-    .rollout-stage.pending {
-      opacity: 0.55;
-    }
-
-    .rollout-stage.done {
-      background: transparent;
-    }
-
-    .rollout-stage.warn {
-      background: transparent;
-    }
-
-    .rollout-stage.danger {
-      background: transparent;
-    }
-
-    .rollout-stage-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 7px;
-      font-size: 11px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-
-    .rollout-stage-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--line-strong);
-      flex-shrink: 0;
-    }
-
-    .rollout-stage.done .rollout-stage-dot {
-      background: var(--good);
-    }
-
-    .rollout-stage.warn .rollout-stage-dot {
-      background: var(--warn);
-    }
-
-    .rollout-stage.danger .rollout-stage-dot {
-      background: var(--danger);
-    }
-
-    .rollout-stage-value {
-      font-size: 15px;
-      font-weight: 700;
-      line-height: 1.35;
-      margin-bottom: 4px;
-    }
-
-    .rollout-stage-meta {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
     /* ── Funnel ── */
 
     .funnel-grid {
@@ -1549,7 +1413,7 @@
       overflow-wrap: anywhere;
     }
 
-    .raw-suggestion {
+    .report-raw-output {
       margin-top: 10px;
       border: 1px solid rgba(20, 33, 42, 0.08);
       border-radius: 12px;
@@ -1557,7 +1421,7 @@
       overflow: hidden;
     }
 
-    .raw-suggestion summary {
+    .report-raw-output summary {
       list-style: none;
       cursor: pointer;
       padding: 10px 12px;
@@ -1569,11 +1433,11 @@
       background: rgba(167, 82, 49, 0.08);
     }
 
-    .raw-suggestion summary::-webkit-details-marker {
+    .report-raw-output summary::-webkit-details-marker {
       display: none;
     }
 
-    .raw-suggestion pre {
+    .report-raw-output pre {
       margin: 0;
       padding: 14px 16px;
       overflow-x: auto;
@@ -1587,7 +1451,7 @@
 
     /* ── Suggestion detail card ── */
 
-    .suggestion-detail {
+    .report-detail {
       margin-top: 12px;
       border: 1px solid var(--line);
       border-radius: 14px;
@@ -1595,7 +1459,7 @@
       overflow: hidden;
     }
 
-    .suggestion-detail-toggle {
+    .report-detail-toggle {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1611,41 +1475,41 @@
       transition: background 0.15s ease;
     }
 
-    .suggestion-detail-toggle:hover {
+    .report-detail-toggle:hover {
       background: rgba(30, 104, 112, 0.1);
       transform: none;
       box-shadow: none;
     }
 
-    .suggestion-detail-toggle .toggle-icon {
+    .report-detail-toggle .toggle-icon {
       display: inline-block;
       font-size: 10px;
       transition: transform 0.2s ease;
     }
 
-    .suggestion-detail.is-open .suggestion-detail-toggle .toggle-icon {
+    .report-detail.is-open .report-detail-toggle .toggle-icon {
       transform: rotate(90deg);
     }
 
-    .suggestion-detail-body {
+    .report-detail-body {
       display: none;
       padding: 16px;
     }
 
-    .suggestion-detail.is-open .suggestion-detail-body {
+    .report-detail.is-open .report-detail-body {
       display: block;
       animation: section-expand 0.2s ease;
     }
 
-    .suggestion-field {
+    .report-field {
       margin-bottom: 14px;
     }
 
-    .suggestion-field:last-child {
+    .report-field:last-child {
       margin-bottom: 0;
     }
 
-    .suggestion-field-label {
+    .report-field-label {
       font-size: 11px;
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -1654,20 +1518,20 @@
       font-weight: 700;
     }
 
-    .suggestion-field-value {
+    .report-field-value {
       font-size: 14px;
       line-height: 1.65;
       color: var(--ink);
     }
 
-    .suggestion-metrics-row {
+    .report-metrics-row {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-bottom: 14px;
     }
 
-    .suggestion-metric {
+    .report-metric {
       display: inline-flex;
       align-items: center;
       gap: 6px;
@@ -1679,7 +1543,7 @@
       color: var(--muted);
     }
 
-    .suggestion-score-track {
+    .report-score-track {
       height: 8px;
       width: 80px;
       border-radius: 999px;
@@ -1689,18 +1553,18 @@
       vertical-align: middle;
     }
 
-    .suggestion-score-fill {
+    .report-score-fill {
       height: 100%;
       border-radius: 999px;
       background: linear-gradient(90deg, var(--support), var(--good));
     }
 
-    .suggestion-evidence-list {
+    .report-evidence-list {
       display: grid;
       gap: 6px;
     }
 
-    .suggestion-evidence-item {
+    .report-evidence-item {
       padding: 8px 12px;
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.86);
@@ -1709,66 +1573,6 @@
       line-height: 1.55;
       color: var(--ink);
       font-style: italic;
-    }
-
-    .suggestion-change-plan {
-      display: grid;
-      gap: 8px;
-    }
-
-    .suggestion-plan-step {
-      padding: 10px 14px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.86);
-      border: 1px solid rgba(20, 33, 42, 0.06);
-    }
-
-    .suggestion-plan-step-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 4px;
-    }
-
-    .suggestion-plan-step-type {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--support);
-    }
-
-    .suggestion-plan-step-file {
-      font-size: 12px;
-      color: var(--muted);
-      font-family: "SFMono-Regular", "SF Mono", "Menlo", monospace;
-    }
-
-    .suggestion-plan-step-summary {
-      font-size: 13px;
-      line-height: 1.55;
-      color: var(--ink);
-    }
-
-    .suggestion-plan-step-preview {
-      margin-top: 8px;
-      padding: 10px 12px;
-      border-radius: 8px;
-      background: rgba(24, 35, 45, 0.96);
-      color: #f4f6f4;
-      font-family: "SFMono-Regular", "SF Mono", "Menlo", monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 240px;
-      overflow-y: auto;
-    }
-
-    .suggestion-separator {
-      height: 1px;
-      background: var(--line);
-      margin: 14px 0;
     }
 
     .action-row {
@@ -2080,28 +1884,8 @@
         padding-right: 0;
       }
 
-      .rollout-badges {
+      .signal-badges {
         grid-template-columns: 1fr;
-      }
-
-      .rollout-stages {
-        grid-template-columns: 1fr;
-      }
-
-      .rollout-stage {
-        padding: 10px 0;
-        border-right: none;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .rollout-stage:not(:first-child) {
-        padding-left: 0;
-      }
-
-      .rollout-stage:last-child {
-        border-right: none;
-        border-bottom: none;
-        padding-right: 0;
       }
 
       .funnel-grid {
@@ -2662,10 +2446,6 @@
 
 .lc-progress-fill.baseline {
   background: linear-gradient(90deg, var(--support), rgba(30, 104, 112, 0.7));
-}
-
-.lc-progress-fill.post-apply {
-  background: linear-gradient(90deg, var(--accent), rgba(167, 82, 49, 0.7));
 }
 
 .lc-card-reason {

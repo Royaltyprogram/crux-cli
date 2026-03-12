@@ -18,9 +18,9 @@ func (s *APISuite) TestDashboardPage_OK() {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), http.StatusOK, resp.StatusCode)
-	require.Contains(s.T(), string(body), "Active suggestion")
-	require.Contains(s.T(), string(body), "Suggested changes")
+	require.Contains(s.T(), string(body), "Latest reports")
+	require.Contains(s.T(), string(body), "Read the current feedback")
 	require.Contains(s.T(), string(body), "Recent AI usage sessions")
 	require.Contains(s.T(), string(body), "Usage Analytics")
-	require.Contains(s.T(), string(body), "Applied Changes")
+	require.Contains(s.T(), string(body), "Latest workflow feedback")
 }

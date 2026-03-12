@@ -27,36 +27,33 @@ type AnalyticsStore struct {
 	bootstrapUsers []configs.BootstrapUser
 	seq            uint64
 
-	organizations          map[string]*Organization
-	users                  map[string]*User
-	accessTokens           map[string]*AccessToken
-	agents                 map[string]*Agent
-	projects               map[string]*Project
-	configSnapshots        map[string][]*ConfigSnapshot
-	sessionSummaries       map[string][]*SessionSummary
-	recommendations        map[string]*Recommendation
-	projectRecommendations map[string][]string
-	recommendationResearch map[string]*RecommendationResearchStatus
-	experiments            map[string]*Experiment
-	applyOperations        map[string]*ApplyOperation
-	audits                 []*AuditEvent
+	organizations    map[string]*Organization
+	users            map[string]*User
+	accessTokens     map[string]*AccessToken
+	agents           map[string]*Agent
+	projects         map[string]*Project
+	configSnapshots  map[string][]*ConfigSnapshot
+	sessionSummaries map[string][]*SessionSummary
+	reports          map[string]*Report
+	projectReports   map[string][]string
+	reportResearch   map[string]*ReportResearchStatus
+	audits           []*AuditEvent
 }
 
 type analyticsStoreState struct {
-	Seq                    uint64                                   `json:"seq"`
-	Organizations          map[string]*Organization                 `json:"organizations"`
-	Users                  map[string]*User                         `json:"users"`
-	AccessTokens           map[string]*AccessToken                  `json:"access_tokens"`
-	Agents                 map[string]*Agent                        `json:"agents"`
-	Projects               map[string]*Project                      `json:"projects"`
-	ConfigSnapshots        map[string][]*ConfigSnapshot             `json:"config_snapshots"`
-	SessionSummaries       map[string][]*SessionSummary             `json:"session_summaries"`
-	Recommendations        map[string]*Recommendation               `json:"recommendations"`
-	ProjectRecommendations map[string][]string                      `json:"project_recommendations"`
-	RecommendationResearch map[string]*RecommendationResearchStatus `json:"recommendation_research"`
-	Experiments            map[string]*Experiment                   `json:"experiments"`
-	ApplyOperations        map[string]*ApplyOperation               `json:"apply_operations"`
-	Audits                 []*AuditEvent                            `json:"audits"`
+	SchemaVersion    string                           `json:"schema_version"`
+	Seq              uint64                           `json:"seq"`
+	Organizations    map[string]*Organization         `json:"organizations"`
+	Users            map[string]*User                 `json:"users"`
+	AccessTokens     map[string]*AccessToken          `json:"access_tokens"`
+	Agents           map[string]*Agent                `json:"agents"`
+	Projects         map[string]*Project              `json:"projects"`
+	ConfigSnapshots  map[string][]*ConfigSnapshot     `json:"config_snapshots"`
+	SessionSummaries map[string][]*SessionSummary     `json:"session_summaries"`
+	Reports          map[string]*Report               `json:"reports"`
+	ProjectReports   map[string][]string              `json:"project_reports"`
+	ReportResearch   map[string]*ReportResearchStatus `json:"report_research"`
+	Audits           []*AuditEvent                    `json:"audits"`
 }
 
 type Organization struct {
@@ -137,119 +134,54 @@ type SessionSummary struct {
 	ModelProvider          string
 	FirstResponseLatencyMS int
 	AssistantResponses     []string
+	ReasoningSummaries     []string
 	Timestamp              time.Time
 }
 
-type Recommendation struct {
-	ID               string
-	ProjectID        string
-	Kind             string
-	Title            string
-	Summary          string
-	Reason           string
-	Explanation      string
-	ExpectedBenefit  string
-	Risk             string
-	ExpectedImpact   string
-	Score            float64
-	Status           string
-	TargetTool       string
-	TargetFileHint   string
-	ResearchProvider string
-	ResearchModel    string
-	Evidence         []string
-	ChangePlan       []ChangePlanStep
-	SettingsUpdates  map[string]any
-	RawSuggestion    string
-	CreatedAt        time.Time
-}
-
-type RecommendationResearchStatus struct {
+type Report struct {
+	ID                  string
 	ProjectID           string
-	State               string
+	Kind                string
+	Title               string
 	Summary             string
-	Provider            string
-	Model               string
-	MinimumSessions     int
-	SessionCount        int
-	RawQueryCount       int
-	RecommendationCount int
-	TriggerSessionID    string
-	LastError           string
-	TriggeredAt         *time.Time
-	StartedAt           *time.Time
-	CompletedAt         *time.Time
-	LastSuccessfulAt    *time.Time
-	LastDurationMS      int
+	UserIntent          string
+	ModelInterpretation string
+	Reason              string
+	Explanation         string
+	ExpectedBenefit     string
+	Risk                string
+	ExpectedImpact      string
+	Confidence          string
+	Strengths           []string
+	Frictions           []string
+	NextSteps           []string
+	Score               float64
+	Status              string
+	TargetTool          string
+	ResearchProvider    string
+	ResearchModel       string
+	Evidence            []string
+	RawSuggestion       string
+	CreatedAt           time.Time
 }
 
-type ChangePlanStep struct {
-	Type            string
-	Action          string
-	TargetFile      string
-	Summary         string
-	SettingsUpdates map[string]any
-	ContentPreview  string
-}
-
-type PatchPreview struct {
-	FilePath        string
-	Operation       string
-	Summary         string
-	SettingsUpdates map[string]any
-	ContentPreview  string
-}
-
-type Experiment struct {
-	ID                   string
-	ProjectID            string
-	RecommendationID     string
-	ApplyID              string
-	RequestedBy          string
-	Scope                string
-	TargetMetric         string
-	Status               string
-	Decision             string
-	DecisionReason       string
-	EvaluationMode       string
-	EvaluationModel      string
-	EvaluationDecision   string
-	EvaluationConfidence string
-	EvaluationSummary    string
-	BaselineSessions     int
-	BaselineQueries      int
-	CreatedAt            time.Time
-	ApprovedAt           *time.Time
-	AppliedAt            *time.Time
-	EvaluatedAt          *time.Time
-	ResolvedAt           *time.Time
-}
-
-type ApplyOperation struct {
-	ID               string
-	ExperimentID     string
-	RecommendationID string
+type ReportResearchStatus struct {
 	ProjectID        string
-	RequestedBy      string
-	Scope            string
-	Status           string
-	PolicyMode       string
-	PolicyReason     string
-	ApprovalStatus   string
-	Decision         string
-	ReviewedBy       string
-	ReviewNote       string
-	AppliedText      string
-	PatchPreview     []PatchPreview
-	AppliedFile      string
-	AppliedSettings  map[string]any
-	Note             string
-	RolledBack       bool
-	RequestedAt      time.Time
-	ReviewedAt       *time.Time
-	AppliedAt        *time.Time
-	LastReportedAt   *time.Time
-	RolledBackAt     *time.Time
+	State            string
+	Summary          string
+	Provider         string
+	Model            string
+	MinimumSessions  int
+	SessionCount     int
+	RawQueryCount    int
+	ReportCount      int `json:"report_count"`
+	TriggerSessionID string
+	LastError        string
+	TriggeredAt      *time.Time
+	StartedAt        *time.Time
+	CompletedAt      *time.Time
+	LastSuccessfulAt *time.Time
+	LastDurationMS   int
 }
 
 type AuditEvent struct {
@@ -273,23 +205,21 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 	}
 
 	store := &AnalyticsStore{
-		db:                     db,
-		filePath:               conf.App.StorePath,
-		allowDemoUser:          conf.AllowsDemoUser(),
-		bootstrapUsers:         append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
-		organizations:          make(map[string]*Organization),
-		users:                  make(map[string]*User),
-		accessTokens:           make(map[string]*AccessToken),
-		agents:                 make(map[string]*Agent),
-		projects:               make(map[string]*Project),
-		configSnapshots:        make(map[string][]*ConfigSnapshot),
-		sessionSummaries:       make(map[string][]*SessionSummary),
-		recommendations:        make(map[string]*Recommendation),
-		projectRecommendations: make(map[string][]string),
-		recommendationResearch: make(map[string]*RecommendationResearchStatus),
-		experiments:            make(map[string]*Experiment),
-		applyOperations:        make(map[string]*ApplyOperation),
-		audits:                 make([]*AuditEvent, 0, 32),
+		db:               db,
+		filePath:         conf.App.StorePath,
+		allowDemoUser:    conf.AllowsDemoUser(),
+		bootstrapUsers:   append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
+		organizations:    make(map[string]*Organization),
+		users:            make(map[string]*User),
+		accessTokens:     make(map[string]*AccessToken),
+		agents:           make(map[string]*Agent),
+		projects:         make(map[string]*Project),
+		configSnapshots:  make(map[string][]*ConfigSnapshot),
+		sessionSummaries: make(map[string][]*SessionSummary),
+		reports:          make(map[string]*Report),
+		projectReports:   make(map[string][]string),
+		reportResearch:   make(map[string]*ReportResearchStatus),
+		audits:           make([]*AuditEvent, 0, 32),
 	}
 	if err := store.initDB(); err != nil {
 		_ = db.Close()
@@ -347,6 +277,9 @@ func (s *AnalyticsStore) ImportStateJSON(data []byte) error {
 	var state analyticsStoreState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
+	}
+	if state.SchemaVersion != "" && state.SchemaVersion != analyticsStoreSchemaVersion {
+		return fmt.Errorf("unsupported analytics store schema_version %q", state.SchemaVersion)
 	}
 
 	s.mu.Lock()
@@ -530,28 +463,18 @@ func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 			}
 		}
 	}
-	for _, id := range sortedKeys(s.recommendations) {
-		if err := appendRecord("recommendation", "", id, s.recommendations[id]); err != nil {
+	for _, id := range sortedKeys(s.reports) {
+		if err := appendRecord("report", "", id, s.reports[id]); err != nil {
 			return nil, err
 		}
 	}
-	for _, projectID := range sortedKeys(s.projectRecommendations) {
-		if err := appendRecord("project_recommendation", "", projectID, s.projectRecommendations[projectID]); err != nil {
+	for _, projectID := range sortedKeys(s.projectReports) {
+		if err := appendRecord("project_report", "", projectID, s.projectReports[projectID]); err != nil {
 			return nil, err
 		}
 	}
-	for _, projectID := range sortedKeys(s.recommendationResearch) {
-		if err := appendRecord("recommendation_research", "", projectID, s.recommendationResearch[projectID]); err != nil {
-			return nil, err
-		}
-	}
-	for _, id := range sortedKeys(s.experiments) {
-		if err := appendRecord("experiment", "", id, s.experiments[id]); err != nil {
-			return nil, err
-		}
-	}
-	for _, id := range sortedKeys(s.applyOperations) {
-		if err := appendRecord("apply_operation", "", id, s.applyOperations[id]); err != nil {
+	for _, projectID := range sortedKeys(s.reportResearch) {
+		if err := appendRecord("report_research", "", projectID, normalizeReportResearchStatus(s.reportResearch[projectID])); err != nil {
 			return nil, err
 		}
 	}
@@ -677,36 +600,24 @@ func (s *AnalyticsStore) applyLoadedRecord(recordType, scopeID, recordID string,
 			return err
 		}
 		s.sessionSummaries[scopeID] = append(s.sessionSummaries[scopeID], &item)
-	case "recommendation":
-		var item Recommendation
+	case "report":
+		var item Report
 		if err := json.Unmarshal(payload, &item); err != nil {
 			return err
 		}
-		s.recommendations[recordID] = &item
-	case "project_recommendation":
+		s.reports[recordID] = &item
+	case "project_report":
 		var item []string
 		if err := json.Unmarshal(payload, &item); err != nil {
 			return err
 		}
-		s.projectRecommendations[recordID] = append([]string(nil), item...)
-	case "recommendation_research":
-		var item RecommendationResearchStatus
+		s.projectReports[recordID] = append([]string(nil), item...)
+	case "report_research":
+		var item ReportResearchStatus
 		if err := json.Unmarshal(payload, &item); err != nil {
 			return err
 		}
-		s.recommendationResearch[recordID] = &item
-	case "experiment":
-		var item Experiment
-		if err := json.Unmarshal(payload, &item); err != nil {
-			return err
-		}
-		s.experiments[recordID] = &item
-	case "apply_operation":
-		var item ApplyOperation
-		if err := json.Unmarshal(payload, &item); err != nil {
-			return err
-		}
-		s.applyOperations[recordID] = &item
+		s.reportResearch[recordID] = normalizeReportResearchStatus(&item)
 	case "audit":
 		var item AuditEvent
 		if err := json.Unmarshal(payload, &item); err != nil {
@@ -750,30 +661,27 @@ func (s *AnalyticsStore) resetInMemoryState() {
 	s.projects = make(map[string]*Project)
 	s.configSnapshots = make(map[string][]*ConfigSnapshot)
 	s.sessionSummaries = make(map[string][]*SessionSummary)
-	s.recommendations = make(map[string]*Recommendation)
-	s.projectRecommendations = make(map[string][]string)
-	s.recommendationResearch = make(map[string]*RecommendationResearchStatus)
-	s.experiments = make(map[string]*Experiment)
-	s.applyOperations = make(map[string]*ApplyOperation)
+	s.reports = make(map[string]*Report)
+	s.projectReports = make(map[string][]string)
+	s.reportResearch = make(map[string]*ReportResearchStatus)
 	s.audits = make([]*AuditEvent, 0, 32)
 }
 
 func (s *AnalyticsStore) snapshotStateLocked() analyticsStoreState {
 	return analyticsStoreState{
-		Seq:                    s.seq,
-		Organizations:          s.organizations,
-		Users:                  s.users,
-		AccessTokens:           s.accessTokens,
-		Agents:                 s.agents,
-		Projects:               s.projects,
-		ConfigSnapshots:        s.configSnapshots,
-		SessionSummaries:       s.sessionSummaries,
-		Recommendations:        s.recommendations,
-		ProjectRecommendations: s.projectRecommendations,
-		RecommendationResearch: s.recommendationResearch,
-		Experiments:            s.experiments,
-		ApplyOperations:        s.applyOperations,
-		Audits:                 s.audits,
+		SchemaVersion:    analyticsStoreSchemaVersion,
+		Seq:              s.seq,
+		Organizations:    s.organizations,
+		Users:            s.users,
+		AccessTokens:     s.accessTokens,
+		Agents:           s.agents,
+		Projects:         s.projects,
+		ConfigSnapshots:  s.configSnapshots,
+		SessionSummaries: s.sessionSummaries,
+		Reports:          s.reports,
+		ProjectReports:   s.projectReports,
+		ReportResearch:   normalizeReportResearchMap(s.reportResearch),
+		Audits:           s.audits,
 	}
 }
 
@@ -786,17 +694,34 @@ func (s *AnalyticsStore) replaceStateLocked(state analyticsStoreState) error {
 	s.projects = ensureMap(state.Projects)
 	s.configSnapshots = ensureNestedMap(state.ConfigSnapshots)
 	s.sessionSummaries = ensureNestedMap(state.SessionSummaries)
-	s.recommendations = ensureMap(state.Recommendations)
-	s.projectRecommendations = ensureStringSliceMap(state.ProjectRecommendations)
-	s.recommendationResearch = ensureMap(state.RecommendationResearch)
-	s.experiments = ensureMap(state.Experiments)
-	s.applyOperations = ensureMap(state.ApplyOperations)
+	s.reports = ensureMap(state.Reports)
+	s.projectReports = ensureStringSliceMap(state.ProjectReports)
+	s.reportResearch = ensureMap(normalizeReportResearchMap(state.ReportResearch))
 	if state.Audits == nil {
 		s.audits = make([]*AuditEvent, 0, 32)
 	} else {
 		s.audits = state.Audits
 	}
 	return nil
+}
+
+func normalizeReportResearchMap(input map[string]*ReportResearchStatus) map[string]*ReportResearchStatus {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]*ReportResearchStatus, len(input))
+	for key, value := range input {
+		out[key] = normalizeReportResearchStatus(value)
+	}
+	return out
+}
+
+func normalizeReportResearchStatus(status *ReportResearchStatus) *ReportResearchStatus {
+	if status == nil {
+		return nil
+	}
+	cloned := *status
+	return &cloned
 }
 
 func openAnalyticsStoreDB(conf *configs.Config) (*sql.DB, error) {
@@ -961,24 +886,6 @@ func cloneStringSlice(input []string) []string {
 	return out
 }
 
-func cloneChangePlanSteps(input []ChangePlanStep) []ChangePlanStep {
-	if len(input) == 0 {
-		return []ChangePlanStep{}
-	}
-	out := make([]ChangePlanStep, 0, len(input))
-	for _, item := range input {
-		out = append(out, ChangePlanStep{
-			Type:            item.Type,
-			Action:          item.Action,
-			TargetFile:      item.TargetFile,
-			Summary:         item.Summary,
-			SettingsUpdates: cloneAnyMap(item.SettingsUpdates),
-			ContentPreview:  item.ContentPreview,
-		})
-	}
-	return out
-}
-
 func (s *AnalyticsStore) collapseProjectsLocked() bool {
 	orgProjects := make(map[string][]*Project)
 	for _, project := range s.projects {
@@ -999,14 +906,14 @@ func (s *AnalyticsStore) collapseProjectsLocked() bool {
 			continue
 		}
 
-		recommendationIDs := make([]string, 0, len(s.projectRecommendations[canonical.ID]))
-		seenRecommendationIDs := make(map[string]struct{}, len(s.projectRecommendations[canonical.ID]))
-		for _, id := range s.projectRecommendations[canonical.ID] {
-			if _, exists := seenRecommendationIDs[id]; exists {
+		reportIDs := make([]string, 0, len(s.projectReports[canonical.ID]))
+		seenReportIDs := make(map[string]struct{}, len(s.projectReports[canonical.ID]))
+		for _, id := range s.projectReports[canonical.ID] {
+			if _, exists := seenReportIDs[id]; exists {
 				continue
 			}
-			seenRecommendationIDs[id] = struct{}{}
-			recommendationIDs = append(recommendationIDs, id)
+			seenReportIDs[id] = struct{}{}
+			reportIDs = append(reportIDs, id)
 		}
 
 		for _, project := range projects {
@@ -1060,34 +967,22 @@ func (s *AnalyticsStore) collapseProjectsLocked() bool {
 			}
 			delete(s.sessionSummaries, project.ID)
 
-			for _, recommendationID := range s.projectRecommendations[project.ID] {
-				rec := s.recommendations[recommendationID]
+			for _, reportID := range s.projectReports[project.ID] {
+				rec := s.reports[reportID]
 				if rec != nil {
 					rec.ProjectID = canonical.ID
 				}
-				if _, exists := seenRecommendationIDs[recommendationID]; exists {
+				if _, exists := seenReportIDs[reportID]; exists {
 					continue
 				}
-				seenRecommendationIDs[recommendationID] = struct{}{}
-				recommendationIDs = append(recommendationIDs, recommendationID)
+				seenReportIDs[reportID] = struct{}{}
+				reportIDs = append(reportIDs, reportID)
 			}
-			delete(s.projectRecommendations, project.ID)
+			delete(s.projectReports, project.ID)
 
-			for _, rec := range s.recommendations {
+			for _, rec := range s.reports {
 				if rec != nil && rec.ProjectID == project.ID {
 					rec.ProjectID = canonical.ID
-				}
-			}
-
-			for _, op := range s.applyOperations {
-				if op != nil && op.ProjectID == project.ID {
-					op.ProjectID = canonical.ID
-				}
-			}
-
-			for _, experiment := range s.experiments {
-				if experiment != nil && experiment.ProjectID == project.ID {
-					experiment.ProjectID = canonical.ID
 				}
 			}
 
@@ -1102,7 +997,7 @@ func (s *AnalyticsStore) collapseProjectsLocked() bool {
 
 		if modified {
 			canonical.Name = sharedWorkspaceName
-			s.projectRecommendations[canonical.ID] = recommendationIDs
+			s.projectReports[canonical.ID] = reportIDs
 		}
 	}
 

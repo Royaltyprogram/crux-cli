@@ -92,7 +92,7 @@ func TestNewEchoAppliesConfiguredCORSHeaders(t *testing.T) {
 	analyticsSvc := service.NewAnalyticsService(service.Options{
 		Config:                    conf,
 		AnalyticsStore:            store,
-		RecommendationMinSessions: 1,
+		ReportMinSessions: 1,
 	})
 	engine := NewHttpEngine(Options{
 		Router: echo,
@@ -127,7 +127,7 @@ func TestNewEchoRateLimitsAPIWhenConfigured(t *testing.T) {
 	analyticsSvc := service.NewAnalyticsService(service.Options{
 		Config:                    conf,
 		AnalyticsStore:            store,
-		RecommendationMinSessions: 1,
+		ReportMinSessions: 1,
 	})
 	engine := NewHttpEngine(Options{
 		Router: echo,

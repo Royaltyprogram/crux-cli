@@ -25,7 +25,7 @@
 
       <div class="wizard-step wizard-step-center is-active" data-wizard-step="0">
         <div class="wizard-title">Welcome to AgentOpt</div>
-        <div class="wizard-desc">AgentOpt watches how you use your coding agents, then suggests better configurations &mdash; one safe change at a time. Approve it, and we'll measure the impact. If it doesn't help, we roll it back automatically.</div>
+        <div class="wizard-desc">AgentOpt watches how you use your coding agents, then turns those sessions into readable feedback reports about prompt quality, workflow friction, and usage habits.</div>
         <div class="wizard-actions">
           <button class="primary-button" type="button" data-action="wizard-next">Get started</button>
         </div>
@@ -75,7 +75,7 @@
 
       <div class="wizard-step" data-wizard-step="3">
         <div class="wizard-title">Connect a workspace</div>
-        <div class="wizard-desc">Link a local repository so AgentOpt can start observing your workflow and suggesting improvements.</div>
+        <div class="wizard-desc">Link a local repository so AgentOpt can start observing your workflow and generating usage feedback reports.</div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Connect command</span>
@@ -117,14 +117,14 @@
 
       <div class="agent-status-bar" id="agentStatusBar">
         <div class="agent-status-dot"></div>
-        <span id="agentStatusText">Agent is observing your workspace...</span>
+        <span id="agentStatusText">AgentOpt is observing your workspace...</span>
       </div>
 
       <div class="loop-section" id="optimizationLoopSection">
         <div class="section-header">
-          <div class="section-kicker">Optimization loop</div>
-          <div class="section-title">Observe - Suggest - Approve - Measure - Roll back</div>
-          <div class="section-desc" id="loopSummary">AgentOpt watches raw queries, tools, and config snapshots to decide the next safe change.</div>
+          <div class="section-kicker">Feedback loop</div>
+          <div class="section-title">Observe - Analyze - Report - Improve</div>
+          <div class="section-desc" id="loopSummary">AgentOpt watches raw queries, responses, tools, and config snapshots to explain how the agent is being used.</div>
         </div>
         <div class="loop-stage-grid" id="loopStageGrid"></div>
         <div class="loop-focus-card" id="loopFocusCard"></div>
@@ -134,21 +134,21 @@
 
       <div class="lifecycle-section" id="lifecycleSection" data-empty="true">
         <div class="section-header">
-          <div class="section-kicker">Rollout lifecycle</div>
-          <div class="section-title" id="lifecycleTitle">Current change pipeline</div>
-          <div class="section-desc" id="lifecycleDesc">Track the full journey of each optimization from suggestion to outcome.</div>
+          <div class="section-kicker">Report lifecycle</div>
+          <div class="section-title" id="lifecycleTitle">Current observation cycle</div>
+          <div class="section-desc" id="lifecycleDesc">Track where the current feedback cycle stands, from captured sessions to the latest report.</div>
         </div>
         <div class="lifecycle-stepper" id="lifecycleStepper"></div>
         <div class="lifecycle-grid" id="lifecycleGrid"></div>
       </div>
 
-      <!-- ── Active Suggestion (always visible at top) ── -->
+      <!-- ── Active Report (always visible at top) ── -->
 
-      <div class="active-suggestion-section" id="activeSuggestionSection">
+      <div class="active-report-section" id="activeReportSection">
         <div class="section-header">
-          <div class="section-kicker">Active suggestion</div>
-          <div class="section-title">Review and approve</div>
-          <div class="section-desc">The agent found an optimization opportunity. Only one experiment runs at a time, so each approval gets a clean before-and-after measurement.</div>
+          <div class="section-kicker">Latest reports</div>
+          <div class="section-title">Read the current feedback</div>
+          <div class="section-desc">These reports summarize how the agent is being used, where friction shows up, and what to try next. Nothing is auto-applied.</div>
         </div>
         <div class="list" id="actionItemList"></div>
       </div>
@@ -157,9 +157,9 @@
 
       <div class="signals">
         <div class="signal-cell">
-          <div class="signal-cell-label">Suggested changes</div>
-          <div class="signal-cell-value" id="activeRecommendations">0</div>
-          <div class="signal-cell-meta" id="activeRecommendationsMeta">Configuration suggestions from the analysis engine.</div>
+          <div class="signal-cell-label">Feedback reports</div>
+          <div class="signal-cell-value" id="activeReports">0</div>
+          <div class="signal-cell-meta" id="activeReportsMeta">Usage feedback generated from the analysis engine.</div>
         </div>
         <div class="signal-cell">
           <div class="signal-cell-label">Sessions observed</div>
@@ -179,13 +179,12 @@
       </div>
 
       <div class="context-bar" id="overviewNarrative">
-        The agent is collecting enough context to produce its first recommendation.
+        The system is collecting enough context to produce its first feedback report.
       </div>
 
       <nav class="dashboard-nav" aria-label="Dashboard views">
-        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="overview">Change History</button>
+        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="overview">Reports</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="trends">Usage Analytics</button>
-        <button class="tab-button" type="button" data-action="switch-tab" data-tab="rollouts">Applied Changes</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="sessions">Sessions</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="cli">Settings</button>
       </nav>
@@ -195,9 +194,9 @@
       <section class="tab-panel is-active" data-tab-panel="overview">
         <div class="section">
           <div class="section-header">
-            <div class="section-kicker">Impact timeline</div>
-            <div class="section-title">Applied suggestions and their results</div>
-            <div class="section-desc">Each suggestion is tracked after approval. Green means it improved your workflow. Red means it was rolled back.</div>
+            <div class="section-kicker">Report timeline</div>
+            <div class="section-title">Latest workflow feedback</div>
+            <div class="section-desc">Each report captures what the system observed in your recent sessions and what that implies for future usage.</div>
           </div>
           <div class="list" id="impactTimelineList"></div>
         </div>
@@ -217,7 +216,7 @@
             <div class="chart-legend">
               <span class="legend-item"><span class="legend-swatch legend-swatch-input"></span>Input tokens</span>
               <span class="legend-item"><span class="legend-swatch legend-swatch-output"></span>Output tokens</span>
-              <span class="legend-item"><span class="legend-swatch legend-swatch-activity"></span>Change activity</span>
+              <span class="legend-item"><span class="legend-swatch legend-swatch-activity"></span>Report activity</span>
             </div>
             <div class="usage-chart" id="usageTrendChart"></div>
           </div>
@@ -254,7 +253,7 @@
               <div class="section-header compact">
                 <div class="section-kicker">Data coverage</div>
                 <div class="section-title">Fill missing model and latency signals</div>
-                <div class="section-desc" id="coverageActionSummary">Enable the daemon with bootstrap to backfill existing local sessions once, then keep these signals current and auto-apply approved changes.</div>
+                <div class="section-desc" id="coverageActionSummary">Run the collector in watch mode to keep session and snapshot coverage current for the next report refresh.</div>
               </div>
               <div class="command-block">
                 <div class="command-block-head">
@@ -268,7 +267,7 @@
                   <span class="command-label">Bootstrap + keep coverage fresh</span>
                   <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="coverageDaemonCmd" data-copy-label="daemon command">Copy</button>
                 </div>
-                <div class="command-shell" id="coverageDaemonCmd">agentopt daemon enable --bootstrap-recent 10 --collect-interval 30m --sync-interval 15s</div>
+                <div class="command-shell" id="coverageDaemonCmd">agentopt collect --watch --recent 1 --interval 30m</div>
               </div>
             </div>
           </div>
@@ -316,7 +315,7 @@
                   <div class="section-title">Cached and reasoning signals</div>
                   <div class="section-desc" id="tokenDetailSummary">Cached input and reasoning output details appear after the collector uploads raw token breakdowns.</div>
                 </div>
-                <div class="trend-badges rollout-badges" id="tokenDetailList"></div>
+                <div class="trend-badges signal-badges" id="tokenDetailList"></div>
               </div>
 
               <div class="insight-card">
@@ -325,7 +324,7 @@
                   <div class="section-title">Function calls and session span</div>
                   <div class="section-desc" id="toolExecutionSummary">Function call counts, tool failures, and session duration appear after local sessions are re-collected with the expanded collector.</div>
                 </div>
-                <div class="trend-badges rollout-badges" id="toolExecutionList"></div>
+                <div class="trend-badges signal-badges" id="toolExecutionList"></div>
                 <div class="model-bars" id="toolMixList"></div>
               </div>
             </div>
@@ -373,84 +372,6 @@
         </div>
       </section>
 
-      <!-- ── Applied Changes (was Rollouts) ── -->
-
-      <section class="tab-panel" data-tab-panel="rollouts" hidden>
-        <div class="section">
-          <div class="section-header">
-            <div class="section-kicker">Change pipeline</div>
-            <div class="section-title">Applied changes overview</div>
-            <div class="section-desc">Track how many suggestions are waiting, approved, applied, or rolled back.</div>
-          </div>
-          <div class="funnel-grid" id="rolloutFunnel"></div>
-        </div>
-
-        <div class="section collapsible" id="rolloutTempoSection">
-          <div class="section-header section-toggle" data-action="toggle-section" data-target="rolloutTempoSection" role="button" tabindex="0">
-            <div class="section-kicker">Timing</div>
-            <div class="section-title">Approval cadence & recent timeline <span class="toggle-chevron"></span></div>
-            <div class="section-desc">How quickly suggestions move from review to applied, and the most recent change timelines.</div>
-          </div>
-          <div class="section-body">
-            <div class="insight-grid">
-              <div class="insight-card">
-                <div class="section-header compact">
-                  <div class="section-kicker">Cadence</div>
-                  <div class="section-title">Approval and sync timing</div>
-                </div>
-                <div class="trend-badges rollout-badges" id="rolloutPulseSummary"></div>
-              </div>
-
-              <div class="insight-card">
-                <div class="section-header compact">
-                  <div class="section-kicker">Recent path</div>
-                  <div class="section-title">Latest change timeline</div>
-                </div>
-                <div class="rollout-lanes" id="rolloutPulseTimeline"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="section collapsible is-collapsed" id="rolloutImpactSection">
-          <div class="section-header section-toggle" data-action="toggle-section" data-target="rolloutImpactSection" role="button" tabindex="0">
-            <div class="section-kicker">Before / after</div>
-            <div class="section-title">Change impact <span class="toggle-chevron"></span></div>
-            <div class="section-desc">Compare token usage before and after applied changes, with approval and sync timing.</div>
-          </div>
-          <div class="section-body">
-            <div class="list" id="impactList"></div>
-          </div>
-        </div>
-
-        <div class="section collapsible is-collapsed" id="rolloutHistorySection">
-          <div class="section-header section-toggle" data-action="toggle-section" data-target="rolloutHistorySection" role="button" tabindex="0">
-            <div class="section-kicker">History</div>
-            <div class="section-title">Config snapshots & activity <span class="toggle-chevron"></span></div>
-            <div class="section-desc">Settings fingerprints, profile captures, and a condensed event timeline.</div>
-          </div>
-          <div class="section-body">
-            <div class="insight-grid">
-              <div class="insight-card">
-                <div class="section-header compact">
-                  <div class="section-kicker">Config history</div>
-                  <div class="section-title">Recent snapshots</div>
-                </div>
-                <div class="list compact-list" id="snapshotList"></div>
-              </div>
-
-              <div class="insight-card">
-                <div class="section-header compact">
-                  <div class="section-kicker">Activity</div>
-                  <div class="section-title">Recent events</div>
-                </div>
-                <div class="list compact-list" id="activityTimeline"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- ── Sessions ── -->
 
       <section class="tab-panel" data-tab-panel="sessions" hidden>
@@ -458,7 +379,7 @@
           <div class="section-header">
             <div class="section-kicker">Observed sessions</div>
             <div class="section-title">Recent AI usage sessions</div>
-            <div class="section-desc">Raw sessions the agent has observed. These feed into its analysis and suggestions.</div>
+            <div class="section-desc">Raw sessions the agent has observed. These feed into its analysis and feedback reports.</div>
           </div>
           <div class="list" id="sessionSummaryList"></div>
         </div>
@@ -491,6 +412,31 @@
             <div class="section-title">Issued CLI tokens</div>
           </div>
           <div class="list" id="cliTokenList"></div>
+        </div>
+
+        <div class="section">
+          <div class="section-header">
+            <div class="section-kicker">Workspace history</div>
+            <div class="section-title">Config snapshots & recent events</div>
+            <div class="section-desc">Recent profile captures and server-side activity for this shared workspace.</div>
+          </div>
+          <div class="insight-grid">
+            <div class="insight-card">
+              <div class="section-header compact">
+                <div class="section-kicker">Config history</div>
+                <div class="section-title">Recent snapshots</div>
+              </div>
+              <div class="list compact-list" id="snapshotList"></div>
+            </div>
+
+            <div class="insight-card">
+              <div class="section-header compact">
+                <div class="section-kicker">Activity</div>
+                <div class="section-title">Recent events</div>
+              </div>
+              <div class="list compact-list" id="activityTimeline"></div>
+            </div>
+          </div>
         </div>
       </section>
 

@@ -89,6 +89,7 @@ type SessionSummaryReq struct {
 	ModelProvider          string         `json:"model_provider"`
 	FirstResponseLatencyMS int            `json:"first_response_latency_ms"`
 	AssistantResponses     []string       `json:"assistant_responses"`
+	ReasoningSummaries     []string       `json:"reasoning_summaries"`
 	Timestamp              time.Time      `json:"timestamp"`
 }
 
@@ -97,7 +98,7 @@ type SessionSummaryListReq struct {
 	Limit     int    `query:"limit"`
 }
 
-type RecommendationListReq struct {
+type ReportListReq struct {
 	ProjectID string `query:"project_id"`
 }
 
@@ -113,53 +114,7 @@ type ProjectListReq struct {
 	OrgID string `query:"org_id" validate:"required"`
 }
 
-type ApplyHistoryReq struct {
-	ProjectID string `query:"project_id"`
-}
-
-type PendingApplyReq struct {
-	ProjectID string `query:"project_id"`
-	UserID    string `query:"user_id"`
-}
-
-type ChangePlanListReq struct {
-	ProjectID string `query:"project_id"`
-	Status    string `query:"status"`
-	UserID    string `query:"user_id"`
-}
-
-type ExperimentListReq struct {
-	ProjectID string `query:"project_id"`
-}
-
-type ImpactSummaryReq struct {
-	ProjectID string `query:"project_id"`
-}
-
 type AuditListReq struct {
 	OrgID     string `query:"org_id" validate:"required"`
 	ProjectID string `query:"project_id"`
-}
-
-type ApplyRecommendationReq struct {
-	RecommendationID string `json:"recommendation_id" validate:"required"`
-	RequestedBy      string `json:"requested_by" validate:"required"`
-	Scope            string `json:"scope"`
-}
-
-type ReviewChangePlanReq struct {
-	ApplyID    string `json:"apply_id" validate:"required"`
-	Decision   string `json:"decision" validate:"required"`
-	ReviewedBy string `json:"reviewed_by" validate:"required"`
-	ReviewNote string `json:"review_note"`
-}
-
-type ApplyResultReq struct {
-	ApplyID         string         `json:"apply_id" validate:"required"`
-	Success         bool           `json:"success"`
-	Note            string         `json:"note"`
-	AppliedFile     string         `json:"applied_file"`
-	AppliedSettings map[string]any `json:"applied_settings"`
-	AppliedText     string         `json:"applied_text"`
-	RolledBack      bool           `json:"rolled_back"`
 }

@@ -22,7 +22,6 @@ const (
 	defaultResearchSampleSize     = 10
 	defaultResearchRequestTimeout = 45 * time.Second
 	defaultResearchEvidenceLimit  = 5
-	defaultCodexInstructionTarget = "~/.codex/AGENTS.md"
 )
 
 type CloudResearchAgent struct {
@@ -36,47 +35,48 @@ type CloudResearchAgent struct {
 	randSource *rand.Rand
 }
 
-type researchRecommendation struct {
-	Kind            string
-	Title           string
-	Summary         string
-	Reason          string
-	Explanation     string
-	ExpectedBenefit string
-	Risk            string
-	ExpectedImpact  string
-	Score           float64
-	Evidence        []string
-	Steps           []ChangePlanStep
-	Settings        map[string]any
-	RawSuggestion   string
+type researchReport struct {
+	Kind                string
+	Title               string
+	Summary             string
+	UserIntent          string
+	ModelInterpretation string
+	Reason              string
+	Explanation         string
+	ExpectedBenefit     string
+	Risk                string
+	ExpectedImpact      string
+	Confidence          string
+	Strengths           []string
+	Frictions           []string
+	NextSteps           []string
+	Score               float64
+	Evidence            []string
+	RawSuggestion       string
 }
 
-type researchRecommendationPayload struct {
-	Recommendations []json.RawMessage `json:"recommendations"`
+type researchReportPayload struct {
+	SchemaVersion string            `json:"schema_version"`
+	Reports       []json.RawMessage `json:"reports"`
 }
 
-type researchRecommendationItemPayload struct {
-	Kind            string                          `json:"kind"`
-	Title           string                          `json:"title"`
-	Summary         string                          `json:"summary"`
-	Reason          string                          `json:"reason"`
-	Explanation     string                          `json:"explanation"`
-	ExpectedBenefit string                          `json:"expected_benefit"`
-	Risk            string                          `json:"risk"`
-	ExpectedImpact  string                          `json:"expected_impact"`
-	Score           float64                         `json:"score"`
-	Evidence        []string                        `json:"evidence"`
-	ChangePlan      []researchChangePlanStepPayload `json:"change_plan"`
-}
-
-type researchChangePlanStepPayload struct {
-	Type            string         `json:"type"`
-	Action          string         `json:"action"`
-	TargetFile      string         `json:"target_file"`
-	Summary         string         `json:"summary"`
-	SettingsUpdates map[string]any `json:"settings_updates"`
-	ContentPreview  string         `json:"content_preview"`
+type researchReportItemPayload struct {
+	Kind                string   `json:"kind"`
+	Title               string   `json:"title"`
+	Summary             string   `json:"summary"`
+	UserIntent          string   `json:"user_intent"`
+	ModelInterpretation string   `json:"model_interpretation"`
+	Reason              string   `json:"reason"`
+	Explanation         string   `json:"explanation"`
+	ExpectedBenefit     string   `json:"expected_benefit"`
+	Risk                string   `json:"risk"`
+	ExpectedImpact      string   `json:"expected_impact"`
+	Confidence          string   `json:"confidence"`
+	Strengths           []string `json:"strengths"`
+	Frictions           []string `json:"frictions"`
+	NextSteps           []string `json:"next_steps"`
+	Score               float64  `json:"score"`
+	Evidence            []string `json:"evidence"`
 }
 
 type instructionPattern struct {
@@ -106,6 +106,7 @@ type researchInteractionSample struct {
 	Tool               string
 	Queries            []string
 	AssistantResponses []string
+	ReasoningSummaries []string
 }
 
 type researchUsageSummary struct {
@@ -195,7 +196,7 @@ func NewCloudResearchAgentPlaceholder(conf *configs.Config) *CloudResearchAgent 
 	return NewCloudResearchAgent(conf)
 }
 
-func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) ([]researchRecommendation, error) {
+func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) ([]researchReport, error) {
 	_ = snapshots
 
 	rawQueries := collectRawQueries(sessions)
@@ -210,17 +211,17 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 	usageSummary := buildResearchUsageSummary(sessions, rawQueries)
 	sampledQueries := sampleRawQueries(rawQueries, minInt(a.sampleSize, len(rawQueries)), a.randSource)
 	interactionSamples := buildResearchInteractionSamples(sessions, defaultResearchEvidenceLimit)
-	recommendations, err := a.generateRecommendations(project, sampledQueries, interactionSamples, usageSummary)
+	reports, err := a.generateReports(project, sampledQueries, interactionSamples, usageSummary)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(recommendations, func(i, j int) bool {
-		if recommendations[i].Score == recommendations[j].Score {
-			return recommendations[i].Title < recommendations[j].Title
+	sort.Slice(reports, func(i, j int) bool {
+		if reports[i].Score == reports[j].Score {
+			return reports[i].Title < reports[j].Title
 		}
-		return recommendations[i].Score > recommendations[j].Score
+		return reports[i].Score > reports[j].Score
 	})
-	return recommendations, nil
+	return reports, nil
 }
 
 func collectRawQueries(sessions []*SessionSummary) []string {
@@ -237,7 +238,7 @@ func collectRawQueries(sessions []*SessionSummary) []string {
 	return out
 }
 
-func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) ([]researchRecommendation, error) {
+func (a *CloudResearchAgent) generateReports(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) ([]researchReport, error) {
 	if len(sampledQueries) == 0 {
 		return nil, fmt.Errorf("no sampled queries available")
 	}
@@ -245,7 +246,7 @@ func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQu
 	ctx, cancel := context.WithTimeout(context.Background(), defaultResearchRequestTimeout)
 	defer cancel()
 
-	prompt, err := buildRecommendationsPrompt(project, sampledQueries, interactionSamples, usageSummary)
+	prompt, err := buildReportsPrompt(project, sampledQueries, interactionSamples, usageSummary)
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +260,11 @@ func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQu
 	if err != nil {
 		return nil, err
 	}
-	return parseResearchRecommendations(resp.OutputText())
+	return parseResearchReports(resp.OutputText())
 }
 
-func buildRecommendationsPrompt(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (string, error) {
-	return renderResearchAgentRecommendationsPrompt(project, sampledQueries, interactionSamples, usageSummary)
+func buildReportsPrompt(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (string, error) {
+	return renderResearchAgentReportsPrompt(project, sampledQueries, interactionSamples, usageSummary)
 }
 
 func sampleRawQueries(queries []string, limit int, rng *rand.Rand) []string {
@@ -283,60 +284,50 @@ func sampleRawQueries(queries []string, limit int, rng *rand.Rand) []string {
 	return append([]string(nil), pool[:limit]...)
 }
 
-func parseResearchRecommendations(raw string) ([]researchRecommendation, error) {
+func parseResearchReports(raw string) ([]researchReport, error) {
 	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.TrimPrefix(cleaned, "```json")
 	cleaned = strings.TrimPrefix(cleaned, "```")
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	cleaned = strings.TrimSpace(cleaned)
 
-	var payload researchRecommendationPayload
+	var payload researchReportPayload
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return nil, err
 	}
+	if payload.SchemaVersion != "" && payload.SchemaVersion != reportFeedbackSchemaVersion {
+		return nil, fmt.Errorf("unsupported report feedback schema_version %q", payload.SchemaVersion)
+	}
 
-	items := make([]researchRecommendation, 0, len(payload.Recommendations))
-	for _, rawItem := range payload.Recommendations {
-		var item researchRecommendationItemPayload
+	rawItems := payload.Reports
+	items := make([]researchReport, 0, len(rawItems))
+	for _, rawItem := range rawItems {
+		var item researchReportItemPayload
 		if err := json.Unmarshal(rawItem, &item); err != nil {
 			continue
 		}
-		rec, ok := sanitizeResearchRecommendation(item, formatResearchSuggestion(rawItem))
+		rec, ok := sanitizeResearchReport(item, formatResearchSuggestion(rawItem))
 		if ok {
 			items = append(items, rec)
 		}
 	}
 	if len(items) == 0 {
-		return nil, fmt.Errorf("no valid recommendations returned")
+		return nil, fmt.Errorf("no valid reports returned")
 	}
 	return items, nil
 }
 
-func sanitizeResearchRecommendation(item researchRecommendationItemPayload, rawSuggestion string) (researchRecommendation, bool) {
-	steps := make([]ChangePlanStep, 0, len(item.ChangePlan))
-	for _, step := range item.ChangePlan {
-		if strings.TrimSpace(step.Action) == "" || strings.TrimSpace(step.TargetFile) == "" {
-			continue
-		}
-		steps = append(steps, ChangePlanStep{
-			Type:            strings.TrimSpace(step.Type),
-			Action:          strings.TrimSpace(step.Action),
-			TargetFile:      strings.TrimSpace(step.TargetFile),
-			Summary:         strings.TrimSpace(step.Summary),
-			SettingsUpdates: cloneAnyMap(step.SettingsUpdates),
-			ContentPreview:  strings.TrimSpace(step.ContentPreview),
-		})
-	}
-	if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Summary) == "" || len(steps) == 0 {
-		return researchRecommendation{}, false
+func sanitizeResearchReport(item researchReportItemPayload, rawSuggestion string) (researchReport, bool) {
+	if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Summary) == "" {
+		return researchReport{}, false
 	}
 
-	kind := sanitizeResearchRecommendationID(strings.TrimSpace(item.Kind))
+	kind := sanitizeResearchReportID(strings.TrimSpace(item.Kind))
 	if kind == "" {
-		kind = sanitizeResearchRecommendationID(strings.TrimSpace(item.Title))
+		kind = sanitizeResearchReportID(strings.TrimSpace(item.Title))
 	}
 	if kind == "" {
-		kind = "llm-generated-recommendation"
+		kind = "llm-generated-report"
 	}
 
 	score := item.Score
@@ -356,20 +347,52 @@ func sanitizeResearchRecommendation(item researchRecommendationItemPayload, rawS
 		evidence = append(evidence, entry)
 	}
 
-	return researchRecommendation{
-		Kind:            kind,
-		Title:           strings.TrimSpace(item.Title),
-		Summary:         strings.TrimSpace(item.Summary),
-		Reason:          strings.TrimSpace(item.Reason),
-		Explanation:     strings.TrimSpace(item.Explanation),
-		ExpectedBenefit: strings.TrimSpace(item.ExpectedBenefit),
-		Risk:            strings.TrimSpace(item.Risk),
-		ExpectedImpact:  strings.TrimSpace(item.ExpectedImpact),
-		Score:           round(score),
-		Evidence:        evidence,
-		Steps:           steps,
-		RawSuggestion:   strings.TrimSpace(rawSuggestion),
+	strengths := sanitizeShortList(item.Strengths)
+	frictions := sanitizeShortList(item.Frictions)
+	nextSteps := sanitizeShortList(item.NextSteps)
+
+	return researchReport{
+		Kind:                kind,
+		Title:               strings.TrimSpace(item.Title),
+		Summary:             strings.TrimSpace(item.Summary),
+		UserIntent:          strings.TrimSpace(item.UserIntent),
+		ModelInterpretation: strings.TrimSpace(item.ModelInterpretation),
+		Reason:              strings.TrimSpace(item.Reason),
+		Explanation:         strings.TrimSpace(item.Explanation),
+		ExpectedBenefit:     strings.TrimSpace(item.ExpectedBenefit),
+		Risk:                strings.TrimSpace(item.Risk),
+		ExpectedImpact:      strings.TrimSpace(item.ExpectedImpact),
+		Confidence:          normalizeResearchConfidence(item.Confidence),
+		Strengths:           strengths,
+		Frictions:           frictions,
+		NextSteps:           nextSteps,
+		Score:               round(score),
+		Evidence:            evidence,
+		RawSuggestion:       strings.TrimSpace(rawSuggestion),
 	}, true
+}
+
+func sanitizeShortList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeResearchConfidence(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "high":
+		return "high"
+	case "medium":
+		return "medium"
+	default:
+		return "low"
+	}
 }
 
 func formatResearchSuggestion(raw json.RawMessage) string {
@@ -384,7 +407,7 @@ func formatResearchSuggestion(raw json.RawMessage) string {
 	return buf.String()
 }
 
-func sanitizeResearchRecommendationID(raw string) string {
+func sanitizeResearchReportID(raw string) string {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if raw == "" {
 		return ""
@@ -626,7 +649,9 @@ func buildResearchInteractionSamples(sessions []*SessionSummary, limit int) []re
 			}
 		}
 
-		if len(queries) == 0 && len(responses) == 0 {
+		reasoningSummaries := selectReasoningSummariesForResearch(session.ReasoningSummaries, 2)
+
+		if len(queries) == 0 && len(responses) == 0 && len(reasoningSummaries) == 0 {
 			continue
 		}
 
@@ -635,10 +660,67 @@ func buildResearchInteractionSamples(sessions []*SessionSummary, limit int) []re
 			Tool:               firstNonEmptyString(strings.TrimSpace(session.Tool), "unknown"),
 			Queries:            append([]string(nil), queries...),
 			AssistantResponses: responses,
+			ReasoningSummaries: reasoningSummaries,
 		})
 		if len(items) >= limit {
 			break
 		}
 	}
 	return items
+}
+
+func selectReasoningSummariesForResearch(values []string, limit int) []string {
+	if limit <= 0 || len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, minInt(limit, len(values)))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || isLowSignalReasoningSummary(value) {
+			continue
+		}
+		out = append(out, value)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func isLowSignalReasoningSummary(raw string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized = strings.NewReplacer(
+		"\r\n", " ",
+		"\n", " ",
+		"\t", " ",
+		"*", " ",
+		"`", " ",
+		"_", " ",
+	).Replace(normalized)
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	if normalized == "" {
+		return true
+	}
+
+	lowSignalPatterns := [][]string{
+		{"agents", "instruction"},
+		{"system", "instruction"},
+		{"approval", "policy"},
+		{"sandbox"},
+		{"preamble"},
+		{"output", "limit"},
+	}
+	for _, pattern := range lowSignalPatterns {
+		matched := true
+		for _, term := range pattern {
+			if !strings.Contains(normalized, term) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }

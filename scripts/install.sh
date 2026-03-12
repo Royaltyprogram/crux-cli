@@ -329,7 +329,6 @@ EXTRACT_DIR="$TMPDIR_WORK/extract"
 mkdir -p "$EXTRACT_DIR"
 BUNDLE_DIR="$(extract_archive_dir "$ARCHIVE_PATH" "$EXTRACT_DIR")"
 [ -x "$BUNDLE_DIR/agentopt" ] || die "bundle is missing agentopt executable"
-[ -f "$BUNDLE_DIR/tools/codex-runner/run.mjs" ] || die "bundle is missing tools/codex-runner/run.mjs"
 
 VERSION_DIR="$INSTALL_ROOT/$VERSION"
 CURRENT_LINK="$INSTALL_ROOT/current"
@@ -354,7 +353,7 @@ if [ -x "$LOCAL_NODE_BIN/node" ]; then
 elif command -v node >/dev/null 2>&1; then
   say "agentopt will use system Node.js $(node --version)"
 else
-  say "node runtime not found; local sync/apply commands require Node.js"
+  say "node runtime not found; install it manually only if you need other Node-based tooling"
 fi
 if ! command -v agentopt >/dev/null 2>&1; then
   case ":$PATH:" in

@@ -4,14 +4,14 @@ const STORAGE_KEYS = {
   activeTab: "agentopt_dashboard_tab",
   onboardingDone: "agentopt_onboarding_done",
 };
-const TAB_IDS = ["overview", "trends", "rollouts", "sessions", "cli"];
+const TAB_IDS = ["overview", "trends", "sessions", "cli"];
 const WIZARD_STEPS = 4;
 
 const state = {
   busy: false,
   activeTab: "overview",
   selectedProjectID: "",
-  recommendationIndex: new Map(),
+  reportIndex: new Map(),
   session: null,
   wizardStep: 0,
   sessionItems: [],
@@ -172,46 +172,32 @@ function renderSessionContext() {
   $("topBarOrg").textContent = org.name || org.id || "-";
 }
 
-function renderAgentStatus(overview, recommendations, applyItems, experiments) {
+function renderAgentStatus(overview, reports) {
   const bar = $("agentStatusBar");
   const text = $("agentStatusText");
-  const activeRecs = Number(overview.active_recommendations || 0);
+  const activeReports = Number(overview.active_reports || 0);
   const totalSessions = Number(overview.total_sessions || 0);
   const research = overview && overview.research_status;
   const researchState = String((research && research.state) || "")
     .trim()
     .toLowerCase();
-  const experimentItems = toArray(experiments);
-  const measuringCount = experimentItems.filter(
-    (item) => String(item.status || "").toLowerCase() === "measuring",
-  ).length;
-  const rollbackCount = experimentItems.filter(
-    (item) => String(item.status || "").toLowerCase() === "rollback_requested",
-  ).length;
-
-  if (rollbackCount > 0) {
-    bar.dataset.state = "suggestion";
-    text.textContent = `Rollback requested — ${rollbackCount} experiment${rollbackCount > 1 ? "s" : ""} will restore the previous config on the next sync`;
-  } else if (researchState === "running") {
-    bar.dataset.state = "suggestion";
+  if (researchState === "running") {
+    bar.dataset.state = "report";
     text.textContent =
-      recommendationResearchNarrative(research) ||
-      "Waiting for the suggestion while uploaded sessions are analyzed";
-  } else if (activeRecs > 0) {
-    bar.dataset.state = "suggestion";
-    text.textContent = `Suggestion ready \u2014 ${activeRecs} optimization${activeRecs > 1 ? "s" : ""} awaiting your review`;
-  } else if (measuringCount > 0) {
-    bar.dataset.state = "measuring";
-    text.textContent = `Measuring impact of ${measuringCount} applied change${measuringCount > 1 ? "s" : ""} \u2014 collecting post-apply sessions`;
+      reportResearchNarrative(research) ||
+      "Analyzing uploaded sessions to build the next feedback report";
+  } else if (activeReports > 0) {
+    bar.dataset.state = "report";
+    text.textContent = `Feedback ready \u2014 ${activeReports} report${activeReports > 1 ? "s" : ""} available to review`;
   } else if (
     researchState === "waiting_for_min_sessions" ||
     researchState === "disabled" ||
     researchState === "failed" ||
-    researchState === "no_recommendations"
+    researchState === "no_reports"
   ) {
     bar.dataset.state = "";
     text.textContent =
-      recommendationResearchNarrative(research) ||
+      reportResearchNarrative(research) ||
       `Observing \u2014 analyzed ${totalSessions} session${totalSessions > 1 ? "s" : ""}`;
   } else if (totalSessions === 0) {
     bar.dataset.state = "";
@@ -219,7 +205,7 @@ function renderAgentStatus(overview, recommendations, applyItems, experiments) {
       "Waiting for sessions \u2014 connect a workspace to start observing";
   } else {
     bar.dataset.state = "";
-    text.textContent = `Observing \u2014 analyzed ${totalSessions} session${totalSessions > 1 ? "s" : ""}, researching patterns`;
+    text.textContent = `Observing \u2014 analyzed ${totalSessions} session${totalSessions > 1 ? "s" : ""}, researching usage patterns`;
   }
 }
 
@@ -594,20 +580,6 @@ function tokenTone(status) {
   return "sky";
 }
 
-function applyTone(status) {
-  const raw = String(status || "").toLowerCase();
-  if (raw === "applied") {
-    return "good";
-  }
-  if (raw === "rollback_confirmed" || raw === "failed" || raw === "rejected") {
-    return "danger";
-  }
-  if (raw === "approved_for_local_apply" || raw === "awaiting_review") {
-    return "warn";
-  }
-  return "sky";
-}
-
 function impactDeltaTone(value) {
   const numeric = Number(value || 0);
   if (numeric < 0) {
@@ -746,148 +718,139 @@ function stepSummary(step) {
   return "Update workspace configuration";
 }
 
-function recommendationPlanSummary(item) {
-  const steps = toArray(item.change_plan);
-  if (!steps.length) {
-    return "One settings update is ready to review.";
+function reportSummaryLine(item) {
+  const frictions = toArray(item.frictions).filter(Boolean);
+  const nextSteps = toArray(item.next_steps).filter(Boolean);
+  if (frictions.length > 0) {
+    return frictions[0];
   }
-  if (steps.length === 1) {
-    return stepSummary(steps[0]);
+  if (nextSteps.length > 0) {
+    return nextSteps[0];
   }
-  return `${steps.length} coordinated updates will be applied together.`;
+  return "A workflow feedback report is ready to review.";
 }
 
-function patchPreviewSummary(items) {
-  const steps = toArray(items);
-  if (!steps.length) {
-    return "One reviewed update is queued for this workspace.";
-  }
-  if (steps.length === 1) {
-    return stepSummary(steps[0]);
-  }
-  return `${steps.length} reviewed updates will land together.`;
-}
-
-function recommendationTitle(recommendationID) {
-  const recommendation = state.recommendationIndex.get(recommendationID);
-  return recommendation ? recommendation.title : "Configuration update";
-}
-
-function recommendationSummary(recommendationID) {
-  const recommendation = state.recommendationIndex.get(recommendationID);
-  return recommendation
-    ? recommendation.summary
-    : "A reviewed configuration update for this workspace.";
-}
-
-function recommendationKind(recommendationID) {
-  const recommendation = state.recommendationIndex.get(recommendationID);
-  return recommendation ? String(recommendation.kind || "").trim() : "";
-}
-
-function recommendationRawSuggestion(recommendationID) {
-  const recommendation = state.recommendationIndex.get(recommendationID);
-  return recommendation
-    ? String(recommendation.raw_suggestion || "").trim()
-    : "";
-}
-
-function rawSuggestionBlock(rawSuggestion) {
-  const text = String(rawSuggestion || "").trim();
+function rawReportOutputBlock(rawOutput) {
+  const text = String(rawOutput || "").trim();
   if (!text) {
     return "";
   }
   return `
-        <details class="raw-suggestion">
-          <summary>LLM raw suggestion</summary>
+        <details class="report-raw-output">
+          <summary>LLM raw output</summary>
           <pre>${escapeHTML(text)}</pre>
         </details>
       `;
 }
 
-function suggestionDetailsBlock(item) {
+function reportDetailsBlock(item) {
   const sections = [];
 
+  const userIntent = String(item.user_intent || "").trim();
+  const modelInterpretation = String(item.model_interpretation || "").trim();
   const reason = String(item.reason || "").trim();
   const explanation = String(item.explanation || "").trim();
   const expectedBenefit = String(item.expected_benefit || "").trim();
   const risk = String(item.risk || "").trim();
   const expectedImpact = String(item.expected_impact || "").trim();
+  const confidence = String(item.confidence || "").trim();
   const score = Number(item.score || 0);
   const evidence = toArray(item.evidence).filter(Boolean);
-  const changePlan = toArray(item.change_plan);
-  const rawSuggestion = String(item.raw_suggestion || "").trim();
+  const strengths = toArray(item.strengths).filter(Boolean);
+  const frictions = toArray(item.frictions).filter(Boolean);
+  const nextSteps = toArray(item.next_steps).filter(Boolean);
+  const rawOutput = String(item.raw_suggestion || "").trim();
 
-  const hasContent = reason || explanation || expectedBenefit || evidence.length || changePlan.length;
-  if (!hasContent && !rawSuggestion) {
+  const hasContent =
+    userIntent ||
+    modelInterpretation ||
+    reason ||
+    explanation ||
+    risk ||
+    expectedBenefit ||
+    expectedImpact ||
+    evidence.length ||
+    strengths.length ||
+    frictions.length ||
+    nextSteps.length;
+  if (!hasContent && !rawOutput) {
     return "";
   }
 
-  if (reason || explanation || expectedBenefit || risk || expectedImpact || score > 0) {
+  if (
+    userIntent ||
+    modelInterpretation ||
+    reason ||
+    explanation ||
+    expectedBenefit ||
+    risk ||
+    expectedImpact ||
+    confidence ||
+    score > 0
+  ) {
     const metricsHTML = [];
     if (score > 0) {
       const pct = Math.round(score * 100);
-      metricsHTML.push(`<span class="suggestion-metric">Score <span class="suggestion-score-track"><span class="suggestion-score-fill" style="width:${pct}%"></span></span> ${pct}%</span>`);
+      metricsHTML.push(`<span class="report-metric">Score <span class="report-score-track"><span class="report-score-fill" style="width:${pct}%"></span></span> ${pct}%</span>`);
     }
     if (expectedImpact) {
-      metricsHTML.push(`<span class="suggestion-metric">${escapeHTML(expectedImpact)}</span>`);
+      metricsHTML.push(`<span class="report-metric">${escapeHTML(expectedImpact)}</span>`);
+    }
+    if (confidence) {
+      metricsHTML.push(`<span class="report-metric">Confidence: ${escapeHTML(titleize(confidence))}</span>`);
     }
     if (risk) {
-      metricsHTML.push(`<span class="suggestion-metric">Risk: ${escapeHTML(risk)}</span>`);
+      metricsHTML.push(`<span class="report-metric">${escapeHTML(risk)}</span>`);
     }
     if (metricsHTML.length) {
-      sections.push(`<div class="suggestion-metrics-row">${metricsHTML.join("")}</div>`);
+      sections.push(`<div class="report-metrics-row">${metricsHTML.join("")}</div>`);
     }
 
+    if (userIntent) {
+      sections.push(`<div class="report-field"><div class="report-field-label">User intent</div><div class="report-field-value">${escapeHTML(userIntent)}</div></div>`);
+    }
+    if (modelInterpretation) {
+      sections.push(`<div class="report-field"><div class="report-field-label">Model interpretation</div><div class="report-field-value">${escapeHTML(modelInterpretation)}</div></div>`);
+    }
     if (reason) {
-      sections.push(`<div class="suggestion-field"><div class="suggestion-field-label">Reason</div><div class="suggestion-field-value">${escapeHTML(reason)}</div></div>`);
+      sections.push(`<div class="report-field"><div class="report-field-label">Reason</div><div class="report-field-value">${escapeHTML(reason)}</div></div>`);
     }
     if (explanation) {
-      sections.push(`<div class="suggestion-field"><div class="suggestion-field-label">Explanation</div><div class="suggestion-field-value">${escapeHTML(explanation)}</div></div>`);
+      sections.push(`<div class="report-field"><div class="report-field-label">Explanation</div><div class="report-field-value">${escapeHTML(explanation)}</div></div>`);
     }
     if (expectedBenefit) {
-      sections.push(`<div class="suggestion-field"><div class="suggestion-field-label">Expected benefit</div><div class="suggestion-field-value">${escapeHTML(expectedBenefit)}</div></div>`);
+      sections.push(`<div class="report-field"><div class="report-field-label">Expected benefit</div><div class="report-field-value">${escapeHTML(expectedBenefit)}</div></div>`);
     }
+  }
+
+  if (strengths.length) {
+    const items = strengths
+      .map((entry) => `<div class="report-evidence-item">${escapeHTML(entry)}</div>`)
+      .join("");
+    sections.push(`<div class="report-field"><div class="report-field-label">Strengths</div><div class="report-evidence-list">${items}</div></div>`);
+  }
+
+  if (frictions.length) {
+    const items = frictions
+      .map((entry) => `<div class="report-evidence-item">${escapeHTML(entry)}</div>`)
+      .join("");
+    sections.push(`<div class="report-field"><div class="report-field-label">Friction points</div><div class="report-evidence-list">${items}</div></div>`);
+  }
+
+  if (nextSteps.length) {
+    const items = nextSteps
+      .map((entry) => `<div class="report-evidence-item">${escapeHTML(entry)}</div>`)
+      .join("");
+    sections.push(`<div class="report-field"><div class="report-field-label">What to try next</div><div class="report-evidence-list">${items}</div></div>`);
   }
 
   if (evidence.length) {
-    const evidenceItems = evidence.map((e) => `<div class="suggestion-evidence-item">${escapeHTML(e)}</div>`).join("");
-    sections.push(`<div class="suggestion-field"><div class="suggestion-field-label">Evidence (${evidence.length})</div><div class="suggestion-evidence-list">${evidenceItems}</div></div>`);
+    const evidenceItems = evidence.map((e) => `<div class="report-evidence-item">${escapeHTML(e)}</div>`).join("");
+    sections.push(`<div class="report-field"><div class="report-field-label">Evidence (${evidence.length})</div><div class="report-evidence-list">${evidenceItems}</div></div>`);
   }
 
-  if (changePlan.length) {
-    const planSteps = changePlan.map((step) => {
-      const stepType = String(step.type || step.action || "").trim();
-      const stepFile = String(step.target_file || step.file_path || "").trim();
-      const stepSummaryText = String(step.summary || "").trim();
-      const stepPreview = String(step.content_preview || "").trim();
-
-      let headerHTML = "";
-      if (stepType) {
-        headerHTML += `<span class="suggestion-plan-step-type">${escapeHTML(stepType)}</span>`;
-      }
-      if (stepFile) {
-        headerHTML += `<span class="suggestion-plan-step-file">${escapeHTML(stepFile)}</span>`;
-      }
-
-      let stepHTML = "";
-      if (headerHTML) {
-        stepHTML += `<div class="suggestion-plan-step-header">${headerHTML}</div>`;
-      }
-      if (stepSummaryText) {
-        stepHTML += `<div class="suggestion-plan-step-summary">${escapeHTML(stepSummaryText)}</div>`;
-      }
-      if (stepPreview) {
-        stepHTML += `<div class="suggestion-plan-step-preview">${escapeHTML(stepPreview)}</div>`;
-      }
-
-      return `<div class="suggestion-plan-step">${stepHTML}</div>`;
-    }).join("");
-    sections.push(`<div class="suggestion-field"><div class="suggestion-field-label">Change plan (${changePlan.length} step${changePlan.length > 1 ? "s" : ""})</div><div class="suggestion-change-plan">${planSteps}</div></div>`);
-  }
-
-  if (rawSuggestion) {
-    sections.push(rawSuggestionBlock(rawSuggestion));
+  if (rawOutput) {
+    sections.push(rawReportOutputBlock(rawOutput));
   }
 
   if (!sections.length) {
@@ -895,31 +858,31 @@ function suggestionDetailsBlock(item) {
   }
 
   return `
-    <div class="suggestion-detail">
-      <button class="suggestion-detail-toggle" type="button" data-action="toggle-suggestion-detail"><span class="toggle-icon">&#9654;</span> View full suggestion details</button>
-      <div class="suggestion-detail-body">${sections.join("")}</div>
+    <div class="report-detail">
+      <button class="report-detail-toggle" type="button" data-action="toggle-report-detail"><span class="toggle-icon">&#9654;</span> View full report details</button>
+      <div class="report-detail-body">${sections.join("")}</div>
     </div>
   `;
 }
 
-function recommendationKindLabel(kind) {
+function reportKindLabel(kind) {
   const value = String(kind || "").toLowerCase();
   if (value.includes("instruction")) {
-    return "Custom instruction";
+    return "Prompt pattern";
   }
   if (value.includes("skill")) {
-    return "Codex skill";
+    return "Skill usage";
   }
   if (value.includes("mcp")) {
-    return "MCP baseline";
+    return "Tooling signal";
   }
   if (value.includes("config")) {
-    return "Agent config";
+    return "Config signal";
   }
-  return "Suggestion";
+  return "Report";
 }
 
-function recommendationKindTone(kind) {
+function reportKindTone(kind) {
   const value = String(kind || "").toLowerCase();
   if (value.includes("instruction")) {
     return "warn";
@@ -932,28 +895,6 @@ function recommendationKindTone(kind) {
   }
   if (value.includes("config")) {
     return "good";
-  }
-  return "sky";
-}
-
-function experimentTone(status) {
-  const value = String(status || "").toLowerCase();
-  if (value === "completed" || value === "rolled_back") {
-    return "good";
-  }
-  if (
-    value === "rollback_requested" ||
-    value === "rollback_failed" ||
-    value === "failed"
-  ) {
-    return "danger";
-  }
-  if (
-    value === "measuring" ||
-    value === "awaiting_review" ||
-    value === "queued_for_apply"
-  ) {
-    return "warn";
   }
   return "sky";
 }
@@ -974,7 +915,7 @@ function tokenSummary(item) {
 function workloadNarrative(overview) {
   const action = String(overview.action_summary || "").trim();
   const outcome = String(overview.outcome_summary || "").trim();
-  const research = recommendationResearchNarrative(
+  const research = reportResearchNarrative(
     overview && overview.research_status,
   );
   const input = Number(overview.avg_input_tokens_per_query || 0);
@@ -988,11 +929,11 @@ function workloadNarrative(overview) {
   const combined = `${action} ${outcome} ${research}${tokenRead}`.trim();
   return (
     combined ||
-    "AgentOpt is collecting enough setup and session context to produce steadier recommendations."
+    "AgentOpt is collecting enough setup and session context to produce steadier feedback reports."
   );
 }
 
-function recommendationResearchNarrative(status) {
+function reportResearchNarrative(status) {
   const item = status || {};
   const state = String(item.state || "").trim().toLowerCase();
   const summary = String(item.summary || "").trim();
@@ -1000,22 +941,25 @@ function recommendationResearchNarrative(status) {
     return summary;
   }
   if (state === "waiting_for_min_sessions") {
-    return `Recommendation research starts after ${formatCount(item.minimum_sessions || 0)} sessions.`;
+    return `Feedback analysis starts after ${formatCount(item.minimum_sessions || 0)} sessions.`;
   }
   if (state === "disabled") {
-    return "OpenAI-backed recommendation research is disabled on this server.";
+    return "OpenAI-backed feedback analysis is disabled on this server.";
   }
   if (state === "running") {
-    return "Waiting for the suggestion while the server analyzes uploaded sessions.";
+    return "Preparing the next feedback report while the server analyzes uploaded sessions.";
   }
-  if (state === "succeeded" || state === "no_recommendations") {
+  if (
+    state === "succeeded" ||
+    state === "no_reports"
+  ) {
     const duration = Number(item.last_duration_ms || 0);
     return duration > 0
-      ? `The last recommendation refresh took ${formatLatency(duration)}.`
-      : "The last recommendation refresh finished recently.";
+      ? `The last report refresh took ${formatLatency(duration)}.`
+      : "The last report refresh finished recently.";
   }
   if (state === "failed") {
-    return "The last recommendation refresh failed.";
+    return "The last report refresh failed.";
   }
   return "";
 }
@@ -1187,6 +1131,12 @@ function sessionFullResponses(item) {
     .filter(Boolean);
 }
 
+function sessionFullReasoningSummaries(item) {
+  return toArray(item.reasoning_summaries)
+    .map((v) => normalizeInlineText(v))
+    .filter(Boolean);
+}
+
 function isPromptTruncated(item) {
   const primary = sessionPrimaryRequest(item);
   return primary.length > 84 || toArray(item.raw_queries).length > 1;
@@ -1259,10 +1209,32 @@ function showFullResponse(sessionIndex) {
   );
 }
 
+function showFullReasoning(sessionIndex) {
+  const item = state.sessionItems[sessionIndex];
+  if (!item) {
+    return;
+  }
+  const summaries = sessionFullReasoningSummaries(item);
+  const bodyHTML = summaries
+    .map((text, i) => {
+      const label =
+        summaries.length === 1
+          ? "Reasoning summary"
+          : `Reasoning summary ${i + 1} of ${summaries.length}`;
+      return `<span class="full-text-section-label">${escapeHTML(label)}</span><div class="full-text-block">${escapeHTML(text)}</div>`;
+    })
+    .join("");
+  openFullTextModal(
+    "Reasoning summaries",
+    `<p><em>These are summary-level reasoning hints captured from local Codex logs. Full reasoning traces are not available here.</em></p>${bodyHTML || "<em>No reasoning summaries captured.</em>"}`,
+  );
+}
+
 function sessionSummaryLines(item) {
   const queries = toArray(item.raw_queries);
   const engineSummary = sessionEngineSummary(item);
   const latestReply = sessionLatestReply(item);
+  const reasoningSummaries = sessionFullReasoningSummaries(item);
   const followUps = sessionFollowUps(item);
   const inputTokens = Number(item.token_in || 0);
   const outputTokens = Number(item.token_out || 0);
@@ -1330,6 +1302,14 @@ function sessionSummaryLines(item) {
   if (toolWallTimeSummary) {
     lines.push(`Tool runtime: ${toolWallTimeSummary}.`);
   }
+  if (reasoningSummaries.length > 0) {
+    lines.push(
+      `Captured ${formatCount(reasoningSummaries.length)} reasoning ${reasoningSummaries.length === 1 ? "summary" : "summaries"} from the model.`,
+    );
+    lines.push(
+      `Latest reasoning summary: ${truncateText(reasoningSummaries[reasoningSummaries.length - 1], 160)}`,
+    );
+  }
   if (followUps.length > 0) {
     lines.push(
       `Latest follow-up: ${truncateText(followUps[followUps.length - 1], 160)}`,
@@ -1351,11 +1331,11 @@ function sessionSummaryLines(item) {
   }
   if (queries.length >= 2) {
     lines.push(
-      "Repeated phrasing here can be turned into a shared instruction block.",
+      "Repeated phrasing here may belong in a reusable prompt template or workspace note.",
     );
   } else {
     lines.push(
-      "More raw queries will make the next instruction suggestion more specific.",
+      "More raw queries will make the next feedback report more specific.",
     );
   }
 
@@ -1851,118 +1831,6 @@ function heavySessions(items) {
     .slice(0, 5);
 }
 
-function recentRolloutCounts(recommendations, reviewQueue, applyItems) {
-  return {
-    activeSuggestions: recommendations.filter(
-      (item) => String(item.status || "").toLowerCase() === "active",
-    ).length,
-    awaitingReview: reviewQueue.length,
-    readyForSync: applyItems.filter(
-      (item) =>
-        String(item.status || "").toLowerCase() === "approved_for_local_apply",
-    ).length,
-    applied: applyItems.filter(
-      (item) => String(item.status || "").toLowerCase() === "applied",
-    ).length,
-    rolledBack: applyItems.filter(
-      (item) =>
-        item.rolled_back ||
-        String(item.status || "").toLowerCase() === "rollback_confirmed",
-    ).length,
-    rejected: applyItems.filter(
-      (item) => String(item.status || "").toLowerCase() === "rejected",
-    ).length,
-  };
-}
-
-function average(values) {
-  if (!values.length) {
-    return null;
-  }
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function rolloutPulseStats(applyItems) {
-  const approvalMinutes = [];
-  const syncMinutes = [];
-  const leadMinutes = [];
-  let rollbackCount = 0;
-  let completedCount = 0;
-
-  applyItems.forEach((item) => {
-    const status = String(item.status || "").toLowerCase();
-    const approval = minutesBetween(item.requested_at, item.reviewed_at);
-    const sync = minutesBetween(
-      item.reviewed_at || item.requested_at,
-      item.applied_at,
-    );
-    const lead = minutesBetween(item.requested_at, item.applied_at);
-    if (approval != null) {
-      approvalMinutes.push(approval);
-    }
-    if (sync != null) {
-      syncMinutes.push(sync);
-    }
-    if (lead != null) {
-      leadMinutes.push(lead);
-    }
-    if (
-      status === "applied" ||
-      status === "rollback_confirmed" ||
-      item.rolled_back
-    ) {
-      completedCount++;
-    }
-    if (status === "rollback_confirmed" || item.rolled_back) {
-      rollbackCount++;
-    }
-  });
-
-  return {
-    avgApprovalMinutes: average(approvalMinutes),
-    avgSyncMinutes: average(syncMinutes),
-    avgLeadMinutes: average(leadMinutes),
-    rollbackRate: completedCount ? rollbackCount / completedCount : 0,
-    completedCount,
-  };
-}
-
-function rolloutReviewStageTone(item) {
-  const status = String(item.status || "").toLowerCase();
-  if (item.reviewed_at) {
-    if (
-      String(item.decision || "").toLowerCase() === "reject" ||
-      status === "rejected"
-    ) {
-      return "danger";
-    }
-    return "done";
-  }
-  if (status === "awaiting_review") {
-    return "warn";
-  }
-  return "pending";
-}
-
-function rolloutApplyStageTone(item) {
-  const status = String(item.status || "").toLowerCase();
-  if (status === "applied") {
-    return "done";
-  }
-  if (
-    status === "rollback_confirmed" ||
-    status === "failed" ||
-    status === "rejected" ||
-    item.rolled_back
-  ) {
-    return "danger";
-  }
-  if (status === "approved_for_local_apply") {
-    return "warn";
-  }
-  return "pending";
-}
-
 function auditTitle(item) {
   const type = String(item.type || "");
   if (type === "execution.result" && item.message) {
@@ -1974,12 +1842,12 @@ function auditTitle(item) {
 /* ── Render ── */
 
 function renderOverview(overview) {
-  const activeRecs = Number(overview.active_recommendations || 0);
+  const activeReports = Number(overview.active_reports || 0);
   const research = overview && overview.research_status;
   const researchState = String((research && research.state) || "")
     .trim()
     .toLowerCase();
-  $("activeRecommendations").textContent = formatCount(activeRecs);
+  $("activeReports").textContent = formatCount(activeReports);
   $("totalSessions").textContent = formatCount(overview.total_sessions);
   $("avgInputTokensPerQuery").textContent = formatCount(
     Math.round(Number(overview.avg_input_tokens_per_query || 0)),
@@ -1990,16 +1858,16 @@ function renderOverview(overview) {
 
   const totalSessions = Number(overview.total_sessions || 0);
 
-  $("activeRecommendationsMeta").textContent =
-    activeRecs === 0
-      ? recommendationResearchNarrative(research) ||
-        "No suggestions yet. Upload more sessions to generate recommendations."
-      : `${formatCount(activeRecs)} configuration suggestion(s) from the analysis engine.`;
+  $("activeReportsMeta").textContent =
+    activeReports === 0
+      ? reportResearchNarrative(research) ||
+        "No reports yet. Upload more sessions to generate workflow feedback."
+      : `${formatCount(activeReports)} feedback report(s) from the analysis engine.`;
   $("totalSessionsMeta").textContent =
     totalSessions === 0
       ? "Upload sessions from the CLI to start tracking AI usage."
       : researchState === "waiting_for_min_sessions"
-        ? `${formatCount(totalSessions)} AI usage session(s) collected so far. The first recommendation refresh starts at ${formatCount(research && research.minimum_sessions)} sessions.`
+        ? `${formatCount(totalSessions)} AI usage session(s) collected so far. The first report refresh starts at ${formatCount(research && research.minimum_sessions)} sessions.`
         : `${formatCount(totalSessions)} AI usage session(s) collected from the CLI so far.`;
   $("avgTokensMeta").textContent =
     `${formatCount(overview.total_input_tokens || 0)} input / ${formatCount(overview.total_output_tokens || 0)} output tokens uploaded so far.`;
@@ -2040,28 +1908,21 @@ function renderUsageTrend(insights) {
         scaledHeight - outputHeight,
       );
       const flags = [];
-      if (Number(item.approval_count || 0) > 0) {
+      const activityNotes = [];
+      if (Number(item.report_count || 0) > 0) {
         flags.push(
-          `<span class="usage-flag approval" title="${escapeAttr(`${formatCount(item.approval_count)} approval(s)`)}"></span>`,
+          `<span class="usage-flag report" title="${escapeAttr(`${formatCount(item.report_count)} feedback report(s)`)}"></span>`,
         );
-      }
-      if (Number(item.applied_count || 0) > 0) {
-        flags.push(
-          `<span class="usage-flag applied" title="${escapeAttr(`${formatCount(item.applied_count)} rollout(s) applied`)}"></span>`,
-        );
-      }
-      if (Number(item.rollback_count || 0) > 0) {
-        flags.push(
-          `<span class="usage-flag rollback" title="${escapeAttr(`${formatCount(item.rollback_count)} rollback(s)`)}"></span>`,
-        );
+        activityNotes.push(`${formatCount(item.report_count)} report(s)`);
       }
       if (Number(item.snapshot_count || 0) > 0) {
         flags.push(
           `<span class="usage-flag snapshot" title="${escapeAttr(`${formatCount(item.snapshot_count)} config snapshot(s)`)}"></span>`,
         );
+        activityNotes.push(`${formatCount(item.snapshot_count)} snapshot(s)`);
       }
       const meta = `${formatCount(item.session_count || 0)} sess`;
-      const tooltip = `${item.day}: ${formatCount(input)} input / ${formatCount(output)} output / ${formatCount(total)} total tokens across ${formatCount(item.query_count || 0)} queries.`;
+      const tooltip = `${item.day}: ${formatCount(input)} input / ${formatCount(output)} output / ${formatCount(total)} total tokens across ${formatCount(item.query_count || 0)} queries.${activityNotes.length ? ` Signals: ${activityNotes.join(", ")}.` : ""}`;
       return `
           <div class="usage-column">
             <div class="usage-column-flags">${flags.join("")}</div>
@@ -2750,6 +2611,7 @@ function renderHeavySessions(items) {
       const latency = sessionLatencySummary(item);
       const duration = sessionDurationSummary(item);
       const tools = sessionToolSummary(item);
+      const reasoningSummaries = sessionFullReasoningSummaries(item);
       const toolMix = sessionToolMixSummary(item);
       const toolErrorMix = sessionToolErrorMixSummary(item);
       const toolWallTime = Number(item.tool_wall_time_ms || 0);
@@ -2795,234 +2657,6 @@ function renderHeavySessions(items) {
     .join("");
 }
 
-function renderRolloutFunnel(recommendations, reviewQueue, applyItems) {
-  const counts = recentRolloutCounts(recommendations, reviewQueue, applyItems);
-  const cards = [
-    {
-      label: "Active",
-      value: counts.activeSuggestions,
-      meta: "Suggestions still open for review.",
-    },
-    {
-      label: "Needs Review",
-      value: counts.awaitingReview,
-      meta: "Change plans waiting on a decision.",
-    },
-    {
-      label: "Ready",
-      value: counts.readyForSync,
-      meta: "Approved and ready for the next local sync.",
-    },
-    {
-      label: "Applied",
-      value: counts.applied,
-      meta: "Changes that completed local execution.",
-    },
-    {
-      label: "Rolled Back",
-      value: counts.rolledBack,
-      meta: "Rollouts that were later reversed.",
-    },
-    {
-      label: "Rejected",
-      value: counts.rejected,
-      meta: "Plans explicitly declined in review.",
-    },
-  ];
-
-  $("rolloutFunnel").innerHTML = cards
-    .map(
-      (item) => `
-        <div class="funnel-card">
-          <div class="funnel-label">${escapeHTML(item.label)}</div>
-          <div class="funnel-value">${escapeHTML(formatCount(item.value))}</div>
-          <div class="funnel-meta">${escapeHTML(item.meta)}</div>
-        </div>
-      `,
-    )
-    .join("");
-}
-
-function renderRolloutPulse(applyItems, impactItems) {
-  const stats = rolloutPulseStats(applyItems);
-  const summaryCards = [
-    {
-      label: "Avg review time",
-      value: formatMinutesDuration(stats.avgApprovalMinutes),
-      meta:
-        stats.avgApprovalMinutes == null
-          ? "No reviewed plans yet"
-          : "Request to approval",
-    },
-    {
-      label: "Avg sync time",
-      value: formatMinutesDuration(stats.avgSyncMinutes),
-      meta:
-        stats.avgSyncMinutes == null
-          ? "No local applies yet"
-          : "Approval to local apply",
-    },
-    {
-      label: "End-to-end",
-      value: formatMinutesDuration(stats.avgLeadMinutes),
-      meta:
-        stats.avgLeadMinutes == null
-          ? "Waiting for completed rollouts"
-          : "Request to applied state",
-    },
-    {
-      label: "Rollback rate",
-      value: formatPercent(stats.rollbackRate),
-      meta:
-        stats.completedCount > 0
-          ? `${formatCount(stats.completedCount)} completed rollout(s)`
-          : "No completed rollouts yet",
-    },
-  ];
-
-  $("rolloutPulseSummary").innerHTML = summaryCards
-    .map(
-      (item) => `
-        <div class="trend-badge">
-          <div class="trend-badge-label">${escapeHTML(item.label)}</div>
-          <div class="trend-badge-value">${escapeHTML(item.value)}</div>
-          <div class="trend-badge-meta">${escapeHTML(item.meta)}</div>
-        </div>
-      `,
-    )
-    .join("");
-
-  if (!applyItems.length) {
-    $("rolloutPulseTimeline").innerHTML = emptyState(
-      "No rollout history yet",
-      "Approve a suggestion to start tracking review and local apply timing.",
-    );
-    return;
-  }
-
-  const impactIndex = new Map(applyItems.map((item) => [item.apply_id, null]));
-  impactItems.forEach((item) => impactIndex.set(item.apply_id, item));
-
-  $("rolloutPulseTimeline").innerHTML = applyItems
-    .slice(0, 5)
-    .map((item) => {
-      const impact = impactIndex.get(item.apply_id) || {};
-      const reviewMinutes = minutesBetween(item.requested_at, item.reviewed_at);
-      const syncMinutes = minutesBetween(
-        item.reviewed_at || item.requested_at,
-        item.applied_at,
-      );
-      const requestMeta = [
-        item.scope ? titleize(item.scope) : "Workspace scope",
-        item.requested_by ? `by ${item.requested_by}` : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      const reviewTone = rolloutReviewStageTone(item);
-      const applyToneValue = rolloutApplyStageTone(item);
-      const applyStatus =
-        item.rolled_back ||
-        String(item.status || "").toLowerCase() === "rollback_confirmed"
-          ? "Rolled back"
-          : titleize(item.status || "Pending");
-      const laneMeta = [
-        `Requested ${formatDateTime(item.requested_at)}`,
-        Number(impact.sessions_after || 0) > 0
-          ? `${formatCount(impact.sessions_after || 0)} post-apply session(s)`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      return `
-          <div class="rollout-lane">
-            <div class="rollout-lane-top">
-              <div class="rollout-lane-title">
-                ${escapeHTML(recommendationTitle(item.recommendation_id))}
-                <small>${escapeHTML(laneMeta)}</small>
-              </div>
-              ${pill(applyStatus, applyTone(item.status))}
-            </div>
-            <div class="rollout-stages">
-              <div class="rollout-stage done">
-                <div class="rollout-stage-label"><span class="rollout-stage-dot"></span>Requested</div>
-                <div class="rollout-stage-value">${escapeHTML(formatDateTime(item.requested_at))}</div>
-                <div class="rollout-stage-meta">${escapeHTML(requestMeta || "Queued for review")}</div>
-              </div>
-              <div class="rollout-stage ${escapeHTML(reviewTone)}">
-                <div class="rollout-stage-label"><span class="rollout-stage-dot"></span>Reviewed</div>
-                <div class="rollout-stage-value">${escapeHTML(item.reviewed_at ? formatMinutesDuration(reviewMinutes) : "Pending")}</div>
-                <div class="rollout-stage-meta">${escapeHTML(item.reviewed_at ? `${titleize(item.decision || "approved")} ${formatDateTime(item.reviewed_at)}` : "Awaiting a decision")}</div>
-              </div>
-              <div class="rollout-stage ${escapeHTML(applyToneValue)}">
-                <div class="rollout-stage-label"><span class="rollout-stage-dot"></span>Applied</div>
-                <div class="rollout-stage-value">${escapeHTML(item.applied_at ? formatMinutesDuration(syncMinutes) : "Pending")}</div>
-                <div class="rollout-stage-meta">${escapeHTML(item.applied_at ? `${applyStatus} ${formatDateTime(item.applied_at)}` : "Waiting for local sync")}</div>
-              </div>
-            </div>
-          </div>
-        `;
-    })
-    .join("");
-}
-
-function renderImpactItems(impactItems, applyItems) {
-  if (!impactItems.length) {
-    $("impactList").innerHTML = emptyState(
-      "No rollout impact yet",
-      "Approve and apply a change first, then upload follow-up sessions to compare before and after.",
-    );
-    return;
-  }
-
-  const applyIndex = new Map(applyItems.map((item) => [item.apply_id, item]));
-  $("impactList").innerHTML = impactItems
-    .slice(0, 6)
-    .map((item) => {
-      const apply = applyIndex.get(item.apply_id) || {};
-      const title = recommendationTitle(item.recommendation_id);
-      const approvalLag = formatDurationBetween(
-        apply.requested_at,
-        apply.reviewed_at,
-      );
-      const syncLag = formatDurationBetween(
-        apply.reviewed_at || apply.requested_at,
-        apply.applied_at,
-      );
-      return `
-          <div class="item">
-            <div class="item-top">
-              <div class="item-title">
-                ${escapeHTML(title)}
-                <small>${escapeHTML(item.interpretation || "Waiting for post-apply sessions.")}</small>
-              </div>
-              ${pill(titleize(item.status || "pending"), applyTone(item.status))}
-            </div>
-            <div class="metric-strip">
-              <div class="metric-block">
-                <div class="metric-label">Tokens / query</div>
-                <div class="metric-value">${escapeHTML(formatCount(Math.round(Number(item.avg_tokens_per_query_after || 0))))}</div>
-                <div class="metric-subvalue">${escapeHTML(`Before ${formatCount(Math.round(Number(item.avg_tokens_per_query_before || 0)))} · After ${formatCount(Math.round(Number(item.avg_tokens_per_query_after || 0)))}`)}</div>
-                <div class="metric-delta">${pill(`${formatSignedCount(item.tokens_per_query_delta)} tokens`, impactDeltaTone(item.tokens_per_query_delta))}</div>
-              </div>
-              <div class="metric-block">
-                <div class="metric-label">Tokens / session</div>
-                <div class="metric-value">${escapeHTML(formatCount(Math.round(Number(item.avg_tokens_per_session_after || 0))))}</div>
-                <div class="metric-subvalue">${escapeHTML(`Before ${formatCount(Math.round(Number(item.avg_tokens_per_session_before || 0)))} · After ${formatCount(Math.round(Number(item.avg_tokens_per_session_after || 0)))}`)}</div>
-                <div class="metric-delta">${pill(`${formatSignedCount(item.tokens_per_session_delta)} tokens`, impactDeltaTone(item.tokens_per_session_delta))}</div>
-              </div>
-              <div class="metric-block">
-                <div class="metric-label">Rollout timing</div>
-                <div class="metric-value">${escapeHTML(formatCount(item.sessions_after || 0))}</div>
-                <div class="metric-subvalue">${escapeHTML(`Post-apply sessions: ${formatCount(item.sessions_after || 0)} · Queries: ${formatCount(item.queries_after || 0)}`)}</div>
-                <div class="metric-subvalue">${escapeHTML(`Approved in ${approvalLag} · Synced in ${syncLag}`)}</div>
-              </div>
-            </div>
-          </div>
-        `;
-    })
-    .join("");
-}
-
 function renderSnapshots(items) {
   if (!items.length) {
     $("snapshotList").innerHTML = emptyState(
@@ -3060,7 +2694,7 @@ function renderActivityTimeline(items) {
   if (!items.length) {
     $("activityTimeline").innerHTML = emptyState(
       "No recent events",
-      "Approvals, uploads, and rollouts will appear here once activity starts.",
+      "Uploads, report refreshes, and workspace activity will appear here once activity starts.",
     );
     return;
   }
@@ -3081,107 +2715,59 @@ function renderActivityTimeline(items) {
     .join("");
 }
 
-function renderOptimizationLoop(
-  overview,
-  recommendations,
-  reviewQueue,
-  applyItems,
-  experiments,
-) {
+function renderOptimizationLoop(overview, reports) {
   const totalSessions = Number(overview.total_sessions || 0);
-  const experimentItems = toArray(experiments);
-  const activeExperiment =
-    experimentItems.find((item) => {
-      const status = String(item.status || "").toLowerCase();
-      return (
-        status === "awaiting_review" ||
-        status === "queued_for_apply" ||
-        status === "measuring" ||
-        status === "rollback_requested"
-      );
-    }) ||
-    experimentItems[0] ||
-    null;
-
-  const stageCounts = {
-    observe: totalSessions,
-    suggest: toArray(recommendations).length,
-    approve: toArray(reviewQueue).length,
-    measure: experimentItems.filter(
-      (item) => String(item.status || "").toLowerCase() === "measuring",
-    ).length,
-    rollback: experimentItems.filter((item) => {
-      const status = String(item.status || "").toLowerCase();
-      return (
-        status === "rollback_requested" ||
-        status === "rolled_back" ||
-        status === "rollback_failed"
-      );
-    }).length,
-  };
-
-  const activeStage = activeExperiment
-    ? {
-        awaiting_review: "approve",
-        queued_for_apply: "approve",
-        measuring: "measure",
-        rollback_requested: "rollback",
-        rolled_back: "rollback",
-        completed: "measure",
-        rollback_failed: "rollback",
-        failed: "rollback",
-      }[String(activeExperiment.status || "").toLowerCase()] || "suggest"
-    : stageCounts.suggest > 0
-      ? "suggest"
-      : "observe";
+  const reportCount = toArray(reports).length;
+  const research = overview && overview.research_status;
+  const researchState = String((research && research.state) || "")
+    .trim()
+    .toLowerCase();
 
   const stages = [
     {
       key: "observe",
       label: "Observe",
-      value: formatCount(stageCounts.observe),
+      value: formatCount(totalSessions),
       meta:
-        stageCounts.observe > 0
-          ? `${formatCount(stageCounts.observe)} session(s) captured`
+        totalSessions > 0
+          ? `${formatCount(totalSessions)} session(s) captured`
           : "Waiting for local sessions",
     },
     {
-      key: "suggest",
-      label: "Suggest",
-      value: formatCount(stageCounts.suggest),
+      key: "analyze",
+      label: "Analyze",
+      value: formatCount(researchState === "running" ? 1 : 0),
       meta:
-        stageCounts.suggest > 0
-          ? `${formatCount(stageCounts.suggest)} ranked suggestion(s)`
-          : "No active suggestions yet",
+        researchState === "running"
+          ? "The research engine is reading recent sessions"
+          : "Waiting for the next refresh",
     },
     {
-      key: "approve",
-      label: "Approve",
-      value: formatCount(stageCounts.approve),
+      key: "report",
+      label: "Report",
+      value: formatCount(reportCount),
       meta:
-        stageCounts.approve > 0
-          ? `${formatCount(stageCounts.approve)} decision(s) waiting`
-          : "No approval blockers",
+        reportCount > 0
+          ? `${formatCount(reportCount)} feedback report(s) ready`
+          : "No report published yet",
     },
     {
-      key: "measure",
-      label: "Measure",
-      value: formatCount(stageCounts.measure),
+      key: "improve",
+      label: "Improve",
+      value: formatCount(reportCount),
       meta:
-        stageCounts.measure > 0
-          ? `${formatCount(stageCounts.measure)} rollout(s) in measurement`
-          : "No active measurement window",
-    },
-    {
-      key: "rollback",
-      label: "Roll back",
-      value: formatCount(stageCounts.rollback),
-      meta:
-        stageCounts.rollback > 0
-          ? `${formatCount(stageCounts.rollback)} rollback event(s)`
-          : "No rollback pressure",
+        reportCount > 0
+          ? "Use the report to adjust prompts and workflow habits"
+          : "Next improvements will appear after a report is generated",
     },
   ];
+
+  const activeStage =
+    researchState === "running"
+      ? "analyze"
+      : reportCount > 0
+        ? "report"
+        : "observe";
 
   $("loopStageGrid").innerHTML = stages
     .map(
@@ -3195,533 +2781,121 @@ function renderOptimizationLoop(
     )
     .join("");
 
-  if (!activeExperiment) {
+  if (reportCount === 0) {
     $("loopSummary").textContent =
       totalSessions > 0
-        ? "The loop is in observation mode. AgentOpt is digesting recent raw queries and config state before promoting the next change."
+        ? "The loop is in observation mode. AgentOpt is digesting recent raw queries and response patterns before publishing the next report."
         : "The loop starts after the CLI uploads sessions and snapshots from your coding-agent workspace.";
     $("loopFocusCard").innerHTML = `
-          <div class="loop-focus-empty">
-            <strong>No experiment is running right now.</strong>
-            <span>${escapeHTML(totalSessions > 0 ? "Approve the next suggestion to start a measured rollout." : "Connect the CLI and upload sessions to seed the first suggestion.")}</span>
-          </div>
-        `;
+      <div class="loop-focus-empty">
+        <strong>No report is published yet.</strong>
+        <span>${escapeHTML(totalSessions > 0 ? "Keep uploading sessions to give the research engine enough evidence." : "Connect the CLI and upload sessions to seed the first report.")}</span>
+      </div>
+    `;
     return;
   }
 
-  const activeRecommendation = state.recommendationIndex.get(
-    activeExperiment.recommendation_id,
-  );
-  const recommendationTitleText = activeRecommendation
-    ? activeRecommendation.title
-    : recommendationTitle(activeExperiment.recommendation_id);
-  const kind = activeRecommendation
-    ? activeRecommendation.kind
-    : recommendationKind(activeExperiment.recommendation_id);
+  const activeReport = toArray(reports)[0] || null;
   const focusBits = [
-    `Baseline ${formatCount(activeExperiment.baseline_sessions || 0)} sessions / ${formatCount(activeExperiment.baseline_queries || 0)} queries`,
-    `Post-apply ${formatCount(activeExperiment.post_apply_sessions || 0)} sessions / ${formatCount(activeExperiment.post_apply_queries || 0)} queries`,
+    `${formatCount(totalSessions)} session(s) observed`,
+    `${formatCount(Number(overview.total_tokens || 0))} total tokens captured`,
   ];
-  if (activeExperiment.scope) {
-    focusBits.push(`${titleize(activeExperiment.scope)} scope`);
+  if (research && research.last_duration_ms) {
+    focusBits.push(`Last refresh ${formatLatency(research.last_duration_ms)}`);
   }
-  if (activeExperiment.requested_by) {
-    focusBits.push(`Requested by ${activeExperiment.requested_by}`);
-  }
-
-  const decisionReason =
-    String(activeExperiment.decision_reason || "").trim() ||
-    "This experiment is waiting for the next transition.";
 
   $("loopSummary").textContent =
-    String(activeExperiment.status || "").toLowerCase() === "rollback_requested"
-      ? "The loop detected a regression and has queued an automatic rollback for the local CLI."
-      : "Each approved change becomes an experiment with a baseline, a measurement window, and a rollback path if the metrics regress.";
+    researchState === "running"
+      ? "A new analysis pass is running. The report will refresh after the server finishes reading the latest sessions."
+      : "Each report combines raw queries, assistant responses, reasoning summaries, tool signals, and recent config state into user-facing feedback.";
 
   $("loopFocusCard").innerHTML = `
-        <div class="loop-focus-top">
-          <div>
-            <div class="loop-focus-kicker">Current experiment</div>
-            <div class="loop-focus-title">${escapeHTML(recommendationTitleText)}</div>
-          </div>
-          <div class="loop-focus-pills">
-            ${pill(recommendationKindLabel(kind), recommendationKindTone(kind))}
-            ${pill(titleize(activeExperiment.status || "pending"), experimentTone(activeExperiment.status))}
-          </div>
-        </div>
-        <div class="loop-focus-body">
-          <div class="loop-focus-reason">${escapeHTML(decisionReason)}</div>
-          <div class="loop-focus-metrics">
-            ${focusBits.map((item) => `<span>${escapeHTML(item)}</span>`).join("")}
-          </div>
-        </div>
-      `;
+    <div class="loop-focus-top">
+      <div>
+        <div class="loop-focus-kicker">Current report</div>
+        <div class="loop-focus-title">${escapeHTML(activeReport ? activeReport.title : "Workflow feedback")}</div>
+      </div>
+      <div class="loop-focus-pills">
+        ${pill(reportKindLabel(activeReport ? activeReport.kind : ""), reportKindTone(activeReport ? activeReport.kind : ""))}
+        ${pill(titleize(activeReport && activeReport.confidence ? activeReport.confidence : "low"), "sky")}
+      </div>
+    </div>
+    <div class="loop-focus-body">
+      <div class="loop-focus-reason">${escapeHTML(activeReport ? activeReport.summary : "The latest report is ready to review.")}</div>
+      <div class="loop-focus-metrics">
+        ${focusBits.map((item) => `<span>${escapeHTML(item)}</span>`).join("")}
+      </div>
+    </div>
+  `;
 }
 
-function findActiveLifecycle(applyItems, experiments) {
-  const experimentIndex = new Map(
-    toArray(experiments).map((e) => [e.experiment_id, e]),
-  );
-  const statusPriority = [
-    "rollback_requested",
-    "approved_for_local_apply",
-    "awaiting_review",
-    "applied",
-  ];
-
-  let target = null;
-  for (const s of statusPriority) {
-    target = applyItems.find((a) => String(a.status || "").toLowerCase() === s);
-    if (target) break;
-  }
-
-  if (!target) {
-    const measuringExp = toArray(experiments).find(
-      (e) => String(e.status || "").toLowerCase() === "measuring",
-    );
-    if (measuringExp) {
-      target = applyItems.find(
-        (a) => a.experiment_id === measuringExp.experiment_id,
-      );
-    }
-  }
-
-  if (!target) {
-    const rbExp = toArray(experiments).find(
-      (e) => String(e.status || "").toLowerCase() === "rollback_requested",
-    );
-    if (rbExp) {
-      target = applyItems.find((a) => a.experiment_id === rbExp.experiment_id);
-    }
-  }
-
-  if (!target && applyItems.length > 0) {
-    target = applyItems[0];
-  }
-
-  return target
-    ? {
-        apply: target,
-        experiment: experimentIndex.get(target.experiment_id) || null,
-      }
-    : null;
-}
-
-function lifecycleDescription(applyStatus, expStatus) {
-  if (applyStatus === "awaiting_review")
-    return "A suggestion is waiting for your review.";
-  if (applyStatus === "rejected")
-    return "This suggestion was declined during review.";
-  if (applyStatus === "approved_for_local_apply")
-    return "Approved and waiting for the local CLI to sync.";
-  if (applyStatus === "failed") return "Local execution of this change failed.";
-  if (applyStatus === "rollback_confirmed")
-    return "Rollback completed \u2014 the previous configuration was restored.";
-  if (applyStatus === "rollback_failed")
-    return "Rollback execution failed \u2014 manual intervention may be needed.";
-  if (expStatus === "measuring")
-    return "Applied locally \u2014 collecting post-apply sessions to evaluate impact.";
-  if (expStatus === "rollback_requested")
-    return "Evaluation detected a regression. Rollback is queued for the next sync.";
-  if (expStatus === "completed")
-    return "Evaluation complete \u2014 this change was measured and kept.";
-  if (expStatus === "rolled_back")
-    return "This change was rolled back after evaluation detected a regression.";
-  return "Tracking the lifecycle of the current optimization change.";
-}
-
-function renderLifecycle(applyItems, experiments) {
+function renderLifecycle() {
   const section = $("lifecycleSection");
-  const lifecycle = findActiveLifecycle(applyItems, experiments);
+  const reports = Array.from(state.reportIndex.values());
+  const latest = reports[0] || null;
 
-  if (!lifecycle) {
+  if (!latest) {
     section.dataset.empty = "true";
+    $("lifecycleTitle").textContent = "Current observation cycle";
+    $("lifecycleDesc").textContent =
+      "Track where the current feedback cycle stands, from captured sessions to the latest report.";
+    $("lifecycleStepper").innerHTML = `
+      <div class="lifecycle-step done"><div class="lifecycle-step-label">Capture</div><div class="lifecycle-step-time"></div></div>
+      <div class="lifecycle-step pending"><div class="lifecycle-step-label">Analyze</div><div class="lifecycle-step-time"></div></div>
+      <div class="lifecycle-step pending"><div class="lifecycle-step-label">Report</div><div class="lifecycle-step-time"></div></div>
+      <div class="lifecycle-step pending"><div class="lifecycle-step-label">Revisit</div><div class="lifecycle-step-time"></div></div>
+    `;
+    $("lifecycleGrid").innerHTML = `
+      <div class="lc-card">
+        <div class="lc-card-header"><div class="lc-card-title">Status</div>${pill("Observing", "sky")}</div>
+        <div class="lc-card-body">
+          <div class="lc-card-reason">No feedback report has been published yet. Keep uploading sessions and snapshots.</div>
+        </div>
+      </div>
+    `;
     return;
   }
 
   section.dataset.empty = "false";
-  const { apply, experiment } = lifecycle;
-  const applyStatus = String(apply.status || "").toLowerCase();
-  const expStatus = experiment
-    ? String(experiment.status || "").toLowerCase()
-    : "";
-  const expDecision = experiment
-    ? String(experiment.decision || "").toLowerCase()
-    : "";
-
-  $("lifecycleTitle").textContent = recommendationTitle(
-    apply.recommendation_id,
-  );
-  $("lifecycleDesc").textContent = lifecycleDescription(applyStatus, expStatus);
-
-  const steps = [];
-
-  steps.push({
-    label: "Suggested",
-    state: "done",
-    time: formatShortDate(apply.requested_at),
-  });
-
-  if (applyStatus === "rejected") {
-    steps.push({
-      label: "Rejected",
-      state: "danger",
-      time: formatShortDate(apply.reviewed_at),
-    });
-  } else if (apply.reviewed_at) {
-    steps.push({
-      label: "Approved",
-      state: "done",
-      time: formatShortDate(apply.reviewed_at),
-    });
-  } else if (applyStatus === "awaiting_review") {
-    steps.push({ label: "Review", state: "active", time: "Waiting" });
-  } else {
-    steps.push({ label: "Review", state: "pending", time: "" });
-  }
-
-  if (applyStatus === "rejected") {
-    steps.push({ label: "Sync", state: "skip", time: "" });
-  } else if (apply.applied_at) {
-    steps.push({ label: "Synced", state: "done", time: "" });
-  } else if (applyStatus === "approved_for_local_apply") {
-    steps.push({ label: "Syncing", state: "active", time: "Pending" });
-  } else {
-    steps.push({ label: "Sync", state: "pending", time: "" });
-  }
-
-  if (applyStatus === "rejected") {
-    steps.push({ label: "Apply", state: "skip", time: "" });
-  } else if (applyStatus === "failed") {
-    steps.push({ label: "Failed", state: "danger", time: "" });
-  } else if (apply.applied_at) {
-    steps.push({
-      label: "Applied",
-      state: "done",
-      time: formatShortDate(apply.applied_at),
-    });
-  } else {
-    steps.push({ label: "Apply", state: "pending", time: "" });
-  }
-
-  if (expStatus === "measuring") {
-    steps.push({
-      label: "Measuring",
-      state: "active",
-      time: formatCount(experiment.post_apply_sessions || 0) + " sess",
-    });
-  } else if (
-    [
-      "completed",
-      "rolled_back",
-      "rollback_requested",
-      "rollback_failed",
-    ].includes(expStatus)
-  ) {
-    steps.push({ label: "Measured", state: "done", time: "" });
-  } else {
-    steps.push({ label: "Measure", state: "pending", time: "" });
-  }
-
-  if (expStatus === "completed") {
-    steps.push({
-      label: "Kept",
-      state: "done",
-      time: formatShortDate(experiment.resolved_at),
-    });
-  } else if (
-    expStatus === "rolled_back" ||
-    applyStatus === "rollback_confirmed"
-  ) {
-    steps.push({
-      label: "Rolled back",
-      state: "done",
-      time: formatShortDate(
-        apply.rolled_back_at || (experiment && experiment.resolved_at),
-      ),
-    });
-  } else if (expStatus === "rollback_requested") {
-    steps.push({ label: "Rollback", state: "active", time: "Queued" });
-  } else if (
-    expStatus === "rollback_failed" ||
-    applyStatus === "rollback_failed"
-  ) {
-    steps.push({ label: "RB failed", state: "danger", time: "" });
-  } else {
-    steps.push({ label: "Outcome", state: "pending", time: "" });
-  }
-
-  const stepperParts = [];
-  steps.forEach((step, i) => {
-    if (i > 0) {
-      const prevState = steps[i - 1].state;
-      const curState = step.state;
-      let lineState = "";
-      if (
-        prevState === "done" &&
-        (curState === "done" || curState === "danger")
-      )
-        lineState = "done";
-      else if (prevState === "done" && curState === "active")
-        lineState = "active";
-      stepperParts.push(
-        `<div class="lc-step-line" data-state="${escapeAttr(lineState)}"></div>`,
-      );
-    }
-    stepperParts.push(
-      `<div class="lc-step" data-state="${escapeAttr(step.state)}">` +
-        `<div class="lc-step-node"><div class="lc-step-inner"></div></div>` +
-        `<div class="lc-step-label">${escapeHTML(step.label)}</div>` +
-        (step.time
-          ? `<div class="lc-step-time">${escapeHTML(step.time)}</div>`
-          : "") +
-        `</div>`,
-    );
-  });
-  $("lifecycleStepper").innerHTML = stepperParts.join("");
-
-  let panelsHTML = "";
-
-  let approvalTone = "sky";
-  let approvalLabel = "Pending";
-  if (applyStatus === "rejected") {
-    approvalTone = "danger";
-    approvalLabel = "Rejected";
-  } else if (applyStatus === "awaiting_review") {
-    approvalTone = "warn";
-    approvalLabel = "Waiting for review";
-  } else if (apply.reviewed_at) {
-    approvalTone = "good";
-    approvalLabel = "Approved";
-  }
-
-  panelsHTML += `<div class="lifecycle-card">
-        <div class="lc-card-header"><div class="lc-card-title">Approval</div>${pill(approvalLabel, approvalTone)}</div>
-        <div class="lc-card-body">
-          <div class="lc-status-row"><span class="lc-status-dot ${escapeAttr(approvalTone)}"></span>${escapeHTML(approvalLabel)}</div>
-          ${apply.reviewed_by ? `<div class="lc-detail"><span class="lc-detail-label">Reviewed by</span><span class="lc-detail-value">${escapeHTML(apply.reviewed_by)}</span></div>` : ""}
-          ${apply.reviewed_at ? `<div class="lc-detail"><span class="lc-detail-label">Reviewed</span><span class="lc-detail-value">${escapeHTML(formatDateTime(apply.reviewed_at))}</span></div>` : ""}
-          ${apply.policy_mode ? `<div class="lc-detail"><span class="lc-detail-label">Policy</span><span class="lc-detail-value">${escapeHTML(titleize(apply.policy_mode))}</span></div>` : ""}
-          ${apply.review_note ? `<div class="lc-card-reason">${escapeHTML(apply.review_note)}</div>` : ""}
-        </div>
-      </div>`;
-
-  let localTone = "sky";
-  let localLabel = "Pending";
-  if (applyStatus === "applied" || applyStatus === "rollback_confirmed") {
-    localTone = "good";
-    localLabel =
-      apply.rolled_back || applyStatus === "rollback_confirmed"
-        ? "Rolled back"
-        : "Applied";
-  } else if (applyStatus === "failed" || applyStatus === "rollback_failed") {
-    localTone = "danger";
-    localLabel =
-      applyStatus === "rollback_failed" ? "Rollback failed" : "Apply failed";
-  } else if (applyStatus === "approved_for_local_apply") {
-    localTone = "warn";
-    localLabel = "Waiting for sync";
-  } else if (applyStatus === "rejected") {
-    localTone = "danger";
-    localLabel = "Not applied";
-  }
-
-  panelsHTML += `<div class="lifecycle-card">
-        <div class="lc-card-header"><div class="lc-card-title">Local apply</div>${pill(localLabel, localTone)}</div>
-        <div class="lc-card-body">
-          <div class="lc-detail"><span class="lc-detail-label">Requested</span><span class="lc-detail-value">${escapeHTML(formatDateTime(apply.requested_at))}</span></div>
-          <div class="lc-detail"><span class="lc-detail-label">Reviewed</span><span class="lc-detail-value">${escapeHTML(apply.reviewed_at ? formatDateTime(apply.reviewed_at) : "Pending")}</span></div>
-          <div class="lc-detail"><span class="lc-detail-label">Applied</span><span class="lc-detail-value">${escapeHTML(apply.applied_at ? formatDateTime(apply.applied_at) : "Pending")}</span></div>
-          ${apply.rolled_back_at ? `<div class="lc-detail"><span class="lc-detail-label">Rolled back</span><span class="lc-detail-value">${escapeHTML(formatDateTime(apply.rolled_back_at))}</span></div>` : ""}
-          ${apply.reviewed_at && apply.requested_at ? `<div class="lc-detail"><span class="lc-detail-label">Review time</span><span class="lc-detail-value">${escapeHTML(formatDurationBetween(apply.requested_at, apply.reviewed_at))}</span></div>` : ""}
-          ${apply.applied_at && (apply.reviewed_at || apply.requested_at) ? `<div class="lc-detail"><span class="lc-detail-label">Sync time</span><span class="lc-detail-value">${escapeHTML(formatDurationBetween(apply.reviewed_at || apply.requested_at, apply.applied_at))}</span></div>` : ""}
-        </div>
-      </div>`;
-
-  let evalTone = "sky";
-  let evalLabel = "Not started";
-  if (expStatus === "measuring") {
-    evalTone = "warn";
-    evalLabel = "Measuring";
-  } else if (expStatus === "completed") {
-    evalTone = "good";
-    evalLabel = expDecision === "keep" ? "Kept" : "Completed";
-  } else if (expStatus === "rollback_requested") {
-    evalTone = "danger";
-    evalLabel = "Regression detected";
-  } else if (expStatus === "rolled_back") {
-    evalTone = "danger";
-    evalLabel = "Rolled back";
-  } else if (expStatus === "rollback_failed") {
-    evalTone = "danger";
-    evalLabel = "Rollback failed";
-  } else if (
-    expStatus === "queued_for_apply" ||
-    expStatus === "awaiting_review"
-  ) {
-    evalTone = "sky";
-    evalLabel = "Queued";
-  }
-
-  const baselineSessions = experiment
-    ? Number(experiment.baseline_sessions || 0)
-    : 0;
-  const baselineQueries = experiment
-    ? Number(experiment.baseline_queries || 0)
-    : 0;
-  const postSessions = experiment
-    ? Number(experiment.post_apply_sessions || 0)
-    : 0;
-  const postQueries = experiment
-    ? Number(experiment.post_apply_queries || 0)
-    : 0;
-  const maxSessions = Math.max(baselineSessions, postSessions, 1);
-  const decisionReason = experiment
-    ? String(experiment.decision_reason || "").trim()
-    : "";
-
-  panelsHTML += `<div class="lifecycle-card">
-        <div class="lc-card-header"><div class="lc-card-title">Evaluation</div>${pill(evalLabel, evalTone)}</div>
-        <div class="lc-card-body">`;
-
-  if (experiment) {
-    const baselineWidth = Math.max(
-      4,
-      Math.round((baselineSessions / maxSessions) * 100),
-    );
-    const postWidth =
-      postSessions > 0
-        ? Math.max(4, Math.round((postSessions / maxSessions) * 100))
-        : 0;
-
-    panelsHTML += `<div class="lc-progress">
-          <div class="lc-progress-row">
-            <div class="lc-progress-header"><span>Baseline</span><span>${escapeHTML(formatCount(baselineSessions))} sess \u00b7 ${escapeHTML(formatCount(baselineQueries))} queries</span></div>
-            <div class="lc-progress-track"><div class="lc-progress-fill baseline" style="width:${baselineWidth}%"></div></div>
-          </div>
-          <div class="lc-progress-row">
-            <div class="lc-progress-header"><span>Post-apply</span><span>${escapeHTML(formatCount(postSessions))} sess \u00b7 ${escapeHTML(formatCount(postQueries))} queries</span></div>
-            <div class="lc-progress-track"><div class="lc-progress-fill post-apply" style="width:${postWidth}%"></div></div>
-          </div>
-        </div>`;
-
-    if (expStatus === "measuring" && !decisionReason) {
-      panelsHTML += `<div class="lc-card-reason">Collecting evidence \u2014 more post-apply sessions are needed before the system can evaluate impact.</div>`;
-    }
-
-    if (decisionReason) {
-      panelsHTML += `<div class="lc-card-reason">${escapeHTML(decisionReason)}</div>`;
-    }
-
-    if (experiment.last_observed_at) {
-      panelsHTML += `<div class="lc-detail"><span class="lc-detail-label">Last observed</span><span class="lc-detail-value">${escapeHTML(formatDateTime(experiment.last_observed_at))}</span></div>`;
-    }
-  } else {
-    panelsHTML += `<div class="lc-detail"><span class="lc-detail-label">Status</span><span class="lc-detail-value">No experiment linked</span></div>`;
-  }
-
-  panelsHTML += `</div></div>`;
-
-  const hasRollback =
-    ["rollback_requested", "rolled_back", "rollback_failed"].includes(
-      expStatus,
-    ) ||
-    ["rollback_confirmed", "rollback_failed", "rollback_requested"].includes(
-      applyStatus,
-    ) ||
-    apply.rolled_back;
-
-  let rbTone = "sky";
-  let rbLabel = "Not triggered";
-  if (applyStatus === "rollback_confirmed" || expStatus === "rolled_back") {
-    rbTone = "good";
-    rbLabel = "Rollback completed";
-  } else if (
-    applyStatus === "rollback_failed" ||
-    expStatus === "rollback_failed"
-  ) {
-    rbTone = "danger";
-    rbLabel = "Rollback failed";
-  } else if (
-    expStatus === "rollback_requested" ||
-    applyStatus === "rollback_requested"
-  ) {
-    rbTone = "warn";
-    rbLabel = "Rollback requested";
-  }
-
-  panelsHTML += `<div class="lifecycle-card">
-        <div class="lc-card-header"><div class="lc-card-title">Rollback</div>${pill(rbLabel, rbTone)}</div>
-        <div class="lc-card-body">
-          <div class="lc-status-row"><span class="lc-status-dot ${escapeAttr(rbTone === "sky" ? "muted" : rbTone)}"></span>${escapeHTML(rbLabel)}</div>`;
-
-  if (hasRollback) {
-    if (decisionReason) {
-      panelsHTML += `<div class="lc-card-reason">${escapeHTML(decisionReason)}</div>`;
-    }
-    if (
-      expStatus === "rollback_requested" ||
-      applyStatus === "rollback_requested"
-    ) {
-      panelsHTML += `<div class="lc-detail"><span class="lc-detail-label">Execution</span><span class="lc-detail-value">Queued for next local sync</span></div>`;
-    }
-    if (apply.rolled_back_at) {
-      panelsHTML += `<div class="lc-detail"><span class="lc-detail-label">Rolled back at</span><span class="lc-detail-value">${escapeHTML(formatDateTime(apply.rolled_back_at))}</span></div>`;
-    }
-  } else {
-    const noRbReason =
-      expStatus === "measuring"
-        ? "Evaluation in progress"
-        : expStatus === "completed"
-          ? "Change kept \u2014 no rollback needed"
-          : applyStatus === "rejected"
-            ? "Change was rejected"
-            : "Waiting for evaluation";
-    panelsHTML += `<div class="lc-detail"><span class="lc-detail-label">Status</span><span class="lc-detail-value">${escapeHTML(noRbReason)}</span></div>`;
-  }
-
-  panelsHTML += `</div></div>`;
-
-  $("lifecycleGrid").innerHTML = panelsHTML;
+  $("lifecycleTitle").textContent = latest.title || "Current workflow report";
+  $("lifecycleDesc").textContent =
+    latest.summary ||
+    "The latest report summarizes how the agent has been used recently.";
+  $("lifecycleStepper").innerHTML = `
+    <div class="lifecycle-step done"><div class="lifecycle-step-label">Capture</div><div class="lifecycle-step-time">${escapeHTML(formatShortDate(latest.created_at))}</div></div>
+    <div class="lifecycle-step done"><div class="lifecycle-step-label">Analyze</div><div class="lifecycle-step-time">${escapeHTML(titleize(latest.confidence || "low"))}</div></div>
+    <div class="lifecycle-step done"><div class="lifecycle-step-label">Report</div><div class="lifecycle-step-time">${escapeHTML(formatShortDate(latest.created_at))}</div></div>
+    <div class="lifecycle-step pending"><div class="lifecycle-step-label">Revisit</div><div class="lifecycle-step-time">After more sessions</div></div>
+  `;
+  $("lifecycleGrid").innerHTML = `
+    <div class="lc-card">
+      <div class="lc-card-header"><div class="lc-card-title">Observation scope</div>${pill("Live", "good")}</div>
+      <div class="lc-card-body">
+        <div class="lc-detail"><span class="lc-detail-label">Report created</span><span class="lc-detail-value">${escapeHTML(formatDateTime(latest.created_at))}</span></div>
+        ${latest.confidence ? `<div class="lc-detail"><span class="lc-detail-label">Confidence</span><span class="lc-detail-value">${escapeHTML(titleize(latest.confidence))}</span></div>` : ""}
+        ${latest.reason ? `<div class="lc-card-reason">${escapeHTML(latest.reason)}</div>` : ""}
+      </div>
+    </div>
+    <div class="lc-card">
+      <div class="lc-card-header"><div class="lc-card-title">Intent read</div>${pill("Report lens", "sky")}</div>
+      <div class="lc-card-body">
+        <div class="lc-detail"><span class="lc-detail-label">User intent</span><span class="lc-detail-value">${escapeHTML(String(latest.user_intent || "").trim() || "Not called out in this report")}</span></div>
+        <div class="lc-detail"><span class="lc-detail-label">Model interpretation</span><span class="lc-detail-value">${escapeHTML(String(latest.model_interpretation || "").trim() || "Not called out in this report")}</span></div>
+      </div>
+    </div>
+    <div class="lc-card">
+      <div class="lc-card-header"><div class="lc-card-title">What stood out</div>${pill(formatCount(toArray(latest.evidence).length), "sky")}</div>
+      <div class="lc-card-body">
+        <div class="lc-detail"><span class="lc-detail-label">Strengths</span><span class="lc-detail-value">${escapeHTML(toArray(latest.strengths).slice(0, 2).join(" · ") || "None highlighted yet")}</span></div>
+        <div class="lc-detail"><span class="lc-detail-label">Frictions</span><span class="lc-detail-value">${escapeHTML(toArray(latest.frictions).slice(0, 2).join(" · ") || "None highlighted yet")}</span></div>
+        <div class="lc-detail"><span class="lc-detail-label">Next steps</span><span class="lc-detail-value">${escapeHTML(toArray(latest.next_steps).slice(0, 2).join(" · ") || "Keep collecting sessions")}</span></div>
+      </div>
+    </div>
+  `;
 }
 
-function renderActionItems(recommendations, reviewQueue) {
-  const html = [];
-
-  reviewQueue.forEach((item) => {
-    const rec = state.recommendationIndex.get(item.recommendation_id) || {};
-    const kind = String(rec.kind || "").trim();
-    html.push(`
-          <div class="item">
-            <div class="item-top">
-              <div class="item-title">
-                ${escapeHTML(rec.title || "Configuration update")}
-                <small>${escapeHTML(rec.summary || "A reviewed configuration update for this workspace.")}</small>
-              </div>
-              <div class="item-pill-row">
-                ${pill(recommendationKindLabel(kind), recommendationKindTone(kind))}
-                ${pill("Needs approval", "warn")}
-              </div>
-            </div>
-            <div class="step-list">
-              <div class="step-line">${escapeHTML(patchPreviewSummary(item.patch_preview))}</div>
-            </div>
-            ${suggestionDetailsBlock(rec)}
-            <div class="action-row">
-              <button class="primary-button" type="button" data-action="review-plan" data-apply-id="${escapeAttr(item.apply_id)}" data-decision="approve">Approve</button>
-              <button class="secondary-button" type="button" data-action="review-plan" data-apply-id="${escapeAttr(item.apply_id)}" data-decision="reject">Decline</button>
-            </div>
-          </div>
-        `);
-  });
-
-  const reviewedIDs = new Set(
-    reviewQueue.map((item) => item.recommendation_id),
-  );
-  const newRecs = recommendations.filter((item) => !reviewedIDs.has(item.id));
-
-  newRecs.slice(0, 5).forEach((item) => {
-    html.push(`
+function renderActionItems(reports) {
+  const html = reports.slice(0, 5).map((item) => `
           <div class="item">
             <div class="item-top">
               <div class="item-title">
@@ -3729,83 +2903,60 @@ function renderActionItems(recommendations, reviewQueue) {
                 <small>${escapeHTML(item.summary || "")}</small>
               </div>
               <div class="item-pill-row">
-                ${pill(recommendationKindLabel(item.kind), recommendationKindTone(item.kind))}
-                ${pill(item.risk || "Low risk", riskTone(item.risk))}
+                ${pill(reportKindLabel(item.kind), reportKindTone(item.kind))}
+                ${pill(titleize(item.confidence || "low"), "sky")}
               </div>
             </div>
             <div class="step-list">
-              <div class="step-line">${escapeHTML(recommendationPlanSummary(item))}</div>
+              <div class="step-line">${escapeHTML(reportSummaryLine(item))}</div>
             </div>
-            ${suggestionDetailsBlock(item)}
-            <div class="action-row">
-              <button class="primary-button" type="button" data-action="approve-recommendation" data-recommendation-id="${escapeAttr(item.id)}">Approve</button>
-              <button class="secondary-button" type="button" data-action="decline-recommendation" data-recommendation-id="${escapeAttr(item.id)}">Decline</button>
-            </div>
+            ${reportDetailsBlock(item)}
           </div>
         `);
-  });
 
-  const section = $("activeSuggestionSection");
-  if (html.length) {
+  const section = $("activeReportSection");
+  if (html.length > 0) {
     section.dataset.empty = "false";
     $("actionItemList").innerHTML = html.join("");
   } else {
     section.dataset.empty = "true";
-    $("actionItemList").innerHTML = "";
+    $("actionItemList").innerHTML = emptyState(
+      "No feedback reports yet",
+      "Upload more sessions from the CLI and the next report will appear here.",
+    );
   }
 }
 
-function renderImpactTimeline(impactItems, applyItems, recommendations) {
+function renderImpactTimeline(reports) {
   const target = $("impactTimelineList");
-  const allApplied = applyItems.filter((item) => {
-    const status = String(item.status || "").toLowerCase();
-    return (
-      status === "applied" ||
-      status === "rollback_confirmed" ||
-      item.rolled_back
-    );
-  });
-
-  if (!allApplied.length) {
+  const reportItems = toArray(reports);
+  if (!reportItems.length) {
     target.innerHTML = emptyState(
-      "No applied changes yet",
-      "When you approve a suggestion, it will appear here with before-and-after metrics. The agent tracks whether each change improved your workflow.",
+      "No reports yet",
+      "When the research engine finishes analyzing recent sessions, the latest feedback reports will appear here.",
     );
     return;
   }
 
-  const impactIndex = new Map(impactItems.map((item) => [item.apply_id, item]));
-  target.innerHTML = allApplied
+  target.innerHTML = reportItems
     .slice(0, 8)
     .map((item) => {
-      const impact = impactIndex.get(item.apply_id) || {};
-      const title = recommendationTitle(item.recommendation_id);
-      const isRolledBack =
-        item.rolled_back ||
-        String(item.status || "").toLowerCase() === "rollback_confirmed";
-      const statusLabel = isRolledBack ? "Rolled back" : "Improved";
-      const statusTone = isRolledBack ? "danger" : "good";
-      const tokenDelta = Number(impact.tokens_per_query_delta || 0);
-      const tokenDeltaText =
-        tokenDelta !== 0 ? `${formatSignedCount(tokenDelta)} tokens/query` : "";
-      const interpretation =
-        impact.interpretation ||
-        (isRolledBack
-          ? "Metrics declined after applying this change. The agent reverted it."
-          : "Measuring impact...");
-      const appliedDate = formatDateTime(item.applied_at);
+      const createdAt = formatDateTime(item.created_at);
+      const confidence = String(item.confidence || "").trim();
+      const firstNextStep = toArray(item.next_steps).find(Boolean) || "";
 
       return `
           <div class="item">
             <div class="item-top">
               <div class="item-title">
-                ${escapeHTML(title)}
-                <small>${escapeHTML(interpretation)}</small>
+                ${escapeHTML(item.title || "Feedback report")}
+                <small>${escapeHTML(item.summary || firstNextStep || "A new workflow report is ready.")}</small>
               </div>
-              ${pill(statusLabel, statusTone)}
+              ${pill(titleize(confidence || "low"), "sky")}
             </div>
             <div class="step-list">
-              ${tokenDeltaText ? `<div class="step-line">${escapeHTML(tokenDeltaText)} &middot; Applied ${escapeHTML(appliedDate)}</div>` : `<div class="step-line">Applied ${escapeHTML(appliedDate)}</div>`}
+              <div class="step-line">${escapeHTML(`Generated ${createdAt}`)}</div>
+              ${firstNextStep ? `<div class="step-line">${escapeHTML(firstNextStep)}</div>` : ""}
             </div>
           </div>
         `;
@@ -3832,6 +2983,7 @@ function renderSessionSummaries(items) {
       const latency = sessionLatencySummary(item);
       const duration = sessionDurationSummary(item);
       const tools = sessionToolSummary(item);
+      const reasoningSummaries = sessionFullReasoningSummaries(item);
       const toolMix = sessionToolMixSummary(item);
       const toolErrorMix = sessionToolErrorMixSummary(item);
       const toolWallTime = Number(item.tool_wall_time_ms || 0);
@@ -3847,6 +2999,9 @@ function renderSessionSummaries(items) {
       }
       if (tools) {
         detailBits.push(tools);
+      }
+      if (reasoningSummaries.length > 0) {
+        detailBits.push(`Reasoning summary ${formatCount(reasoningSummaries.length)}`);
       }
       if (toolMix) {
         detailBits.push(toolMix);
@@ -3868,6 +3023,11 @@ function renderSessionSummaries(items) {
       if (isResponseTruncated(item)) {
         expandLinks.push(
           `<button class="expand-link" type="button" data-action="show-full-response" data-session-index="${idx}">Show full response</button>`,
+        );
+      }
+      if (reasoningSummaries.length > 0) {
+        expandLinks.push(
+          `<button class="expand-link" type="button" data-action="show-full-reasoning" data-session-index="${idx}">Show reasoning summaries</button>`,
         );
       }
       const expandRow = expandLinks.length
@@ -3951,169 +3111,6 @@ async function withBusy(task) {
   } finally {
     state.busy = false;
     syncBusyUI();
-  }
-}
-
-function requireUser() {
-  const userID =
-    state.session && state.session.user ? state.session.user.id : "";
-  if (!userID) {
-    redirectToLanding("Sign in again to continue.");
-  }
-  return userID;
-}
-
-async function approveRecommendation(recommendationID) {
-  const requestedBy = requireUser();
-  if (!requestedBy) {
-    return;
-  }
-
-  try {
-    await withBusy(async () => {
-      const data = await requestJSON(
-        "/api/v1/recommendations/apply",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recommendation_id: recommendationID,
-            requested_by: requestedBy,
-            scope: "user",
-          }),
-        },
-        "Failed to create the change plan.",
-      );
-
-      if (data.policy_mode !== "auto_approved" && data.apply_id) {
-        await requestJSON(
-          "/api/v1/change-plans/review",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              apply_id: data.apply_id,
-              decision: "approve",
-              reviewed_by: requestedBy,
-              review_note: "dashboard approve",
-            }),
-          },
-          "Failed to approve the plan.",
-        );
-      }
-
-      await load({ skipBusy: true });
-      setStatus(
-        "Approved. The local CLI can pick up this change on the next sync.",
-      );
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) {
-      redirectToLanding("Your session expired. Sign in again.");
-      return;
-    }
-    setStatus(
-      error instanceof Error ? error.message : "Failed to approve.",
-      true,
-    );
-  }
-}
-
-async function declineRecommendation(recommendationID) {
-  const requestedBy = requireUser();
-  if (!requestedBy) {
-    return;
-  }
-
-  try {
-    await withBusy(async () => {
-      const data = await requestJSON(
-        "/api/v1/recommendations/apply",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recommendation_id: recommendationID,
-            requested_by: requestedBy,
-            scope: "user",
-          }),
-        },
-        "Failed to create the change plan.",
-      );
-
-      if (data.apply_id) {
-        await requestJSON(
-          "/api/v1/change-plans/review",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              apply_id: data.apply_id,
-              decision: "reject",
-              reviewed_by: requestedBy,
-              review_note: "dashboard decline",
-            }),
-          },
-          "Failed to decline the plan.",
-        );
-      }
-
-      await load({ skipBusy: true });
-      setStatus("Declined. The suggestion has been dismissed.");
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) {
-      redirectToLanding("Your session expired. Sign in again.");
-      return;
-    }
-    setStatus(
-      error instanceof Error ? error.message : "Failed to decline.",
-      true,
-    );
-  }
-}
-
-async function reviewPlan(applyID, decision) {
-  const reviewer = requireUser();
-  if (!reviewer) {
-    return;
-  }
-
-  try {
-    await withBusy(async () => {
-      await requestJSON(
-        "/api/v1/change-plans/review",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apply_id: applyID,
-            decision,
-            reviewed_by: reviewer,
-            review_note: `dashboard ${decision}`,
-          }),
-        },
-        "Failed to update the review decision.",
-      );
-
-      await load({ skipBusy: true });
-      setStatus(
-        decision === "approve"
-          ? "Approved. The local CLI can pick up this change on the next sync."
-          : "Declined. The plan will stay out of the rollout queue.",
-      );
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) {
-      redirectToLanding("Your session expired. Sign in again.");
-      return;
-    }
-    setStatus(
-      error instanceof Error
-        ? error.message
-        : "Failed to update the review decision.",
-      true,
-    );
   }
 }
 
@@ -4275,39 +3272,26 @@ async function load(options = {}) {
     renderOverview(overview);
     renderCLITokens(toArray(cliTokensData.items));
 
-    state.recommendationIndex = new Map();
+    state.reportIndex = new Map();
 
-    let recommendations = [];
-    let reviewQueue = [];
+    let reports = [];
     let sessions = [];
     let insights = {};
-    let impactItems = [];
-    let applyItems = [];
-    let experiments = [];
     let snapshots = [];
     let audits = [];
 
     if (projectID) {
       const [
-        recommendationsData,
-        reviewData,
+        reportsData,
         sessionData,
         insightsData,
-        impactData,
-        applyHistoryData,
-        experimentData,
         snapshotData,
         auditData,
       ] = await Promise.all([
         requestJSON(
-          `/api/v1/recommendations?project_id=${encodeURIComponent(projectID)}`,
+          `/api/v1/reports?project_id=${encodeURIComponent(projectID)}`,
           {},
-          "Failed to load workspace suggestions.",
-        ),
-        requestJSON(
-          `/api/v1/change-plans?project_id=${encodeURIComponent(projectID)}&status=awaiting_review`,
-          {},
-          "Failed to load the approval queue.",
+          "Failed to load workspace reports.",
         ),
         requestJSON(
           `/api/v1/session-summaries?project_id=${encodeURIComponent(projectID)}&limit=10`,
@@ -4318,21 +3302,6 @@ async function load(options = {}) {
           `/api/v1/dashboard/project-insights?project_id=${encodeURIComponent(projectID)}`,
           {},
           "Failed to load usage trends.",
-        ),
-        requestJSON(
-          `/api/v1/impact?project_id=${encodeURIComponent(projectID)}`,
-          {},
-          "Failed to load rollout impact.",
-        ),
-        requestJSON(
-          `/api/v1/applies?project_id=${encodeURIComponent(projectID)}`,
-          {},
-          "Failed to load rollout history.",
-        ),
-        requestJSON(
-          `/api/v1/experiments?project_id=${encodeURIComponent(projectID)}`,
-          {},
-          "Failed to load experiment history.",
         ),
         requestJSON(
           `/api/v1/config-snapshots?project_id=${encodeURIComponent(projectID)}`,
@@ -4346,32 +3315,22 @@ async function load(options = {}) {
         ),
       ]);
 
-      recommendations = toArray(recommendationsData.items);
-      reviewQueue = toArray(reviewData.items);
+      reports = toArray(reportsData.items);
       sessions = toArray(sessionData.items);
       insights = insightsData || {};
-      impactItems = toArray(impactData.items);
-      applyItems = toArray(applyHistoryData.items);
-      experiments = toArray(experimentData.items);
       snapshots = toArray(snapshotData.items);
       audits = toArray(auditData.items);
 
-      recommendations.forEach((item) => {
-        state.recommendationIndex.set(item.id, item);
+      reports.forEach((item) => {
+        state.reportIndex.set(item.id, item);
       });
     }
 
-    renderAgentStatus(overview, recommendations, applyItems, experiments);
-    renderOptimizationLoop(
-      overview,
-      recommendations,
-      reviewQueue,
-      applyItems,
-      experiments,
-    );
-    renderLifecycle(applyItems, experiments);
-    renderActionItems(recommendations, reviewQueue);
-    renderImpactTimeline(impactItems, applyItems, recommendations);
+    renderAgentStatus(overview, reports);
+    renderOptimizationLoop(overview, reports);
+    renderLifecycle();
+    renderActionItems(reports);
+    renderImpactTimeline(reports);
     renderUsageTrend(insights);
     renderTrendCoverage(insights);
     renderModelCoverage(insights);
@@ -4384,9 +3343,6 @@ async function load(options = {}) {
     renderDurationTrend(insights);
     renderCoverageActions(insights);
     renderHeavySessions(sessions);
-    renderRolloutFunnel(recommendations, reviewQueue, applyItems);
-    renderRolloutPulse(applyItems, impactItems);
-    renderImpactItems(impactItems, applyItems);
     renderSnapshots(snapshots);
     renderActivityTimeline(audits);
     renderSessionSummaries(sessions);
@@ -4404,7 +3360,7 @@ async function load(options = {}) {
         projects.find((item) => item.id === projectID)?.name ||
         "Shared workspace";
       setStatus(
-        `Showing ${workspaceName}. Review your AI usage and approve recommended changes.`,
+        `Showing ${workspaceName}. Review the latest AI usage feedback reports.`,
       );
     } else {
       setStatus(
@@ -4438,8 +3394,8 @@ function toggleSection(targetID) {
   section.classList.toggle("is-collapsed");
 }
 
-function toggleSuggestionDetail(button) {
-  const detail = button.closest(".suggestion-detail");
+function toggleReportDetail(button) {
+  const detail = button.closest(".report-detail");
   if (!detail) {
     return;
   }
@@ -4481,15 +3437,6 @@ function handleActionClick(event) {
         button.dataset.copyLabel || "command",
       );
       break;
-    case "approve-recommendation":
-      approveRecommendation(button.dataset.recommendationId || "");
-      break;
-    case "decline-recommendation":
-      declineRecommendation(button.dataset.recommendationId || "");
-      break;
-    case "review-plan":
-      reviewPlan(button.dataset.applyId || "", button.dataset.decision || "");
-      break;
     case "sign-out":
       signOut();
       break;
@@ -4505,8 +3452,11 @@ function handleActionClick(event) {
     case "show-full-response":
       showFullResponse(Number(button.dataset.sessionIndex || 0));
       break;
-    case "toggle-suggestion-detail":
-      toggleSuggestionDetail(button);
+    case "show-full-reasoning":
+      showFullReasoning(Number(button.dataset.sessionIndex || 0));
+      break;
+    case "toggle-report-detail":
+      toggleReportDetail(button);
       break;
     case "close-full-text":
       closeFullTextModal();

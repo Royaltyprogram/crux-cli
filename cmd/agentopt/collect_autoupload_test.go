@@ -28,6 +28,7 @@ func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 		`{"timestamp":"2026-03-10T08:00:00Z","type":"turn_context","payload":{"model":"gpt-5.4"}}`,
 		`{"timestamp":"2026-03-10T08:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"## My request for Codex:\nSummarize the upload pipeline."}}`,
 		`{"timestamp":"2026-03-10T08:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"cached_input_tokens":240,"output_tokens":180,"reasoning_output_tokens":60,"total_tokens":1080}}}}`,
+		`{"timestamp":"2026-03-10T08:00:02.200Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Checking the upload order before summarizing the pipeline."}]}}`,
 		`{"timestamp":"2026-03-10T08:00:02.500Z","type":"response_item","payload":{"type":"function_call","call_id":"call-1","name":"shell","arguments":"{\"cmd\":\"echo hi\"}"}}`,
 		`{"timestamp":"2026-03-10T08:00:02.700Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"Exit code: 1\nWall time: 0.1 seconds\nOutput:\npermission denied"}}`,
 		`{"timestamp":"2026-03-10T08:00:03Z","type":"event_msg","payload":{"type":"agent_message","message":"The collector uploads snapshots first and session summaries second."}}`,
@@ -61,10 +62,10 @@ func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.SessionIngestResp{
-					SessionID:           sessionReq.SessionID,
-					ProjectID:           sessionReq.ProjectID,
-					RecommendationCount: 1,
-					RecordedAt:          sessionReq.Timestamp,
+					SessionID:   sessionReq.SessionID,
+					ProjectID:   sessionReq.ProjectID,
+					ReportCount: 1,
+					RecordedAt:  sessionReq.Timestamp,
 				}),
 			}))
 		default:
@@ -111,6 +112,7 @@ func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 	require.Equal(t, "openai", sessionReq.ModelProvider)
 	require.Equal(t, 2000, sessionReq.FirstResponseLatencyMS)
 	require.Equal(t, []string{"The collector uploads snapshots first and session summaries second."}, sessionReq.AssistantResponses)
+	require.Equal(t, []string{"Checking the upload order before summarizing the pipeline."}, sessionReq.ReasoningSummaries)
 }
 
 func TestRunCollectSkipsUnchangedSnapshotAndHandlesMissingSessions(t *testing.T) {

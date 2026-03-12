@@ -61,6 +61,7 @@ type codexResponseItemPayload struct {
 	CallID  string                 `json:"call_id"`
 	Name    string                 `json:"name"`
 	Content []codexResponseContent `json:"content"`
+	Summary []codexResponseContent `json:"summary"`
 	Output  any                    `json:"output"`
 }
 
@@ -149,6 +150,7 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 	seenQueries := map[string]struct{}{}
 	seenModels := map[string]struct{}{}
 	seenResponses := map[string]struct{}{}
+	seenReasoningSummaries := map[string]struct{}{}
 	toolCalls := make(map[string]int)
 	toolErrors := make(map[string]int)
 	toolWallTimesMS := make(map[string]int)
@@ -275,6 +277,10 @@ func collectCodexSessionSummary(path, tool string) (request.SessionSummaryReq, e
 						}
 					}
 				}
+			case "reasoning":
+				for _, summary := range codexResponseItemReasoningSummaries(payload) {
+					appendReasoningSummary(seenReasoningSummaries, &req.ReasoningSummaries, summary)
+				}
 			}
 		}
 	}
@@ -316,6 +322,15 @@ func appendRawQuery(seen map[string]struct{}, dst *[]string, raw string) bool {
 
 func appendAssistantResponse(seen map[string]struct{}, dst *[]string, raw string) bool {
 	text := normalizeCodexSessionText(raw)
+	if text == "" {
+		return false
+	}
+	appendUniqueString(seen, dst, text)
+	return true
+}
+
+func appendReasoningSummary(seen map[string]struct{}, dst *[]string, raw string) bool {
+	text := normalizeCodexReasoningSummary(raw)
 	if text == "" {
 		return false
 	}
@@ -430,6 +445,44 @@ func normalizeCodexSessionText(raw string) string {
 		raw = strings.ReplaceAll(raw, "\n\n", "\n")
 	}
 	return strings.TrimSpace(raw)
+}
+
+func normalizeCodexReasoningSummary(raw string) string {
+	text := normalizeCodexSessionText(raw)
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "#")
+		line = strings.TrimSpace(line)
+		line = strings.Trim(line, "*`_ ")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func codexResponseItemReasoningSummaries(payload codexResponseItemPayload) []string {
+	items := make([]string, 0, len(payload.Summary)+len(payload.Content))
+	appendReasoningText := func(contents []codexResponseContent) {
+		for _, content := range contents {
+			switch strings.TrimSpace(content.Type) {
+			case "summary_text", "reasoning_text", "output_text":
+				if text := strings.TrimSpace(content.Text); text != "" {
+					items = append(items, text)
+				}
+			}
+		}
+	}
+	appendReasoningText(payload.Summary)
+	appendReasoningText(payload.Content)
+	return items
 }
 
 func stripCodexTaggedBlock(raw, openTag, closeTag string) string {

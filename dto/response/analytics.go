@@ -116,12 +116,13 @@ type ConfigSnapshotListResp struct {
 }
 
 type SessionIngestResp struct {
-	SessionID               string                            `json:"session_id"`
-	ProjectID               string                            `json:"project_id"`
-	RecommendationCount     int                               `json:"recommendation_count"`
-	LatestRecommendationIDs []string                          `json:"latest_recommendation_ids"`
-	RecordedAt              time.Time                         `json:"recorded_at"`
-	ResearchStatus          *RecommendationResearchStatusResp `json:"research_status,omitempty"`
+	SchemaVersion   string                    `json:"schema_version"`
+	SessionID       string                    `json:"session_id"`
+	ProjectID       string                    `json:"project_id"`
+	ReportCount     int                       `json:"report_count"`
+	LatestReportIDs []string                  `json:"latest_report_ids"`
+	RecordedAt      time.Time                 `json:"recorded_at"`
+	ResearchStatus  *ReportResearchStatusResp `json:"research_status,omitempty"`
 }
 
 type SessionSummaryItem struct {
@@ -144,6 +145,7 @@ type SessionSummaryItem struct {
 	ModelProvider          string         `json:"model_provider"`
 	FirstResponseLatencyMS int            `json:"first_response_latency_ms"`
 	AssistantResponses     []string       `json:"assistant_responses"`
+	ReasoningSummaries     []string       `json:"reasoning_summaries"`
 	Timestamp              time.Time      `json:"timestamp"`
 }
 
@@ -151,41 +153,36 @@ type SessionSummaryListResp struct {
 	Items []SessionSummaryItem `json:"items"`
 }
 
-type ChangePlanStepResp struct {
-	Type            string         `json:"type"`
-	Action          string         `json:"action"`
-	TargetFile      string         `json:"target_file"`
-	Summary         string         `json:"summary"`
-	SettingsUpdates map[string]any `json:"settings_updates"`
-	ContentPreview  string         `json:"content_preview"`
+type ReportResp struct {
+	ID                  string    `json:"id"`
+	ProjectID           string    `json:"project_id"`
+	Kind                string    `json:"kind"`
+	Title               string    `json:"title"`
+	Summary             string    `json:"summary"`
+	UserIntent          string    `json:"user_intent"`
+	ModelInterpretation string    `json:"model_interpretation"`
+	Reason              string    `json:"reason"`
+	Explanation         string    `json:"explanation"`
+	ExpectedBenefit     string    `json:"expected_benefit"`
+	Risk                string    `json:"risk"`
+	ExpectedImpact      string    `json:"expected_impact"`
+	Confidence          string    `json:"confidence"`
+	Strengths           []string  `json:"strengths"`
+	Frictions           []string  `json:"frictions"`
+	NextSteps           []string  `json:"next_steps"`
+	Status              string    `json:"status"`
+	Score               float64   `json:"score"`
+	TargetTool          string    `json:"target_tool"`
+	ResearchProvider    string    `json:"research_provider"`
+	ResearchModel       string    `json:"research_model"`
+	Evidence            []string  `json:"evidence"`
+	RawSuggestion       string    `json:"raw_suggestion"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
-type RecommendationResp struct {
-	ID               string               `json:"id"`
-	ProjectID        string               `json:"project_id"`
-	Kind             string               `json:"kind"`
-	Title            string               `json:"title"`
-	Summary          string               `json:"summary"`
-	Reason           string               `json:"reason"`
-	Explanation      string               `json:"explanation"`
-	ExpectedBenefit  string               `json:"expected_benefit"`
-	Risk             string               `json:"risk"`
-	ExpectedImpact   string               `json:"expected_impact"`
-	Status           string               `json:"status"`
-	Score            float64              `json:"score"`
-	TargetTool       string               `json:"target_tool"`
-	TargetFileHint   string               `json:"target_file_hint"`
-	ResearchProvider string               `json:"research_provider"`
-	ResearchModel    string               `json:"research_model"`
-	Evidence         []string             `json:"evidence"`
-	ChangePlan       []ChangePlanStepResp `json:"change_plan"`
-	SettingsUpdates  map[string]any       `json:"settings_updates"`
-	RawSuggestion    string               `json:"raw_suggestion"`
-	CreatedAt        time.Time            `json:"created_at"`
-}
-
-type RecommendationListResp struct {
-	Items []RecommendationResp `json:"items"`
+type ReportListResp struct {
+	SchemaVersion string       `json:"schema_version"`
+	Items         []ReportResp `json:"items"`
 }
 
 type ProjectResp struct {
@@ -203,171 +200,6 @@ type ProjectListResp struct {
 	Items []ProjectResp `json:"items"`
 }
 
-type PatchPreviewItem struct {
-	FilePath        string         `json:"file_path"`
-	Operation       string         `json:"operation"`
-	Summary         string         `json:"summary"`
-	SettingsUpdates map[string]any `json:"settings_updates"`
-	ContentPreview  string         `json:"content_preview"`
-}
-
-type ApplyPlanResp struct {
-	ApplyID        string             `json:"apply_id"`
-	ExperimentID   string             `json:"experiment_id"`
-	Recommendation RecommendationResp `json:"recommendation"`
-	Status         string             `json:"status"`
-	PolicyMode     string             `json:"policy_mode"`
-	PolicyReason   string             `json:"policy_reason"`
-	ApprovalStatus string             `json:"approval_status"`
-	Decision       string             `json:"decision"`
-	ReviewedBy     string             `json:"reviewed_by"`
-	ReviewNote     string             `json:"review_note"`
-	ReviewedAt     *time.Time         `json:"reviewed_at"`
-	PatchPreview   []PatchPreviewItem `json:"patch_preview"`
-	RequestedAt    time.Time          `json:"requested_at"`
-}
-
-type ApplyResultResp struct {
-	ApplyID      string    `json:"apply_id"`
-	ExperimentID string    `json:"experiment_id"`
-	Status       string    `json:"status"`
-	AppliedAt    time.Time `json:"applied_at"`
-	RolledBack   bool      `json:"rolled_back"`
-}
-
-type ChangePlanReviewResp struct {
-	ApplyID        string     `json:"apply_id"`
-	Status         string     `json:"status"`
-	PolicyMode     string     `json:"policy_mode"`
-	PolicyReason   string     `json:"policy_reason"`
-	ApprovalStatus string     `json:"approval_status"`
-	Decision       string     `json:"decision"`
-	ReviewedBy     string     `json:"reviewed_by"`
-	ReviewNote     string     `json:"review_note"`
-	ReviewedAt     *time.Time `json:"reviewed_at"`
-}
-
-type ApplyHistoryItem struct {
-	ApplyID          string             `json:"apply_id"`
-	ExperimentID     string             `json:"experiment_id"`
-	RecommendationID string             `json:"recommendation_id"`
-	Status           string             `json:"status"`
-	PolicyMode       string             `json:"policy_mode"`
-	PolicyReason     string             `json:"policy_reason"`
-	ApprovalStatus   string             `json:"approval_status"`
-	Decision         string             `json:"decision"`
-	Scope            string             `json:"scope"`
-	RequestedBy      string             `json:"requested_by"`
-	ReviewedBy       string             `json:"reviewed_by"`
-	ReviewNote       string             `json:"review_note"`
-	RequestedAt      time.Time          `json:"requested_at"`
-	ReviewedAt       *time.Time         `json:"reviewed_at"`
-	AppliedAt        *time.Time         `json:"applied_at"`
-	LastReportedAt   *time.Time         `json:"last_reported_at"`
-	RolledBackAt     *time.Time         `json:"rolled_back_at"`
-	AppliedFile      string             `json:"applied_file"`
-	AppliedSettings  map[string]any     `json:"applied_settings"`
-	AppliedText      string             `json:"applied_text"`
-	PatchPreview     []PatchPreviewItem `json:"patch_preview"`
-	RolledBack       bool               `json:"rolled_back"`
-}
-
-type ApplyHistoryResp struct {
-	Items []ApplyHistoryItem `json:"items"`
-}
-
-type PendingApplyItem struct {
-	ApplyID          string             `json:"apply_id"`
-	ExperimentID     string             `json:"experiment_id"`
-	RecommendationID string             `json:"recommendation_id"`
-	Action           string             `json:"action"`
-	Status           string             `json:"status"`
-	PolicyMode       string             `json:"policy_mode"`
-	PolicyReason     string             `json:"policy_reason"`
-	ApprovalStatus   string             `json:"approval_status"`
-	Scope            string             `json:"scope"`
-	RequestedBy      string             `json:"requested_by"`
-	RequestedAt      time.Time          `json:"requested_at"`
-	Note             string             `json:"note"`
-	PatchPreview     []PatchPreviewItem `json:"patch_preview"`
-}
-
-type ExperimentSummaryResp struct {
-	ExperimentID         string     `json:"experiment_id"`
-	ProjectID            string     `json:"project_id"`
-	RecommendationID     string     `json:"recommendation_id"`
-	ApplyID              string     `json:"apply_id"`
-	Status               string     `json:"status"`
-	Decision             string     `json:"decision"`
-	DecisionReason       string     `json:"decision_reason"`
-	EvaluationMode       string     `json:"evaluation_mode"`
-	EvaluationModel      string     `json:"evaluation_model"`
-	EvaluationDecision   string     `json:"evaluation_decision"`
-	EvaluationConfidence string     `json:"evaluation_confidence"`
-	EvaluationSummary    string     `json:"evaluation_summary"`
-	TargetMetric         string     `json:"target_metric"`
-	RequestedBy          string     `json:"requested_by"`
-	Scope                string     `json:"scope"`
-	BaselineSessions     int        `json:"baseline_sessions"`
-	BaselineQueries      int        `json:"baseline_queries"`
-	PostApplySessions    int        `json:"post_apply_sessions"`
-	PostApplyQueries     int        `json:"post_apply_queries"`
-	CreatedAt            time.Time  `json:"created_at"`
-	ApprovedAt           *time.Time `json:"approved_at"`
-	AppliedAt            *time.Time `json:"applied_at"`
-	EvaluatedAt          *time.Time `json:"evaluated_at"`
-	LastObservedAt       *time.Time `json:"last_observed_at"`
-	ResolvedAt           *time.Time `json:"resolved_at"`
-}
-
-type ExperimentListResp struct {
-	Items []ExperimentSummaryResp `json:"items"`
-}
-
-type PendingApplyResp struct {
-	Items []PendingApplyItem `json:"items"`
-}
-
-type ImpactSummaryItem struct {
-	ApplyID                         string     `json:"apply_id"`
-	ExperimentID                    string     `json:"experiment_id"`
-	RecommendationID                string     `json:"recommendation_id"`
-	Status                          string     `json:"status"`
-	EvaluationMode                  string     `json:"evaluation_mode"`
-	EvaluationModel                 string     `json:"evaluation_model"`
-	EvaluationDecision              string     `json:"evaluation_decision"`
-	EvaluationConfidence            string     `json:"evaluation_confidence"`
-	EvaluationSummary               string     `json:"evaluation_summary"`
-	AppliedAt                       *time.Time `json:"applied_at"`
-	SessionsBefore                  int        `json:"sessions_before"`
-	SessionsAfter                   int        `json:"sessions_after"`
-	QueriesBefore                   int        `json:"queries_before"`
-	QueriesAfter                    int        `json:"queries_after"`
-	AvgInputTokensPerQueryBefore    float64    `json:"avg_input_tokens_per_query_before"`
-	AvgInputTokensPerQueryAfter     float64    `json:"avg_input_tokens_per_query_after"`
-	AvgOutputTokensPerQueryBefore   float64    `json:"avg_output_tokens_per_query_before"`
-	AvgOutputTokensPerQueryAfter    float64    `json:"avg_output_tokens_per_query_after"`
-	AvgTokensPerQueryBefore         float64    `json:"avg_tokens_per_query_before"`
-	AvgTokensPerQueryAfter          float64    `json:"avg_tokens_per_query_after"`
-	AvgInputTokensPerSessionBefore  float64    `json:"avg_input_tokens_per_session_before"`
-	AvgInputTokensPerSessionAfter   float64    `json:"avg_input_tokens_per_session_after"`
-	AvgOutputTokensPerSessionBefore float64    `json:"avg_output_tokens_per_session_before"`
-	AvgOutputTokensPerSessionAfter  float64    `json:"avg_output_tokens_per_session_after"`
-	AvgTokensPerSessionBefore       float64    `json:"avg_tokens_per_session_before"`
-	AvgTokensPerSessionAfter        float64    `json:"avg_tokens_per_session_after"`
-	InputTokensPerQueryDelta        float64    `json:"input_tokens_per_query_delta"`
-	OutputTokensPerQueryDelta       float64    `json:"output_tokens_per_query_delta"`
-	TokensPerQueryDelta             float64    `json:"tokens_per_query_delta"`
-	InputTokensPerSessionDelta      float64    `json:"input_tokens_per_session_delta"`
-	OutputTokensPerSessionDelta     float64    `json:"output_tokens_per_session_delta"`
-	TokensPerSessionDelta           float64    `json:"tokens_per_session_delta"`
-	Interpretation                  string     `json:"interpretation"`
-}
-
-type ImpactSummaryResp struct {
-	Items []ImpactSummaryItem `json:"items"`
-}
-
 type AuditEventResp struct {
 	ID        string    `json:"id"`
 	OrgID     string    `json:"org_id"`
@@ -381,53 +213,48 @@ type AuditListResp struct {
 	Items []AuditEventResp `json:"items"`
 }
 
-type RecommendationResearchStatusResp struct {
-	State               string     `json:"state"`
-	Summary             string     `json:"summary"`
-	Provider            string     `json:"provider"`
-	Model               string     `json:"model"`
-	MinimumSessions     int        `json:"minimum_sessions"`
-	SessionCount        int        `json:"session_count"`
-	RawQueryCount       int        `json:"raw_query_count"`
-	RecommendationCount int        `json:"recommendation_count"`
-	TriggerSessionID    string     `json:"trigger_session_id"`
-	LastError           string     `json:"last_error"`
-	TriggeredAt         *time.Time `json:"triggered_at"`
-	StartedAt           *time.Time `json:"started_at"`
-	CompletedAt         *time.Time `json:"completed_at"`
-	LastSuccessfulAt    *time.Time `json:"last_successful_at"`
-	LastDurationMS      int        `json:"last_duration_ms"`
+type ReportResearchStatusResp struct {
+	SchemaVersion    string     `json:"schema_version"`
+	State            string     `json:"state"`
+	Summary          string     `json:"summary"`
+	Provider         string     `json:"provider"`
+	Model            string     `json:"model"`
+	MinimumSessions  int        `json:"minimum_sessions"`
+	SessionCount     int        `json:"session_count"`
+	RawQueryCount    int        `json:"raw_query_count"`
+	ReportCount      int        `json:"report_count"`
+	TriggerSessionID string     `json:"trigger_session_id"`
+	LastError        string     `json:"last_error"`
+	TriggeredAt      *time.Time `json:"triggered_at"`
+	StartedAt        *time.Time `json:"started_at"`
+	CompletedAt      *time.Time `json:"completed_at"`
+	LastSuccessfulAt *time.Time `json:"last_successful_at"`
+	LastDurationMS   int        `json:"last_duration_ms"`
 }
 
 type DashboardOverviewResp struct {
-	OrgID                     string                            `json:"org_id"`
-	TotalDevices              int                               `json:"total_devices"`
-	TotalProjects             int                               `json:"total_projects"`
-	TotalSessions             int                               `json:"total_sessions"`
-	ActiveRecommendations     int                               `json:"active_recommendations"`
-	ActiveExperimentCount     int                               `json:"active_experiment_count"`
-	PendingReviewCount        int                               `json:"pending_review_count"`
-	ApprovedQueueCount        int                               `json:"approved_queue_count"`
-	SuccessfulRolloutCount    int                               `json:"successful_rollout_count"`
-	FailedExecutionCount      int                               `json:"failed_execution_count"`
-	TotalInputTokens          int                               `json:"total_input_tokens"`
-	TotalOutputTokens         int                               `json:"total_output_tokens"`
-	TotalTokens               int                               `json:"total_tokens"`
-	AvgInputTokensPerQuery    float64                           `json:"avg_input_tokens_per_query"`
-	AvgOutputTokensPerQuery   float64                           `json:"avg_output_tokens_per_query"`
-	AvgTokensPerQuery         float64                           `json:"avg_tokens_per_query"`
-	AvgInputTokensPerSession  float64                           `json:"avg_input_tokens_per_session"`
-	AvgOutputTokensPerSession float64                           `json:"avg_output_tokens_per_session"`
-	AvgTokensPerSession       float64                           `json:"avg_tokens_per_session"`
-	AvgQueriesPerSession      float64                           `json:"avg_queries_per_session"`
-	RecommendationApplyRate   float64                           `json:"recommendation_apply_rate"`
-	RollbackRate              float64                           `json:"rollback_rate"`
-	ActionSummary             string                            `json:"action_summary"`
-	OutcomeSummary            string                            `json:"outcome_summary"`
-	ResearchProvider          string                            `json:"research_provider"`
-	ResearchMode              string                            `json:"research_mode"`
-	LastIngestedAt            *time.Time                        `json:"last_ingested_at"`
-	ResearchStatus            *RecommendationResearchStatusResp `json:"research_status,omitempty"`
+	SchemaVersion             string                    `json:"schema_version"`
+	OrgID                     string                    `json:"org_id"`
+	TotalDevices              int                       `json:"total_devices"`
+	TotalProjects             int                       `json:"total_projects"`
+	TotalSessions             int                       `json:"total_sessions"`
+	ActiveReports             int                       `json:"active_reports"`
+	TotalInputTokens          int                       `json:"total_input_tokens"`
+	TotalOutputTokens         int                       `json:"total_output_tokens"`
+	TotalTokens               int                       `json:"total_tokens"`
+	AvgInputTokensPerQuery    float64                   `json:"avg_input_tokens_per_query"`
+	AvgOutputTokensPerQuery   float64                   `json:"avg_output_tokens_per_query"`
+	AvgTokensPerQuery         float64                   `json:"avg_tokens_per_query"`
+	AvgInputTokensPerSession  float64                   `json:"avg_input_tokens_per_session"`
+	AvgOutputTokensPerSession float64                   `json:"avg_output_tokens_per_session"`
+	AvgTokensPerSession       float64                   `json:"avg_tokens_per_session"`
+	AvgQueriesPerSession      float64                   `json:"avg_queries_per_session"`
+	ActionSummary             string                    `json:"action_summary"`
+	OutcomeSummary            string                    `json:"outcome_summary"`
+	ResearchProvider          string                    `json:"research_provider"`
+	ResearchMode              string                    `json:"research_mode"`
+	LastIngestedAt            *time.Time                `json:"last_ingested_at"`
+	ResearchStatus            *ReportResearchStatusResp `json:"research_status,omitempty"`
 }
 
 type DashboardProjectInsightDayResp struct {
@@ -442,9 +269,7 @@ type DashboardProjectInsightDayResp struct {
 	FunctionCallCount         int    `json:"function_call_count"`
 	ToolErrorCount            int    `json:"tool_error_count"`
 	ToolWallTimeMS            int    `json:"tool_wall_time_ms"`
-	ApprovalCount             int    `json:"approval_count"`
-	AppliedCount              int    `json:"applied_count"`
-	RollbackCount             int    `json:"rollback_count"`
+	ReportCount               int    `json:"report_count"`
 	SnapshotCount             int    `json:"snapshot_count"`
 	LatencySessionCount       int    `json:"latency_session_count"`
 	AvgFirstResponseLatencyMS int    `json:"avg_first_response_latency_ms"`
@@ -476,6 +301,7 @@ type DashboardProjectInsightToolResp struct {
 }
 
 type DashboardProjectInsightsResp struct {
+	SchemaVersion              string                                `json:"schema_version"`
 	ProjectID                  string                                `json:"project_id"`
 	Days                       []DashboardProjectInsightDayResp      `json:"days"`
 	Models                     []DashboardProjectInsightModelResp    `json:"models"`
@@ -499,5 +325,5 @@ type DashboardProjectInsightsResp struct {
 	AvgToolWallTimeMS          int                                   `json:"avg_tool_wall_time_ms"`
 	SessionsWithFunctionCalls  int                                   `json:"sessions_with_function_calls"`
 	SessionsWithToolErrors     int                                   `json:"sessions_with_tool_errors"`
-	ResearchStatus             *RecommendationResearchStatusResp     `json:"research_status,omitempty"`
+	ResearchStatus             *ReportResearchStatusResp             `json:"research_status,omitempty"`
 }

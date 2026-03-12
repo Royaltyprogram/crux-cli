@@ -43,8 +43,8 @@ func waitForDashboardResearchStatus(
 	t *testing.T,
 	echo *echo.Echo,
 	token, orgID string,
-	matcher func(*response.RecommendationResearchStatusResp) bool,
-) *response.RecommendationResearchStatusResp {
+	matcher func(*response.ReportResearchStatusResp) bool,
+) *response.ReportResearchStatusResp {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -74,9 +74,9 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:                    conf,
-		AnalyticsStore:            store,
-		RecommendationMinSessions: 1,
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
 	})
 
 	echo, err := routes.NewEcho(conf, nil, store)
@@ -136,14 +136,19 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		AssistantResponses: []string{
 			"The analytics route registers auth, ingestion, and dashboard handlers in one place.",
 		},
+		ReasoningSummaries: []string{
+			"Checking route flow and test expectations before proposing the patch.",
+		},
 	})
 	require.NotNil(t, ingestResp.ResearchStatus)
+	require.Equal(t, "report-api.v1", ingestResp.SchemaVersion)
 	require.Equal(t, "running", ingestResp.ResearchStatus.State)
 
-	status := waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-route", func(item *response.RecommendationResearchStatusResp) bool {
+	status := waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-route", func(item *response.ReportResearchStatusResp) bool {
 		return item != nil && item.State == "succeeded"
 	})
-	require.Equal(t, 1, status.RecommendationCount)
+	require.Equal(t, "report-api.v1", status.SchemaVersion)
+	require.Equal(t, 1, status.ReportCount)
 
 	snapshotList := getJSON[response.ConfigSnapshotListResp](t, echo, conf.App.APIToken, "/api/v1/config-snapshots", url.Values{
 		"project_id": []string{projectResp.ProjectID},
@@ -168,66 +173,16 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Equal(t, map[string]int{"shell": 1}, sessionList.Items[0].ToolErrors)
 	require.Equal(t, map[string]int{"shell": 700, "read_file": 200}, sessionList.Items[0].ToolWallTimesMS)
 	require.Equal(t, []string{"The analytics route registers auth, ingestion, and dashboard handlers in one place."}, sessionList.Items[0].AssistantResponses)
+	require.Equal(t, []string{"Checking route flow and test expectations before proposing the patch."}, sessionList.Items[0].ReasoningSummaries)
 
-	recResp := getJSON[response.RecommendationListResp](t, echo, conf.App.APIToken, "/api/v1/recommendations", url.Values{
+	recResp := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
+	require.Equal(t, "report-api.v1", recResp.SchemaVersion)
 	require.NotEmpty(t, recResp.Items)
 	require.Contains(t, recResp.Items[0].RawSuggestion, "\"kind\": \"llm-workflow-review\"")
-
-	applyResp := postJSON[response.ApplyPlanResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/recommendations/apply", request.ApplyRecommendationReq{
-		RecommendationID: recResp.Items[0].ID,
-		RequestedBy:      "user-route",
-	})
-	require.Equal(t, "awaiting_review", applyResp.Status)
-	require.NotEmpty(t, applyResp.ExperimentID)
-
-	experimentResp := getJSON[response.ExperimentListResp](t, echo, conf.App.APIToken, "/api/v1/experiments", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.Len(t, experimentResp.Items, 1)
-	require.Equal(t, applyResp.ExperimentID, experimentResp.Items[0].ExperimentID)
-	require.Equal(t, "awaiting_review", experimentResp.Items[0].Status)
-
-	reviewResp := postJSON[response.ChangePlanReviewResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/change-plans/review", request.ReviewChangePlanReq{
-		ApplyID:    applyResp.ApplyID,
-		Decision:   "approve",
-		ReviewedBy: "user-route",
-	})
-	require.Equal(t, "approved_for_local_apply", reviewResp.Status)
-
-	pendingResp := getJSON[response.PendingApplyResp](t, echo, conf.App.APIToken, "/api/v1/applies/pending", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-		"user_id":    []string{"user-route"},
-	})
-	require.Len(t, pendingResp.Items, 1)
-	require.Equal(t, applyResp.ApplyID, pendingResp.Items[0].ApplyID)
-	require.Equal(t, applyResp.ExperimentID, pendingResp.Items[0].ExperimentID)
-
-	applyResult := postJSON[response.ApplyResultResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
-		ApplyID:     applyResp.ApplyID,
-		Success:     true,
-		Note:        "applied by route test",
-		AppliedFile: "AGENTS.md",
-		AppliedText: "AgentOpt Research Findings",
-	})
-	require.Equal(t, "applied", applyResult.Status)
-	require.False(t, applyResult.RolledBack)
-	require.Equal(t, applyResp.ExperimentID, applyResult.ExperimentID)
-
-	pendingAfterApply := getJSON[response.PendingApplyResp](t, echo, conf.App.APIToken, "/api/v1/applies/pending", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-		"user_id":    []string{"user-route"},
-	})
-	require.Empty(t, pendingAfterApply.Items)
-
-	applyHistory := getJSON[response.ApplyHistoryResp](t, echo, conf.App.APIToken, "/api/v1/applies", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.NotEmpty(t, applyHistory.Items)
-	require.Equal(t, "applied", applyHistory.Items[0].Status)
-	require.Equal(t, "AGENTS.md", applyHistory.Items[0].AppliedFile)
-	require.Equal(t, applyResp.ExperimentID, applyHistory.Items[0].ExperimentID)
+	require.NotEmpty(t, recResp.Items[0].UserIntent)
+	require.NotEmpty(t, recResp.Items[0].ModelInterpretation)
 
 	postApplySession := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID: projectResp.ProjectID,
@@ -241,56 +196,33 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		Timestamp: time.Now().UTC().Add(2 * time.Hour),
 	})
 	require.NotEmpty(t, postApplySession.SessionID)
+	waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-route", func(item *response.ReportResearchStatusResp) bool {
+		return item != nil && item.State == "succeeded"
+	})
 
-	impactResp := getJSON[response.ImpactSummaryResp](t, echo, conf.App.APIToken, "/api/v1/impact", url.Values{
+	recRespAfterSecondSession := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
-	require.NotEmpty(t, impactResp.Items)
-	require.Equal(t, applyResp.ApplyID, impactResp.Items[0].ApplyID)
-	require.Equal(t, applyResp.ExperimentID, impactResp.Items[0].ExperimentID)
-	require.Greater(t, impactResp.Items[0].SessionsAfter, 0)
-
-	rollbackResp := postJSON[response.ApplyResultResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/applies/result", request.ApplyResultReq{
-		ApplyID:     applyResp.ApplyID,
-		Success:     true,
-		Note:        "rolled back by route test",
-		AppliedFile: "AGENTS.md",
-		RolledBack:  true,
-	})
-	require.Equal(t, "rollback_confirmed", rollbackResp.Status)
-	require.True(t, rollbackResp.RolledBack)
-
-	applyHistoryAfterRollback := getJSON[response.ApplyHistoryResp](t, echo, conf.App.APIToken, "/api/v1/applies", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.NotEmpty(t, applyHistoryAfterRollback.Items)
-	require.Equal(t, "rollback_confirmed", applyHistoryAfterRollback.Items[0].Status)
-	require.True(t, applyHistoryAfterRollback.Items[0].RolledBack)
-	require.NotNil(t, applyHistoryAfterRollback.Items[0].RolledBackAt)
-
-	experimentAfterRollback := getJSON[response.ExperimentListResp](t, echo, conf.App.APIToken, "/api/v1/experiments", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-	})
-	require.Len(t, experimentAfterRollback.Items, 1)
-	require.Equal(t, "rolled_back", experimentAfterRollback.Items[0].Status)
-	require.Equal(t, "rollback", experimentAfterRollback.Items[0].Decision)
+	require.NotEmpty(t, recRespAfterSecondSession.Items)
+	require.NotEmpty(t, recRespAfterSecondSession.Items[0].Summary)
 
 	overviewResp := getJSON[response.DashboardOverviewResp](t, echo, conf.App.APIToken, "/api/v1/dashboard/overview", url.Values{
 		"org_id": []string{"org-route"},
 	})
+	require.Equal(t, "report-api.v1", overviewResp.SchemaVersion)
 	require.Greater(t, overviewResp.AvgTokensPerQuery, 0.0)
 	require.Greater(t, overviewResp.AvgInputTokensPerQuery, 0.0)
 	require.Greater(t, overviewResp.AvgOutputTokensPerQuery, 0.0)
 	require.Greater(t, overviewResp.TotalInputTokens, 0)
 	require.Greater(t, overviewResp.TotalOutputTokens, 0)
 	require.Greater(t, overviewResp.TotalTokens, 0)
-	require.Zero(t, overviewResp.ActiveExperimentCount)
 	require.NotEmpty(t, overviewResp.ActionSummary)
 	require.NotEmpty(t, overviewResp.OutcomeSummary)
 
 	insightsResp := getJSON[response.DashboardProjectInsightsResp](t, echo, conf.App.APIToken, "/api/v1/dashboard/project-insights", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
+	require.Equal(t, "report-api.v1", insightsResp.SchemaVersion)
 	require.NotEmpty(t, insightsResp.Days)
 	require.Equal(t, projectResp.ProjectID, insightsResp.ProjectID)
 	require.Equal(t, 1, insightsResp.KnownModelSessions)
@@ -353,8 +285,6 @@ func newRouteResearchConfig(t *testing.T) *configs.Config {
 			}
 			require.NoError(t, err)
 		}
-		input, _ := payload["input"].(string)
-
 		body := `{
   "output": [
     {
@@ -362,27 +292,12 @@ func newRouteResearchConfig(t *testing.T) *configs.Config {
       "content": [
         {
           "type": "output_text",
-          "text": "{\"recommendations\":[{\"kind\":\"llm-workflow-review\",\"title\":\"Reduce repeated workflow recap before implementation\",\"summary\":\"The uploaded raw queries show the user spending too many turns on control-flow recap and verification setup before the actual patch work starts.\",\"reason\":\"Recent raw queries repeatedly ask for current behavior summaries, exact checks, and narrow patch scope before implementation begins.\",\"explanation\":\"A small instruction update can push the coding agent to locate the concrete files first, summarize only the relevant control flow, and propose a verification plan by default.\",\"expected_benefit\":\"Less repeated steering and faster transition from orientation to implementation.\",\"risk\":\"Low. Reviewable instruction update only.\",\"expected_impact\":\"Fewer exploratory turns and clearer first useful responses.\",\"score\":0.82,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"],\"change_plan\":[{\"type\":\"text_append\",\"action\":\"append_block\",\"target_file\":\"~/.codex/AGENTS.md\",\"summary\":\"Add a reusable workflow-defaults block for Codex.\",\"content_preview\":\"## Workflow Defaults\\n- Locate the concrete files first.\\n- Summarize only the relevant control flow.\\n- List targeted verification before proposing the patch.\\n\"}]}]}"
+          "text": "{\"schema_version\":\"report-feedback.v1\",\"reports\":[{\"kind\":\"llm-workflow-review\",\"title\":\"Reduce repeated workflow recap before implementation\",\"summary\":\"The uploaded raw queries show the user spending too many turns on control-flow recap and verification setup before the actual patch work starts.\",\"user_intent\":\"The user wants a small, validated fix and keeps narrowing scope before implementation.\",\"model_interpretation\":\"The model appears to understand the request as repo-orientation and verification planning first, then patching.\",\"reason\":\"Recent raw queries repeatedly ask for current behavior summaries, exact checks, and narrow patch scope before implementation begins.\",\"explanation\":\"The report should call out that the user is compensating for missing default repo discovery and verification structure.\",\"expected_benefit\":\"Less repeated steering and faster transition from orientation to implementation.\",\"risk\":\"Low. Observational feedback only.\",\"expected_impact\":\"Fewer exploratory turns and clearer first useful responses.\",\"confidence\":\"high\",\"strengths\":[\"The user consistently asks for narrow patch scope.\",\"Verification intent is explicit before risky edits.\"],\"frictions\":[\"Repo discovery is repeated across sessions.\",\"Verification setup often arrives only after extra recap turns.\"],\"next_steps\":[\"Start with concrete file discovery before summarizing control flow.\",\"List targeted verification immediately after locating the fix.\"],\"score\":0.82,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"]}]}"
         }
       ]
     }
   ]
 }`
-		if strings.Contains(input, "Before Rollout Queries") {
-			body = `{
-  "output": [
-    {
-      "type": "message",
-      "content": [
-        {
-          "type": "output_text",
-          "text": "{\"decision\":\"observe\",\"confidence\":\"low\",\"summary\":\"The qualitative review does not show a strong enough workflow change yet, so the rollout should keep being observed.\"}"
-        }
-      ]
-    }
-  ]
-}`
-		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, err := w.Write([]byte(body))
@@ -409,9 +324,9 @@ func TestAnalyticsRouteLoginAndCLITokenFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:                    conf,
-		AnalyticsStore:            store,
-		RecommendationMinSessions: 1,
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
 	})
 
 	echo, err := routes.NewEcho(conf, nil, store)
@@ -492,9 +407,9 @@ func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
 	require.NoError(t, err)
 
 	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:                    conf,
-		AnalyticsStore:            store,
-		RecommendationMinSessions: 1,
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
 	})
 
 	echo, err := routes.NewEcho(conf, nil, store)

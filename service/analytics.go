@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -17,33 +16,31 @@ import (
 
 type AnalyticsService struct {
 	Options
-	researchAgent             *CloudResearchAgent
-	evaluationAgent           *CloudEvaluationAgent
-	recommendationMinSessions int
-	recommendationRefreshMu   sync.Mutex
-	recommendationRefreshLive map[string]bool
-	recommendationRefreshNext map[string]*recommendationRefreshJob
+	researchAgent     *CloudResearchAgent
+	reportMinSessions int
+	reportRefreshMu   sync.Mutex
+	reportRefreshLive map[string]bool
+	reportRefreshNext map[string]*reportRefreshJob
 }
 
 const sharedWorkspaceName = "Shared workspace"
-const defaultRecommendationMinSessions = 10
+const defaultReportMinSessions = 10
 
 func NewAnalyticsService(opt Options) *AnalyticsService {
-	recommendationMinSessions := opt.RecommendationMinSessions
-	if recommendationMinSessions <= 0 {
-		recommendationMinSessions = defaultRecommendationMinSessions
+	reportMinSessions := opt.ReportMinSessions
+	if reportMinSessions <= 0 {
+		reportMinSessions = defaultReportMinSessions
 	}
 	return &AnalyticsService{
-		Options:                   opt,
-		researchAgent:             NewCloudResearchAgent(opt.Config),
-		evaluationAgent:           NewCloudEvaluationAgent(opt.Config),
-		recommendationMinSessions: recommendationMinSessions,
-		recommendationRefreshLive: make(map[string]bool),
-		recommendationRefreshNext: make(map[string]*recommendationRefreshJob),
+		Options:           opt,
+		researchAgent:     NewCloudResearchAgent(opt.Config),
+		reportMinSessions: reportMinSessions,
+		reportRefreshLive: make(map[string]bool),
+		reportRefreshNext: make(map[string]*reportRefreshJob),
 	}
 }
 
-type recommendationRefreshJob struct {
+type reportRefreshJob struct {
 	project          *Project
 	sessions         []*SessionSummary
 	snapshots        []*ConfigSnapshot
@@ -656,6 +653,7 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		ModelProvider:          strings.TrimSpace(req.ModelProvider),
 		FirstResponseLatencyMS: maxInt(req.FirstResponseLatencyMS, 0),
 		AssistantResponses:     cloneStringSlice(req.AssistantResponses),
+		ReasoningSummaries:     cloneStringSlice(req.ReasoningSummaries),
 		Timestamp:              recordedAt,
 	}
 
@@ -675,32 +673,9 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		project.LastIngestedAt = &recordedAt
 	}
 
-	var recommendations []*Recommendation
-	var refreshJob *recommendationRefreshJob
-	if activeExperiment := s.findActiveExperimentLocked(project.ID); activeExperiment != nil {
-		s.setRecommendationResearchStatusLocked(project.ID, RecommendationResearchStatus{
-			ProjectID:           project.ID,
-			State:               "deferred_active_experiment",
-			Summary:             "Recommendation refresh is deferred while an active experiment is still being measured.",
-			Provider:            s.researchAgent.Provider,
-			Model:               s.researchAgent.Model,
-			MinimumSessions:     s.recommendationMinSessions,
-			SessionCount:        len(s.AnalyticsStore.sessionSummaries[project.ID]),
-			RawQueryCount:       len(collectRawQueries(s.AnalyticsStore.sessionSummaries[project.ID])),
-			RecommendationCount: len(s.currentRecommendationsLocked(project.ID)),
-			TriggerSessionID:    sessionID,
-		})
-		s.evaluateExperimentsLocked(project, recordedAt)
-		if s.findActiveExperimentLocked(project.ID) != nil {
-			recommendations = s.currentRecommendationsLocked(project.ID)
-		} else {
-			recommendations, refreshJob = s.prepareRecommendationRefreshLocked(project, sessionID)
-		}
-	} else {
-		recommendations, refreshJob = s.prepareRecommendationRefreshLocked(project, sessionID)
-	}
-	ids := make([]string, 0, len(recommendations))
-	for _, item := range recommendations {
+	reports, refreshJob := s.prepareReportRefreshLocked(project, sessionID)
+	ids := make([]string, 0, len(reports))
+	for _, item := range reports {
 		ids = append(ids, item.ID)
 	}
 
@@ -711,16 +686,17 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 	}
 
 	resp := &response.SessionIngestResp{
-		SessionID:               sessionID,
-		ProjectID:               req.ProjectID,
-		RecommendationCount:     len(ids),
-		LatestRecommendationIDs: ids,
-		RecordedAt:              recordedAt,
-		ResearchStatus:          cloneRecommendationResearchStatusResp(s.AnalyticsStore.recommendationResearch[project.ID]),
+		SchemaVersion:   reportAPISchemaVersion,
+		SessionID:       sessionID,
+		ProjectID:       req.ProjectID,
+		ReportCount:     len(ids),
+		LatestReportIDs: cloneStringSlice(ids),
+		RecordedAt:      recordedAt,
+		ResearchStatus:  cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[project.ID]),
 	}
 	s.AnalyticsStore.mu.Unlock()
 
-	s.enqueueRecommendationRefresh(refreshJob)
+	s.enqueueReportRefresh(refreshJob)
 	return resp, nil
 }
 
@@ -764,6 +740,7 @@ func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *reques
 			ModelProvider:          session.ModelProvider,
 			FirstResponseLatencyMS: session.FirstResponseLatencyMS,
 			AssistantResponses:     cloneStringSlice(session.AssistantResponses),
+			ReasoningSummaries:     cloneStringSlice(session.ReasoningSummaries),
 			Timestamp:              session.Timestamp,
 		})
 	}
@@ -780,7 +757,7 @@ func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *reques
 	return &response.SessionSummaryListResp{Items: items}, nil
 }
 
-func (s *AnalyticsService) ListRecommendations(ctx context.Context, req *request.RecommendationListReq) (*response.RecommendationListResp, error) {
+func (s *AnalyticsService) ListReports(ctx context.Context, req *request.ReportListReq) (*response.ReportListResp, error) {
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
 
@@ -793,14 +770,14 @@ func (s *AnalyticsService) ListRecommendations(ctx context.Context, req *request
 	}
 	req.ProjectID = project.ID
 
-	ids := s.AnalyticsStore.projectRecommendations[req.ProjectID]
-	items := make([]response.RecommendationResp, 0, len(ids))
+	ids := s.AnalyticsStore.projectReports[req.ProjectID]
+	items := make([]response.ReportResp, 0, len(ids))
 	for _, id := range ids {
-		rec, ok := s.AnalyticsStore.recommendations[id]
+		rec, ok := s.AnalyticsStore.reports[id]
 		if !ok {
 			continue
 		}
-		items = append(items, toRecommendationResp(rec))
+		items = append(items, toReportResp(rec))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Score == items[j].Score {
@@ -809,7 +786,10 @@ func (s *AnalyticsService) ListRecommendations(ctx context.Context, req *request
 		return items[i].Score > items[j].Score
 	})
 
-	return &response.RecommendationListResp{Items: items}, nil
+	return &response.ReportListResp{
+		SchemaVersion: reportAPISchemaVersion,
+		Items:         items,
+	}, nil
 }
 
 func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.DashboardOverviewReq) (*response.DashboardOverviewResp, error) {
@@ -831,21 +811,14 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 	}
 
 	var (
-		totalSessions          int
-		totalInputTokens       int
-		totalOutputTokens      int
-		totalTokens            int
-		totalQueries           int
-		totalActiveRecs        int
-		totalActiveExperiments int
-		totalApplyOps          int
-		totalSuccessfulApply   int
-		totalFailedApply       int
-		totalRollbacks         int
-		totalPendingReview     int
-		totalApprovedQueue     int
-		lastIngestedAt         *time.Time
-		researchStatus         *RecommendationResearchStatus
+		totalSessions      int
+		totalInputTokens   int
+		totalOutputTokens  int
+		totalTokens        int
+		totalQueries       int
+		totalActiveReports int
+		lastIngestedAt     *time.Time
+		researchStatus     *ReportResearchStatus
 	)
 
 	for _, projectID := range projectIDs {
@@ -861,66 +834,24 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 			}
 		}
 
-		for _, recommendationID := range s.AnalyticsStore.projectRecommendations[projectID] {
-			rec := s.AnalyticsStore.recommendations[recommendationID]
+		for _, reportID := range s.AnalyticsStore.projectReports[projectID] {
+			rec := s.AnalyticsStore.reports[reportID]
 			if rec != nil && rec.Status == "active" {
-				totalActiveRecs++
+				totalActiveReports++
 			}
 		}
-		if candidate := s.AnalyticsStore.recommendationResearch[projectID]; isRecommendationResearchStatusNewer(candidate, researchStatus) {
+		if candidate := s.AnalyticsStore.reportResearch[projectID]; isReportResearchStatusNewer(candidate, researchStatus) {
 			researchStatus = candidate
 		}
 	}
 
-	for _, op := range s.AnalyticsStore.applyOperations {
-		project := s.AnalyticsStore.projects[op.ProjectID]
-		if project == nil || project.OrgID != req.OrgID {
-			continue
-		}
-		totalApplyOps++
-		if op.Status == "applied" {
-			totalSuccessfulApply++
-		}
-		if op.Status == "failed" || op.Status == "rollback_failed" {
-			totalFailedApply++
-		}
-		if op.Status == "awaiting_review" {
-			totalPendingReview++
-		}
-		if op.Status == "approved_for_local_apply" {
-			totalApprovedQueue++
-		}
-		if op.RolledBack {
-			totalRollbacks++
-		}
-	}
-	for _, experiment := range s.AnalyticsStore.experiments {
-		if experiment == nil {
-			continue
-		}
-		project := s.AnalyticsStore.projects[experiment.ProjectID]
-		if project == nil || project.OrgID != req.OrgID {
-			continue
-		}
-		switch experiment.Status {
-		case "awaiting_review", "queued_for_apply", "measuring", "rollback_requested":
-			totalActiveExperiments++
-		}
-	}
-
-	rollbackRate := safeDiv(float64(totalRollbacks), float64(maxInt(totalApplyOps, 1)))
-
 	return &response.DashboardOverviewResp{
+		SchemaVersion:             reportAPISchemaVersion,
 		OrgID:                     req.OrgID,
 		TotalDevices:              countDevicesByOrg(s.AnalyticsStore.agents, req.OrgID),
 		TotalProjects:             len(projectIDs),
 		TotalSessions:             totalSessions,
-		ActiveRecommendations:     totalActiveRecs,
-		ActiveExperimentCount:     totalActiveExperiments,
-		PendingReviewCount:        totalPendingReview,
-		ApprovedQueueCount:        totalApprovedQueue,
-		SuccessfulRolloutCount:    totalSuccessfulApply,
-		FailedExecutionCount:      totalFailedApply,
+		ActiveReports:             totalActiveReports,
 		TotalInputTokens:          totalInputTokens,
 		TotalOutputTokens:         totalOutputTokens,
 		TotalTokens:               totalTokens,
@@ -931,14 +862,12 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		AvgOutputTokensPerSession: safeDiv(float64(totalOutputTokens), float64(maxInt(totalSessions, 1))),
 		AvgTokensPerSession:       safeDiv(float64(totalTokens), float64(maxInt(totalSessions, 1))),
 		AvgQueriesPerSession:      safeDiv(float64(totalQueries), float64(maxInt(totalSessions, 1))),
-		RecommendationApplyRate:   safeDiv(float64(totalSuccessfulApply), float64(maxInt(totalActiveRecs+totalSuccessfulApply, 1))),
-		RollbackRate:              rollbackRate,
-		ActionSummary:             buildDashboardActionSummary(totalPendingReview, totalApprovedQueue, totalActiveRecs),
-		OutcomeSummary:            buildDashboardOutcomeSummary(totalSuccessfulApply, totalFailedApply, rollbackRate),
+		ActionSummary:             buildDashboardActionSummary(totalActiveReports, researchStatus),
+		OutcomeSummary:            buildDashboardOutcomeSummary(totalSessions, totalActiveReports, researchStatus),
 		ResearchProvider:          s.researchAgent.Provider,
 		ResearchMode:              s.researchAgent.Mode,
 		LastIngestedAt:            lastIngestedAt,
-		ResearchStatus:            cloneRecommendationResearchStatusResp(researchStatus),
+		ResearchStatus:            cloneReportResearchStatusResp(researchStatus),
 	}, nil
 }
 
@@ -1096,24 +1025,13 @@ func (s *AnalyticsService) DashboardProjectInsights(ctx context.Context, req *re
 		day := snapshot.CapturedAt.UTC().Format("2006-01-02")
 		ensureDay(day).point.SnapshotCount++
 	}
-
-	for _, audit := range s.AnalyticsStore.audits {
-		if audit == nil || audit.ProjectID != req.ProjectID {
+	for _, reportID := range s.AnalyticsStore.projectReports[req.ProjectID] {
+		report := s.AnalyticsStore.reports[reportID]
+		if report == nil {
 			continue
 		}
-		day := audit.CreatedAt.UTC().Format("2006-01-02")
-		point := ensureDay(day)
-		switch audit.Type {
-		case "change_plan.approved", "change_plan.auto_approved":
-			point.point.ApprovalCount++
-		case "execution.result":
-			switch strings.TrimSpace(audit.Message) {
-			case "rollback_confirmed":
-				point.point.RollbackCount++
-			case "applied":
-				point.point.AppliedCount++
-			}
-		}
+		day := report.CreatedAt.UTC().Format("2006-01-02")
+		ensureDay(day).point.ReportCount++
 	}
 
 	days := make([]response.DashboardProjectInsightDayResp, 0, len(pointsByDay))
@@ -1189,6 +1107,7 @@ func (s *AnalyticsService) DashboardProjectInsights(ctx context.Context, req *re
 	})
 
 	return &response.DashboardProjectInsightsResp{
+		SchemaVersion:              reportAPISchemaVersion,
 		ProjectID:                  req.ProjectID,
 		Days:                       days,
 		Models:                     models,
@@ -1212,7 +1131,7 @@ func (s *AnalyticsService) DashboardProjectInsights(ctx context.Context, req *re
 		AvgToolWallTimeMS:          int(math.Round(safeDiv(float64(totalToolWallTimeMS), float64(maxInt(totalFunctionCalls, 1))))),
 		SessionsWithFunctionCalls:  sessionsWithFunctionCalls,
 		SessionsWithToolErrors:     sessionsWithToolErrors,
-		ResearchStatus:             cloneRecommendationResearchStatusResp(s.AnalyticsStore.recommendationResearch[req.ProjectID]),
+		ResearchStatus:             cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[req.ProjectID]),
 	}, nil
 }
 
@@ -1248,412 +1167,6 @@ func (s *AnalyticsService) ListProjects(ctx context.Context, req *request.Projec
 	})
 
 	return &response.ProjectListResp{Items: items}, nil
-}
-
-func (s *AnalyticsService) CreateApplyPlan(ctx context.Context, req *request.ApplyRecommendationReq) (*response.ApplyPlanResp, error) {
-	s.AnalyticsStore.mu.Lock()
-	defer s.AnalyticsStore.mu.Unlock()
-
-	rec, ok := s.AnalyticsStore.recommendations[req.RecommendationID]
-	if !ok {
-		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown recommendation_id"))
-	}
-	project, err := s.resolveProjectLocked(ctx, rec.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-
-	req.RequestedBy = s.actorFromContext(ctx, req.RequestedBy)
-	if req.RequestedBy == "" {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("requested_by is required"))
-	}
-
-	scope := req.Scope
-	if scope == "" {
-		scope = "user"
-	}
-	if activeExperiment := s.findActiveExperimentLocked(rec.ProjectID); activeExperiment != nil {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr(
-			fmt.Sprintf("active experiment %s must be resolved before creating another plan", activeExperiment.ID),
-		))
-	}
-
-	now := time.Now().UTC()
-	patchPreview := buildPatchPreview(rec)
-	policyMode, policyReason := evaluateChangePlanPolicy(rec, scope, patchPreview)
-	op := &ApplyOperation{
-		ID:               s.AnalyticsStore.nextID("apply"),
-		RecommendationID: req.RecommendationID,
-		ProjectID:        rec.ProjectID,
-		RequestedBy:      req.RequestedBy,
-		Scope:            scope,
-		Status:           "awaiting_review",
-		PolicyMode:       policyMode,
-		PolicyReason:     policyReason,
-		ApprovalStatus:   "awaiting_review",
-		Decision:         "pending",
-		PatchPreview:     patchPreview,
-		RequestedAt:      now,
-	}
-	experiment := &Experiment{
-		ID:               s.AnalyticsStore.nextID("exp"),
-		ProjectID:        rec.ProjectID,
-		RecommendationID: req.RecommendationID,
-		ApplyID:          op.ID,
-		RequestedBy:      req.RequestedBy,
-		Scope:            scope,
-		TargetMetric:     "tokens_per_query",
-		Status:           "awaiting_review",
-		Decision:         "pending",
-		DecisionReason:   "waiting for approval",
-		BaselineSessions: len(s.AnalyticsStore.sessionSummaries[rec.ProjectID]),
-		BaselineQueries:  summarizeSessions(s.AnalyticsStore.sessionSummaries[rec.ProjectID]).QueryCount,
-		CreatedAt:        now,
-	}
-	op.ExperimentID = experiment.ID
-	if policyMode == "auto_approved" {
-		op.Status = "approved_for_local_apply"
-		op.ApprovalStatus = "approved"
-		op.Decision = "auto_approved"
-		op.ReviewedBy = "policy-engine"
-		op.ReviewNote = policyReason
-		op.ReviewedAt = &now
-		experiment.Status = "queued_for_apply"
-		experiment.Decision = "approved"
-		experiment.DecisionReason = policyReason
-		experiment.ApprovedAt = &now
-	}
-	s.AnalyticsStore.experiments[experiment.ID] = experiment
-	s.AnalyticsStore.applyOperations[op.ID] = op
-	auditType := "change_plan.requested"
-	auditMessage := "change plan created and waiting for review"
-	if policyMode == "auto_approved" {
-		auditType = "change_plan.auto_approved"
-		auditMessage = "change plan auto-approved by policy engine"
-	}
-	s.appendAuditLocked(project.OrgID, rec.ProjectID, auditType, auditMessage)
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		return nil, err
-	}
-
-	return &response.ApplyPlanResp{
-		ApplyID:        op.ID,
-		ExperimentID:   experiment.ID,
-		Recommendation: toRecommendationResp(rec),
-		Status:         op.Status,
-		PolicyMode:     op.PolicyMode,
-		PolicyReason:   op.PolicyReason,
-		ApprovalStatus: op.ApprovalStatus,
-		Decision:       op.Decision,
-		ReviewedBy:     op.ReviewedBy,
-		ReviewNote:     op.ReviewNote,
-		ReviewedAt:     op.ReviewedAt,
-		PatchPreview:   toPatchPreviewResp(patchPreview),
-		RequestedAt:    now,
-	}, nil
-}
-
-func (s *AnalyticsService) ListChangePlans(ctx context.Context, req *request.ChangePlanListReq) (*response.ApplyHistoryResp, error) {
-	s.AnalyticsStore.mu.RLock()
-	defer s.AnalyticsStore.mu.RUnlock()
-
-	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-	req.ProjectID = project.ID
-	req.UserID = s.actorFromContext(ctx, req.UserID)
-
-	items := make([]response.ApplyHistoryItem, 0)
-	for _, op := range s.AnalyticsStore.applyOperations {
-		if op.ProjectID != req.ProjectID {
-			continue
-		}
-		if req.Status != "" && op.Status != req.Status && op.ApprovalStatus != req.Status {
-			continue
-		}
-		if req.UserID != "" && op.RequestedBy != req.UserID && op.ReviewedBy != req.UserID {
-			continue
-		}
-		items = append(items, toApplyHistoryItem(op))
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].RequestedAt.Equal(items[j].RequestedAt) {
-			return items[i].ApplyID > items[j].ApplyID
-		}
-		return items[i].RequestedAt.After(items[j].RequestedAt)
-	})
-
-	return &response.ApplyHistoryResp{Items: items}, nil
-}
-
-func (s *AnalyticsService) ListExperiments(ctx context.Context, req *request.ExperimentListReq) (*response.ExperimentListResp, error) {
-	s.AnalyticsStore.mu.RLock()
-	defer s.AnalyticsStore.mu.RUnlock()
-
-	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-	req.ProjectID = project.ID
-
-	items := make([]response.ExperimentSummaryResp, 0)
-	for _, experiment := range s.AnalyticsStore.experiments {
-		if experiment == nil || experiment.ProjectID != req.ProjectID {
-			continue
-		}
-		items = append(items, s.toExperimentSummaryLocked(experiment))
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
-			return items[i].ExperimentID > items[j].ExperimentID
-		}
-		return items[i].CreatedAt.After(items[j].CreatedAt)
-	})
-
-	return &response.ExperimentListResp{Items: items}, nil
-}
-
-func (s *AnalyticsService) ReviewChangePlan(ctx context.Context, req *request.ReviewChangePlanReq) (*response.ChangePlanReviewResp, error) {
-	s.AnalyticsStore.mu.Lock()
-	defer s.AnalyticsStore.mu.Unlock()
-
-	op, ok := s.AnalyticsStore.applyOperations[req.ApplyID]
-	if !ok {
-		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown apply_id"))
-	}
-	project, err := s.resolveProjectLocked(ctx, op.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-
-	decision := strings.ToLower(strings.TrimSpace(req.Decision))
-	if decision != "approve" && decision != "approved" && decision != "reject" && decision != "rejected" {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("decision must be approve or reject"))
-	}
-
-	now := time.Now().UTC()
-	req.ReviewedBy = s.actorFromContext(ctx, req.ReviewedBy)
-	if req.ReviewedBy == "" {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("reviewed_by is required"))
-	}
-	op.ReviewedBy = req.ReviewedBy
-	op.ReviewNote = req.ReviewNote
-	op.ReviewedAt = &now
-
-	switch decision {
-	case "approve", "approved":
-		op.Decision = "approved"
-		op.ApprovalStatus = "approved"
-		op.Status = "approved_for_local_apply"
-		s.markExperimentApprovedLocked(op.ExperimentID, now, "approved during review")
-		s.appendAuditLocked(project.OrgID, op.ProjectID, "change_plan.approved", "change plan approved for local apply")
-	default:
-		op.Decision = "rejected"
-		op.ApprovalStatus = "rejected"
-		op.Status = "rejected"
-		s.markExperimentResolvedLocked(op.ExperimentID, "rejected", "rejected", firstNonEmpty(req.ReviewNote, "rejected during review"), now)
-		s.appendAuditLocked(project.OrgID, op.ProjectID, "change_plan.rejected", "change plan rejected during review")
-	}
-
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		return nil, err
-	}
-
-	return &response.ChangePlanReviewResp{
-		ApplyID:        op.ID,
-		Status:         op.Status,
-		PolicyMode:     op.PolicyMode,
-		PolicyReason:   op.PolicyReason,
-		ApprovalStatus: op.ApprovalStatus,
-		Decision:       op.Decision,
-		ReviewedBy:     op.ReviewedBy,
-		ReviewNote:     op.ReviewNote,
-		ReviewedAt:     op.ReviewedAt,
-	}, nil
-}
-
-func (s *AnalyticsService) ApplyHistory(ctx context.Context, req *request.ApplyHistoryReq) (*response.ApplyHistoryResp, error) {
-	s.AnalyticsStore.mu.RLock()
-	defer s.AnalyticsStore.mu.RUnlock()
-
-	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-	req.ProjectID = project.ID
-
-	items := make([]response.ApplyHistoryItem, 0)
-	for _, op := range s.AnalyticsStore.applyOperations {
-		if op.ProjectID != req.ProjectID {
-			continue
-		}
-		items = append(items, toApplyHistoryItem(op))
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].RequestedAt.Equal(items[j].RequestedAt) {
-			return items[i].ApplyID > items[j].ApplyID
-		}
-		return items[i].RequestedAt.After(items[j].RequestedAt)
-	})
-
-	return &response.ApplyHistoryResp{Items: items}, nil
-}
-
-func (s *AnalyticsService) PendingApplies(ctx context.Context, req *request.PendingApplyReq) (*response.PendingApplyResp, error) {
-	s.AnalyticsStore.mu.RLock()
-	defer s.AnalyticsStore.mu.RUnlock()
-
-	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-	req.ProjectID = project.ID
-	req.UserID = s.actorFromContext(ctx, req.UserID)
-
-	items := make([]response.PendingApplyItem, 0)
-	for _, op := range s.AnalyticsStore.applyOperations {
-		if op.ProjectID != req.ProjectID {
-			continue
-		}
-		action := ""
-		switch op.Status {
-		case "approved_for_local_apply":
-			action = "apply"
-		case "rollback_requested":
-			action = "rollback"
-		default:
-			continue
-		}
-		switch op.Scope {
-		case "project", "team", "org":
-		case "user", "":
-			if req.UserID == "" || op.RequestedBy != req.UserID {
-				continue
-			}
-		default:
-			if req.UserID == "" || op.RequestedBy != req.UserID {
-				continue
-			}
-		}
-		items = append(items, response.PendingApplyItem{
-			ApplyID:          op.ID,
-			ExperimentID:     op.ExperimentID,
-			RecommendationID: op.RecommendationID,
-			Action:           action,
-			Status:           op.Status,
-			PolicyMode:       op.PolicyMode,
-			PolicyReason:     op.PolicyReason,
-			ApprovalStatus:   op.ApprovalStatus,
-			Scope:            op.Scope,
-			RequestedBy:      op.RequestedBy,
-			RequestedAt:      op.RequestedAt,
-			Note:             op.Note,
-			PatchPreview:     toPatchPreviewResp(op.PatchPreview),
-		})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].RequestedAt.Equal(items[j].RequestedAt) {
-			return items[i].ApplyID > items[j].ApplyID
-		}
-		return items[i].RequestedAt.After(items[j].RequestedAt)
-	})
-
-	return &response.PendingApplyResp{Items: items}, nil
-}
-
-func (s *AnalyticsService) ImpactSummary(ctx context.Context, req *request.ImpactSummaryReq) (*response.ImpactSummaryResp, error) {
-	s.AnalyticsStore.mu.RLock()
-	defer s.AnalyticsStore.mu.RUnlock()
-
-	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-	req.ProjectID = project.ID
-
-	items := make([]response.ImpactSummaryItem, 0)
-	sessions := s.AnalyticsStore.sessionSummaries[req.ProjectID]
-	for _, op := range s.AnalyticsStore.applyOperations {
-		if op.ProjectID != req.ProjectID || op.AppliedAt == nil {
-			continue
-		}
-
-		before, after := splitSessionsByApplyTime(sessions, *op.AppliedAt)
-		beforeStats := summarizeSessions(before)
-		afterStats := summarizeSessions(after)
-
-		items = append(items, response.ImpactSummaryItem{
-			ApplyID:                         op.ID,
-			ExperimentID:                    op.ExperimentID,
-			RecommendationID:                op.RecommendationID,
-			Status:                          op.Status,
-			EvaluationMode:                  experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationMode }),
-			EvaluationModel:                 experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationModel }),
-			EvaluationDecision:              experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationDecision }),
-			EvaluationConfidence:            experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationConfidence }),
-			EvaluationSummary:               experimentField(s.AnalyticsStore.experiments[op.ExperimentID], func(exp *Experiment) string { return exp.EvaluationSummary }),
-			AppliedAt:                       op.AppliedAt,
-			SessionsBefore:                  len(before),
-			SessionsAfter:                   len(after),
-			QueriesBefore:                   beforeStats.QueryCount,
-			QueriesAfter:                    afterStats.QueryCount,
-			AvgInputTokensPerQueryBefore:    beforeStats.AvgInputTokensPerQuery,
-			AvgInputTokensPerQueryAfter:     afterStats.AvgInputTokensPerQuery,
-			AvgOutputTokensPerQueryBefore:   beforeStats.AvgOutputTokensPerQuery,
-			AvgOutputTokensPerQueryAfter:    afterStats.AvgOutputTokensPerQuery,
-			AvgTokensPerQueryBefore:         beforeStats.AvgTokensPerQuery,
-			AvgTokensPerQueryAfter:          afterStats.AvgTokensPerQuery,
-			AvgInputTokensPerSessionBefore:  beforeStats.AvgInputTokensPerSession,
-			AvgInputTokensPerSessionAfter:   afterStats.AvgInputTokensPerSession,
-			AvgOutputTokensPerSessionBefore: beforeStats.AvgOutputTokensPerSession,
-			AvgOutputTokensPerSessionAfter:  afterStats.AvgOutputTokensPerSession,
-			AvgTokensPerSessionBefore:       beforeStats.AvgTokensPerSession,
-			AvgTokensPerSessionAfter:        afterStats.AvgTokensPerSession,
-			InputTokensPerQueryDelta:        round(afterStats.AvgInputTokensPerQuery - beforeStats.AvgInputTokensPerQuery),
-			OutputTokensPerQueryDelta:       round(afterStats.AvgOutputTokensPerQuery - beforeStats.AvgOutputTokensPerQuery),
-			TokensPerQueryDelta:             round(afterStats.AvgTokensPerQuery - beforeStats.AvgTokensPerQuery),
-			InputTokensPerSessionDelta:      round(afterStats.AvgInputTokensPerSession - beforeStats.AvgInputTokensPerSession),
-			OutputTokensPerSessionDelta:     round(afterStats.AvgOutputTokensPerSession - beforeStats.AvgOutputTokensPerSession),
-			TokensPerSessionDelta:           round(afterStats.AvgTokensPerSession - beforeStats.AvgTokensPerSession),
-			Interpretation:                  interpretImpact(beforeStats, afterStats, len(after)),
-		})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].AppliedAt == nil {
-			return false
-		}
-		if items[j].AppliedAt == nil {
-			return true
-		}
-		if items[i].AppliedAt.Equal(*items[j].AppliedAt) {
-			return items[i].ApplyID > items[j].ApplyID
-		}
-		return items[i].AppliedAt.After(*items[j].AppliedAt)
-	})
-
-	return &response.ImpactSummaryResp{Items: items}, nil
 }
 
 func (s *AnalyticsService) AuditList(ctx context.Context, req *request.AuditListReq) (*response.AuditListResp, error) {
@@ -1692,74 +1205,11 @@ func (s *AnalyticsService) AuditList(ctx context.Context, req *request.AuditList
 	return &response.AuditListResp{Items: items}, nil
 }
 
-func (s *AnalyticsService) ReportApplyResult(ctx context.Context, req *request.ApplyResultReq) (*response.ApplyResultResp, error) {
-	s.AnalyticsStore.mu.Lock()
-	defer s.AnalyticsStore.mu.Unlock()
-
-	op, ok := s.AnalyticsStore.applyOperations[req.ApplyID]
-	if !ok {
-		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown apply_id"))
-	}
-	project, err := s.resolveProjectLocked(ctx, op.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.authorizeProject(ctx, project); err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC()
-	op.LastReportedAt = &now
-	op.AppliedFile = req.AppliedFile
-	op.AppliedSettings = cloneAnyMap(req.AppliedSettings)
-	op.AppliedText = req.AppliedText
-	op.Note = req.Note
-	op.RolledBack = req.RolledBack
-	switch {
-	case req.RolledBack:
-		if op.RolledBackAt == nil {
-			op.RolledBackAt = &now
-		}
-		op.Status = "rollback_confirmed"
-		s.markExperimentResolvedLocked(op.ExperimentID, "rolled_back", "rollback", firstNonEmpty(req.Note, "rollback confirmed"), now)
-	case req.Success:
-		if op.AppliedAt == nil {
-			op.AppliedAt = &now
-		}
-		op.Status = "applied"
-		s.markExperimentMeasuringLocked(op.ExperimentID, *op.AppliedAt, firstNonEmpty(req.Note, "waiting for post-apply sessions"))
-	default:
-		if op.Status == "rollback_requested" {
-			op.Status = "rollback_failed"
-			s.markExperimentResolvedLocked(op.ExperimentID, "rollback_failed", "rollback_failed", firstNonEmpty(req.Note, "local rollback failed"), now)
-		} else {
-			op.Status = "failed"
-			s.markExperimentResolvedLocked(op.ExperimentID, "failed", "failed", firstNonEmpty(req.Note, "local apply failed"), now)
-		}
-	}
-	if op.ApprovalStatus == "" {
-		op.ApprovalStatus = "approved"
-	}
-
-	s.appendAuditLocked(project.OrgID, op.ProjectID, "execution.result", op.Status)
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		return nil, err
-	}
-
-	return &response.ApplyResultResp{
-		ApplyID:      op.ID,
-		ExperimentID: op.ExperimentID,
-		Status:       op.Status,
-		AppliedAt:    derefTime(op.AppliedAt, now),
-		RolledBack:   op.RolledBack,
-	}, nil
-}
-
-func (s *AnalyticsService) currentRecommendationsLocked(projectID string) []*Recommendation {
-	ids := s.AnalyticsStore.projectRecommendations[projectID]
-	items := make([]*Recommendation, 0, len(ids))
+func (s *AnalyticsService) currentReportsLocked(projectID string) []*Report {
+	ids := s.AnalyticsStore.projectReports[projectID]
+	items := make([]*Report, 0, len(ids))
 	for _, id := range ids {
-		rec, ok := s.AnalyticsStore.recommendations[id]
+		rec, ok := s.AnalyticsStore.reports[id]
 		if !ok || rec == nil {
 			continue
 		}
@@ -1768,96 +1218,44 @@ func (s *AnalyticsService) currentRecommendationsLocked(projectID string) []*Rec
 	return items
 }
 
-func (s *AnalyticsService) evaluateExperimentsLocked(project *Project, observedAt time.Time) {
-	if project == nil {
-		return
-	}
-	sessions := s.AnalyticsStore.sessionSummaries[project.ID]
-	for _, experiment := range s.AnalyticsStore.experiments {
-		if experiment == nil || experiment.ProjectID != project.ID || experiment.Status != "measuring" {
-			continue
-		}
-		op := s.AnalyticsStore.applyOperations[experiment.ApplyID]
-		if op == nil || op.AppliedAt == nil {
-			continue
-		}
-		before, after := splitSessionsByApplyTime(sessions, *op.AppliedAt)
-		beforeStats := summarizeSessions(before)
-		afterStats := summarizeSessions(after)
-
-		qualitative := s.maybeReviewExperimentLocked(project, experiment, before, after, beforeStats, afterStats, len(after), observedAt)
-		nextStatus, decision, reason := qualitativeOutcome(qualitative)
-		experiment.Decision = decision
-		experiment.DecisionReason = reason
-
-		switch nextStatus {
-		case "measuring":
-			continue
-		case "completed":
-			s.markExperimentResolvedLocked(experiment.ID, "completed", "keep", reason, observedAt)
-			s.appendAuditLocked(project.OrgID, project.ID, "experiment.completed", reason)
-		case "rollback_requested":
-			s.markExperimentRollbackRequestedLocked(experiment.ID, reason)
-			op.Status = "rollback_requested"
-			op.Note = reason
-			s.appendAuditLocked(project.OrgID, project.ID, "rollback.requested", reason)
-		}
-	}
-}
-
-func qualitativeOutcome(review experimentEvaluation) (string, string, string) {
-	reason := strings.TrimSpace(review.Summary)
-	if reason == "" {
-		reason = "The qualitative review did not provide a decision yet."
-	}
-	switch review.Decision {
-	case "keep":
-		return "completed", "keep", reason
-	case "rollback":
-		return "rollback_requested", "rollback", reason
-	default:
-		return "measuring", "observe", reason
-	}
-}
-
-func (s *AnalyticsService) prepareRecommendationRefreshLocked(project *Project, triggerSessionID string) ([]*Recommendation, *recommendationRefreshJob) {
+func (s *AnalyticsService) prepareReportRefreshLocked(project *Project, triggerSessionID string) ([]*Report, *reportRefreshJob) {
 	sessions := s.AnalyticsStore.sessionSummaries[project.ID]
 	rawQueries := collectRawQueries(sessions)
-	status := RecommendationResearchStatus{
-		ProjectID:           project.ID,
-		Provider:            s.researchAgent.Provider,
-		Model:               s.researchAgent.Model,
-		MinimumSessions:     s.recommendationMinSessions,
-		SessionCount:        len(sessions),
-		RawQueryCount:       len(rawQueries),
-		TriggerSessionID:    triggerSessionID,
-		RecommendationCount: len(s.currentRecommendationsLocked(project.ID)),
+	status := ReportResearchStatus{
+		ProjectID:        project.ID,
+		Provider:         s.researchAgent.Provider,
+		Model:            s.researchAgent.Model,
+		MinimumSessions:  s.reportMinSessions,
+		SessionCount:     len(sessions),
+		RawQueryCount:    len(rawQueries),
+		TriggerSessionID: triggerSessionID,
+		ReportCount:      len(s.currentReportsLocked(project.ID)),
 	}
 	triggeredAt := time.Now().UTC()
 	status.TriggeredAt = cloneTime(&triggeredAt)
-	if len(sessions) < s.recommendationMinSessions {
+	if len(sessions) < s.reportMinSessions {
 		status.State = "waiting_for_min_sessions"
-		status.Summary = fmt.Sprintf("Collected %d of %d sessions needed before fetching new recommendations.", len(sessions), s.recommendationMinSessions)
-		s.setRecommendationResearchStatusLocked(project.ID, status)
-		return s.currentRecommendationsLocked(project.ID), nil
+		status.Summary = fmt.Sprintf("Collected %d of %d sessions needed before generating the first feedback report.", len(sessions), s.reportMinSessions)
+		s.setReportResearchStatusLocked(project.ID, status)
+		return s.currentReportsLocked(project.ID), nil
 	}
 	if strings.TrimSpace(s.researchAgent.apiKey) == "" {
 		status.State = "disabled"
-		status.Summary = "OpenAI-backed recommendation research is disabled on this server, so no new suggestions will be fetched."
-		s.setRecommendationResearchStatusLocked(project.ID, status)
-		return s.currentRecommendationsLocked(project.ID), nil
+		status.Summary = "OpenAI-backed report research is disabled on this server, so no new feedback reports will be generated."
+		s.setReportResearchStatusLocked(project.ID, status)
+		return s.currentReportsLocked(project.ID), nil
 	}
 	if len(rawQueries) == 0 {
 		status.State = "missing_raw_queries"
-		status.Summary = "Uploaded sessions are missing raw query evidence, so the server cannot fetch targeted recommendations yet."
-		s.setRecommendationResearchStatusLocked(project.ID, status)
-		return s.currentRecommendationsLocked(project.ID), nil
+		status.Summary = "Uploaded sessions are missing raw query evidence, so the server cannot generate a targeted feedback report yet."
+		s.setReportResearchStatusLocked(project.ID, status)
+		return s.currentReportsLocked(project.ID), nil
 	}
 	status.State = "running"
-	status.Summary = fmt.Sprintf("Waiting for the suggestion from %s. Uploaded sessions are being analyzed in the background.", s.researchAgent.Provider)
+	status.Summary = fmt.Sprintf("Preparing the next feedback report with %s while uploaded sessions are analyzed in the background.", s.researchAgent.Provider)
 	status.StartedAt = cloneTime(&triggeredAt)
-	s.setRecommendationResearchStatusLocked(project.ID, status)
-	return s.currentRecommendationsLocked(project.ID), &recommendationRefreshJob{
+	s.setReportResearchStatusLocked(project.ID, status)
+	return s.currentReportsLocked(project.ID), &reportRefreshJob{
 		project:          cloneProject(project),
 		sessions:         cloneSessionSummaries(sessions),
 		snapshots:        cloneConfigSnapshots(s.AnalyticsStore.configSnapshots[project.ID]),
@@ -1866,41 +1264,41 @@ func (s *AnalyticsService) prepareRecommendationRefreshLocked(project *Project, 
 	}
 }
 
-func (s *AnalyticsService) enqueueRecommendationRefresh(job *recommendationRefreshJob) {
+func (s *AnalyticsService) enqueueReportRefresh(job *reportRefreshJob) {
 	if job == nil || job.project == nil {
 		return
 	}
 
-	s.recommendationRefreshMu.Lock()
+	s.reportRefreshMu.Lock()
 	projectID := job.project.ID
-	if s.recommendationRefreshLive[projectID] {
-		s.recommendationRefreshNext[projectID] = job
-		s.recommendationRefreshMu.Unlock()
+	if s.reportRefreshLive[projectID] {
+		s.reportRefreshNext[projectID] = job
+		s.reportRefreshMu.Unlock()
 		return
 	}
-	s.recommendationRefreshLive[projectID] = true
-	s.recommendationRefreshMu.Unlock()
+	s.reportRefreshLive[projectID] = true
+	s.reportRefreshMu.Unlock()
 
-	go func(current *recommendationRefreshJob) {
+	go func(current *reportRefreshJob) {
 		for current != nil {
-			s.runRecommendationRefresh(current)
+			s.runReportRefresh(current)
 
-			s.recommendationRefreshMu.Lock()
-			next := s.recommendationRefreshNext[projectID]
+			s.reportRefreshMu.Lock()
+			next := s.reportRefreshNext[projectID]
 			if next != nil {
-				delete(s.recommendationRefreshNext, projectID)
-				s.recommendationRefreshMu.Unlock()
+				delete(s.reportRefreshNext, projectID)
+				s.reportRefreshMu.Unlock()
 				current = next
 				continue
 			}
-			delete(s.recommendationRefreshLive, projectID)
-			s.recommendationRefreshMu.Unlock()
+			delete(s.reportRefreshLive, projectID)
+			s.reportRefreshMu.Unlock()
 			current = nil
 		}
 	}(job)
 }
 
-func (s *AnalyticsService) runRecommendationRefresh(job *recommendationRefreshJob) {
+func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 	if job == nil || job.project == nil {
 		return
 	}
@@ -1913,8 +1311,8 @@ func (s *AnalyticsService) runRecommendationRefresh(job *recommendationRefreshJo
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
-	current := s.AnalyticsStore.recommendationResearch[job.project.ID]
-	if !recommendationRefreshMatchesRun(current, job.triggeredAt) {
+	current := s.AnalyticsStore.reportResearch[job.project.ID]
+	if !reportRefreshMatchesRun(current, job.triggeredAt) {
 		return
 	}
 
@@ -1924,46 +1322,46 @@ func (s *AnalyticsService) runRecommendationRefresh(job *recommendationRefreshJo
 	status.TriggerSessionID = job.triggerSessionID
 	if err != nil {
 		status.State = "failed"
-		status.Summary = fmt.Sprintf("Recommendation research failed after %s while waiting for %s.", humanizeDurationMS(status.LastDurationMS), s.researchAgent.Provider)
+		status.Summary = fmt.Sprintf("Feedback analysis failed after %s while waiting for %s.", humanizeDurationMS(status.LastDurationMS), s.researchAgent.Provider)
 		status.LastError = err.Error()
-		s.setRecommendationResearchStatusLocked(job.project.ID, status)
+		s.setReportResearchStatusLocked(job.project.ID, status)
 		_ = s.AnalyticsStore.persistLocked()
 		return
 	}
 
-	previousIDs := s.AnalyticsStore.projectRecommendations[job.project.ID]
+	previousIDs := s.AnalyticsStore.projectReports[job.project.ID]
 	for _, id := range previousIDs {
-		if rec, ok := s.AnalyticsStore.recommendations[id]; ok && rec.Status == "active" {
+		if rec, ok := s.AnalyticsStore.reports[id]; ok && rec.Status == "active" {
 			rec.Status = "superseded"
 		}
 	}
 
-	candidates := make([]*Recommendation, 0, len(rawCandidates))
+	candidates := make([]*Report, 0, len(rawCandidates))
 	for _, candidate := range rawCandidates {
-		candidates = append(candidates, s.newRecommendationLocked(job.project, candidate))
+		candidates = append(candidates, s.newReportRecordLocked(job.project, candidate))
 	}
 
 	ids := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		ids = append(ids, candidate.ID)
-		s.AnalyticsStore.recommendations[candidate.ID] = candidate
+		s.AnalyticsStore.reports[candidate.ID] = candidate
 	}
-	s.AnalyticsStore.projectRecommendations[job.project.ID] = ids
-	status.RecommendationCount = len(ids)
+	s.AnalyticsStore.projectReports[job.project.ID] = ids
+	status.ReportCount = len(ids)
 	status.LastError = ""
 	if len(ids) == 0 {
-		status.State = "no_recommendations"
-		status.Summary = fmt.Sprintf("Recommendation research finished in %s but did not produce any actionable suggestions.", humanizeDurationMS(status.LastDurationMS))
+		status.State = "no_reports"
+		status.Summary = fmt.Sprintf("Feedback analysis finished in %s but did not produce a publishable report.", humanizeDurationMS(status.LastDurationMS))
 	} else {
 		status.State = "succeeded"
-		status.Summary = fmt.Sprintf("Recommendation research finished in %s and produced %d suggestion(s).", humanizeDurationMS(status.LastDurationMS), len(ids))
+		status.Summary = fmt.Sprintf("Feedback analysis finished in %s and produced %d report(s).", humanizeDurationMS(status.LastDurationMS), len(ids))
 		status.LastSuccessfulAt = cloneTime(&completedAt)
 	}
-	s.setRecommendationResearchStatusLocked(job.project.ID, status)
+	s.setReportResearchStatusLocked(job.project.ID, status)
 	_ = s.AnalyticsStore.persistLocked()
 }
 
-func recommendationRefreshMatchesRun(current *RecommendationResearchStatus, triggeredAt time.Time) bool {
+func reportRefreshMatchesRun(current *ReportResearchStatus, triggeredAt time.Time) bool {
 	if current == nil || current.TriggeredAt == nil {
 		return false
 	}
@@ -1996,6 +1394,7 @@ func cloneSessionSummaries(items []*SessionSummary) []*SessionSummary {
 		cloned.RawQueries = cloneStringSlice(item.RawQueries)
 		cloned.Models = cloneStringSlice(item.Models)
 		cloned.AssistantResponses = cloneStringSlice(item.AssistantResponses)
+		cloned.ReasoningSummaries = cloneStringSlice(item.ReasoningSummaries)
 		out = append(out, &cloned)
 	}
 	return out
@@ -2019,339 +1418,66 @@ func cloneConfigSnapshots(items []*ConfigSnapshot) []*ConfigSnapshot {
 	return out
 }
 
-func (s *AnalyticsService) newRecommendationLocked(project *Project, tpl researchRecommendation) *Recommendation {
+func (s *AnalyticsService) newReportRecordLocked(project *Project, tpl researchReport) *Report {
 	tool := project.DefaultTool
 	if strings.TrimSpace(tool) == "" {
 		tool = "codex"
 	}
-	targetFile := targetFileHint(tool)
-	if len(tpl.Steps) > 0 && tpl.Steps[0].TargetFile != "" {
-		targetFile = tpl.Steps[0].TargetFile
-	}
-	return &Recommendation{
-		ID:               s.AnalyticsStore.nextID("rec"),
-		ProjectID:        project.ID,
-		Kind:             tpl.Kind,
-		Title:            tpl.Title,
-		Summary:          tpl.Summary,
-		Reason:           tpl.Reason,
-		Explanation:      tpl.Explanation,
-		ExpectedBenefit:  tpl.ExpectedBenefit,
-		Risk:             tpl.Risk,
-		ExpectedImpact:   tpl.ExpectedImpact,
-		Score:            tpl.Score,
-		Status:           "active",
-		TargetTool:       tool,
-		TargetFileHint:   targetFile,
-		ResearchProvider: s.researchAgent.Provider,
-		ResearchModel:    s.researchAgent.Model,
-		Evidence:         cloneStringSlice(tpl.Evidence),
-		ChangePlan:       cloneChangePlanSteps(tpl.Steps),
-		SettingsUpdates:  cloneAnyMap(tpl.Settings),
-		RawSuggestion:    tpl.RawSuggestion,
-		CreatedAt:        time.Now().UTC(),
-	}
-}
-
-func buildPatchPreview(rec *Recommendation) []PatchPreview {
-	if len(rec.ChangePlan) == 0 {
-		return []PatchPreview{{
-			FilePath:        rec.TargetFileHint,
-			Operation:       "merge_patch",
-			Summary:         rec.Title,
-			SettingsUpdates: cloneAnyMap(rec.SettingsUpdates),
-		}}
-	}
-	out := make([]PatchPreview, 0, len(rec.ChangePlan))
-	for _, step := range rec.ChangePlan {
-		out = append(out, PatchPreview{
-			FilePath:        step.TargetFile,
-			Operation:       step.Action,
-			Summary:         step.Summary,
-			SettingsUpdates: cloneAnyMap(step.SettingsUpdates),
-			ContentPreview:  step.ContentPreview,
-		})
-	}
-	return out
-}
-
-func evaluateChangePlanPolicy(rec *Recommendation, scope string, preview []PatchPreview) (string, string) {
-	if strings.ToLower(scope) != "user" {
-		return "requires_review", "non-user scope rollout requires explicit approval"
-	}
-	if !isLowRiskRecommendation(rec.Risk) {
-		return "requires_review", "recommendation risk is not low"
-	}
-	if len(preview) != 1 {
-		return "requires_review", "multi-step plans require human review"
-	}
-	step := preview[0]
-	if step.Operation != "merge_patch" {
-		return "requires_review", "non-merge patch operations require human review"
-	}
-	if !isPolicyAutoApproveTarget(step.FilePath) {
-		return "requires_review", "target file is outside the auto-approve policy scope"
-	}
-	return "auto_approved", "low-risk single-file config merge qualifies for automatic approval"
-}
-
-func isLowRiskRecommendation(risk string) bool {
-	risk = strings.ToLower(strings.TrimSpace(risk))
-	return strings.HasPrefix(risk, "low") && !strings.Contains(risk, "medium")
-}
-
-func isPolicyAutoApproveTarget(target string) bool {
-	switch filepath.Clean(target) {
-	case filepath.Clean(".codex/config.json"), filepath.Clean(".claude/settings.local.json"):
-		return true
-	default:
-		return false
+	return &Report{
+		ID:                  s.AnalyticsStore.nextID("rec"),
+		ProjectID:           project.ID,
+		Kind:                tpl.Kind,
+		Title:               tpl.Title,
+		Summary:             tpl.Summary,
+		UserIntent:          tpl.UserIntent,
+		ModelInterpretation: tpl.ModelInterpretation,
+		Reason:              tpl.Reason,
+		Explanation:         tpl.Explanation,
+		ExpectedBenefit:     tpl.ExpectedBenefit,
+		Risk:                tpl.Risk,
+		ExpectedImpact:      tpl.ExpectedImpact,
+		Confidence:          tpl.Confidence,
+		Strengths:           cloneStringSlice(tpl.Strengths),
+		Frictions:           cloneStringSlice(tpl.Frictions),
+		NextSteps:           cloneStringSlice(tpl.NextSteps),
+		Score:               tpl.Score,
+		Status:              "active",
+		TargetTool:          tool,
+		ResearchProvider:    s.researchAgent.Provider,
+		ResearchModel:       s.researchAgent.Model,
+		Evidence:            cloneStringSlice(tpl.Evidence),
+		RawSuggestion:       tpl.RawSuggestion,
+		CreatedAt:           time.Now().UTC(),
 	}
 }
 
-func dominantTask(counts map[string]int) string {
-	bestTask := "observe"
-	bestCount := -1
-	for task, count := range counts {
-		if count > bestCount {
-			bestTask = task
-			bestCount = count
-		}
+func toReportResp(rec *Report) response.ReportResp {
+	return response.ReportResp{
+		ID:                  rec.ID,
+		ProjectID:           rec.ProjectID,
+		Kind:                rec.Kind,
+		Title:               rec.Title,
+		Summary:             rec.Summary,
+		UserIntent:          rec.UserIntent,
+		ModelInterpretation: rec.ModelInterpretation,
+		Reason:              rec.Reason,
+		Explanation:         rec.Explanation,
+		ExpectedBenefit:     rec.ExpectedBenefit,
+		Risk:                rec.Risk,
+		ExpectedImpact:      rec.ExpectedImpact,
+		Confidence:          rec.Confidence,
+		Strengths:           cloneStringSlice(rec.Strengths),
+		Frictions:           cloneStringSlice(rec.Frictions),
+		NextSteps:           cloneStringSlice(rec.NextSteps),
+		Status:              rec.Status,
+		Score:               rec.Score,
+		TargetTool:          rec.TargetTool,
+		ResearchProvider:    rec.ResearchProvider,
+		ResearchModel:       rec.ResearchModel,
+		Evidence:            cloneStringSlice(rec.Evidence),
+		RawSuggestion:       rec.RawSuggestion,
+		CreatedAt:           rec.CreatedAt,
 	}
-	return bestTask
-}
-
-func targetFileHint(tool string) string {
-	switch strings.ToLower(tool) {
-	case "claude", "claude-code":
-		return ".claude/settings.local.json"
-	default:
-		return ".codex/config.json"
-	}
-}
-
-func toRecommendationResp(rec *Recommendation) response.RecommendationResp {
-	return response.RecommendationResp{
-		ID:               rec.ID,
-		ProjectID:        rec.ProjectID,
-		Kind:             rec.Kind,
-		Title:            rec.Title,
-		Summary:          rec.Summary,
-		Reason:           rec.Reason,
-		Explanation:      rec.Explanation,
-		ExpectedBenefit:  rec.ExpectedBenefit,
-		Risk:             rec.Risk,
-		ExpectedImpact:   rec.ExpectedImpact,
-		Status:           rec.Status,
-		Score:            rec.Score,
-		TargetTool:       rec.TargetTool,
-		TargetFileHint:   rec.TargetFileHint,
-		ResearchProvider: rec.ResearchProvider,
-		ResearchModel:    rec.ResearchModel,
-		Evidence:         cloneStringSlice(rec.Evidence),
-		ChangePlan:       toChangePlanResp(rec.ChangePlan),
-		SettingsUpdates:  cloneAnyMap(rec.SettingsUpdates),
-		RawSuggestion:    rec.RawSuggestion,
-		CreatedAt:        rec.CreatedAt,
-	}
-}
-
-func toPatchPreviewResp(items []PatchPreview) []response.PatchPreviewItem {
-	out := make([]response.PatchPreviewItem, 0, len(items))
-	for _, item := range items {
-		out = append(out, response.PatchPreviewItem{
-			FilePath:        item.FilePath,
-			Operation:       item.Operation,
-			Summary:         item.Summary,
-			SettingsUpdates: cloneAnyMap(item.SettingsUpdates),
-			ContentPreview:  item.ContentPreview,
-		})
-	}
-	return out
-}
-
-func toChangePlanResp(items []ChangePlanStep) []response.ChangePlanStepResp {
-	out := make([]response.ChangePlanStepResp, 0, len(items))
-	for _, item := range items {
-		out = append(out, response.ChangePlanStepResp{
-			Type:            item.Type,
-			Action:          item.Action,
-			TargetFile:      item.TargetFile,
-			Summary:         item.Summary,
-			SettingsUpdates: cloneAnyMap(item.SettingsUpdates),
-			ContentPreview:  item.ContentPreview,
-		})
-	}
-	return out
-}
-
-func toApplyHistoryItem(op *ApplyOperation) response.ApplyHistoryItem {
-	return response.ApplyHistoryItem{
-		ApplyID:          op.ID,
-		ExperimentID:     op.ExperimentID,
-		RecommendationID: op.RecommendationID,
-		Status:           op.Status,
-		PolicyMode:       op.PolicyMode,
-		PolicyReason:     op.PolicyReason,
-		ApprovalStatus:   op.ApprovalStatus,
-		Decision:         op.Decision,
-		Scope:            op.Scope,
-		RequestedBy:      op.RequestedBy,
-		ReviewedBy:       op.ReviewedBy,
-		ReviewNote:       op.ReviewNote,
-		RequestedAt:      op.RequestedAt,
-		ReviewedAt:       op.ReviewedAt,
-		AppliedAt:        op.AppliedAt,
-		LastReportedAt:   op.LastReportedAt,
-		RolledBackAt:     op.RolledBackAt,
-		AppliedFile:      op.AppliedFile,
-		AppliedSettings:  cloneAnyMap(op.AppliedSettings),
-		AppliedText:      op.AppliedText,
-		PatchPreview:     toPatchPreviewResp(op.PatchPreview),
-		RolledBack:       op.RolledBack,
-	}
-}
-
-func (s *AnalyticsService) findActiveExperimentLocked(projectID string) *Experiment {
-	var active *Experiment
-	for _, experiment := range s.AnalyticsStore.experiments {
-		if experiment == nil || experiment.ProjectID != projectID {
-			continue
-		}
-		switch experiment.Status {
-		case "awaiting_review", "queued_for_apply", "measuring", "rollback_requested":
-		default:
-			continue
-		}
-		if active == nil || experiment.CreatedAt.After(active.CreatedAt) {
-			active = experiment
-		}
-	}
-	return active
-}
-
-func (s *AnalyticsService) toExperimentSummaryLocked(experiment *Experiment) response.ExperimentSummaryResp {
-	postApplySessions := 0
-	postApplyQueries := 0
-	var lastObservedAt *time.Time
-
-	sessions := s.AnalyticsStore.sessionSummaries[experiment.ProjectID]
-	for _, session := range sessions {
-		if session == nil {
-			continue
-		}
-		if lastObservedAt == nil || session.Timestamp.After(*lastObservedAt) {
-			ts := session.Timestamp
-			lastObservedAt = &ts
-		}
-	}
-	if experiment.AppliedAt != nil {
-		_, after := splitSessionsByApplyTime(sessions, *experiment.AppliedAt)
-		postApplySessions = len(after)
-		postApplyQueries = summarizeSessions(after).QueryCount
-	}
-
-	return response.ExperimentSummaryResp{
-		ExperimentID:         experiment.ID,
-		ProjectID:            experiment.ProjectID,
-		RecommendationID:     experiment.RecommendationID,
-		ApplyID:              experiment.ApplyID,
-		Status:               experiment.Status,
-		Decision:             experiment.Decision,
-		DecisionReason:       experiment.DecisionReason,
-		EvaluationMode:       experiment.EvaluationMode,
-		EvaluationModel:      experiment.EvaluationModel,
-		EvaluationDecision:   experiment.EvaluationDecision,
-		EvaluationConfidence: experiment.EvaluationConfidence,
-		EvaluationSummary:    experiment.EvaluationSummary,
-		TargetMetric:         experiment.TargetMetric,
-		RequestedBy:          experiment.RequestedBy,
-		Scope:                experiment.Scope,
-		BaselineSessions:     experiment.BaselineSessions,
-		BaselineQueries:      experiment.BaselineQueries,
-		PostApplySessions:    postApplySessions,
-		PostApplyQueries:     postApplyQueries,
-		CreatedAt:            experiment.CreatedAt,
-		ApprovedAt:           experiment.ApprovedAt,
-		AppliedAt:            experiment.AppliedAt,
-		EvaluatedAt:          experiment.EvaluatedAt,
-		LastObservedAt:       lastObservedAt,
-		ResolvedAt:           experiment.ResolvedAt,
-	}
-}
-
-func (s *AnalyticsService) markExperimentApprovedLocked(experimentID string, approvedAt time.Time, reason string) {
-	experiment, ok := s.AnalyticsStore.experiments[experimentID]
-	if !ok || experiment == nil {
-		return
-	}
-	experiment.Status = "queued_for_apply"
-	experiment.Decision = "approved"
-	experiment.DecisionReason = firstNonEmpty(reason, "approved")
-	experiment.ApprovedAt = &approvedAt
-	experiment.ResolvedAt = nil
-}
-
-func (s *AnalyticsService) markExperimentMeasuringLocked(experimentID string, appliedAt time.Time, reason string) {
-	experiment, ok := s.AnalyticsStore.experiments[experimentID]
-	if !ok || experiment == nil {
-		return
-	}
-	experiment.Status = "measuring"
-	experiment.Decision = "observe"
-	experiment.DecisionReason = firstNonEmpty(reason, "waiting for post-apply sessions")
-	if experiment.AppliedAt == nil {
-		experiment.AppliedAt = &appliedAt
-	}
-	experiment.EvaluationDecision = ""
-	experiment.EvaluationConfidence = ""
-	experiment.EvaluationSummary = ""
-	experiment.EvaluatedAt = nil
-	experiment.ResolvedAt = nil
-}
-
-func (s *AnalyticsService) markExperimentRollbackRequestedLocked(experimentID, reason string) {
-	experiment, ok := s.AnalyticsStore.experiments[experimentID]
-	if !ok || experiment == nil {
-		return
-	}
-	experiment.Status = "rollback_requested"
-	experiment.Decision = "rollback"
-	experiment.DecisionReason = firstNonEmpty(reason, "rollback requested")
-	experiment.ResolvedAt = nil
-}
-
-func (s *AnalyticsService) markExperimentResolvedLocked(experimentID, status, decision, reason string, resolvedAt time.Time) {
-	experiment, ok := s.AnalyticsStore.experiments[experimentID]
-	if !ok || experiment == nil {
-		return
-	}
-	experiment.Status = status
-	experiment.Decision = decision
-	experiment.DecisionReason = firstNonEmpty(reason, experiment.DecisionReason)
-	experiment.ResolvedAt = &resolvedAt
-}
-
-func (s *AnalyticsService) maybeReviewExperimentLocked(project *Project, experiment *Experiment, before, after []*SessionSummary, beforeStats, afterStats sessionSummaryStats, afterCount int, observedAt time.Time) experimentEvaluation {
-	if experiment == nil || afterCount == 0 {
-		return experimentEvaluation{}
-	}
-
-	review := s.evaluationAgent.ReviewExperiment(project, before, after, beforeStats, afterStats)
-	experiment.EvaluationMode = review.Mode
-	experiment.EvaluationModel = review.Model
-	experiment.EvaluationDecision = review.Decision
-	experiment.EvaluationConfidence = review.Confidence
-	experiment.EvaluationSummary = review.Summary
-	experiment.EvaluatedAt = &observedAt
-	return review
-}
-
-func experimentField(experiment *Experiment, pick func(*Experiment) string) string {
-	if experiment == nil || pick == nil {
-		return ""
-	}
-	return pick(experiment)
 }
 
 func countDevicesByOrg(devices map[string]*Agent, orgID string) int {
@@ -2433,30 +1559,36 @@ func cloneTime(value *time.Time) *time.Time {
 	return &cloned
 }
 
-func cloneRecommendationResearchStatusResp(status *RecommendationResearchStatus) *response.RecommendationResearchStatusResp {
+func cloneReportResearchStatusResp(status *ReportResearchStatus) *response.ReportResearchStatusResp {
 	if status == nil {
 		return nil
 	}
-	return &response.RecommendationResearchStatusResp{
-		State:               status.State,
-		Summary:             status.Summary,
-		Provider:            status.Provider,
-		Model:               status.Model,
-		MinimumSessions:     status.MinimumSessions,
-		SessionCount:        status.SessionCount,
-		RawQueryCount:       status.RawQueryCount,
-		RecommendationCount: status.RecommendationCount,
-		TriggerSessionID:    status.TriggerSessionID,
-		LastError:           status.LastError,
-		TriggeredAt:         cloneTime(status.TriggeredAt),
-		StartedAt:           cloneTime(status.StartedAt),
-		CompletedAt:         cloneTime(status.CompletedAt),
-		LastSuccessfulAt:    cloneTime(status.LastSuccessfulAt),
-		LastDurationMS:      status.LastDurationMS,
+	reportCount := status.ReportCount
+	return &response.ReportResearchStatusResp{
+		SchemaVersion:    reportAPISchemaVersion,
+		State:            normalizeResearchStatusState(status.State),
+		Summary:          status.Summary,
+		Provider:         status.Provider,
+		Model:            status.Model,
+		MinimumSessions:  status.MinimumSessions,
+		SessionCount:     status.SessionCount,
+		RawQueryCount:    status.RawQueryCount,
+		ReportCount:      reportCount,
+		TriggerSessionID: status.TriggerSessionID,
+		LastError:        status.LastError,
+		TriggeredAt:      cloneTime(status.TriggeredAt),
+		StartedAt:        cloneTime(status.StartedAt),
+		CompletedAt:      cloneTime(status.CompletedAt),
+		LastSuccessfulAt: cloneTime(status.LastSuccessfulAt),
+		LastDurationMS:   status.LastDurationMS,
 	}
 }
 
-func isRecommendationResearchStatusNewer(candidate, current *RecommendationResearchStatus) bool {
+func normalizeResearchStatusState(state string) string {
+	return strings.TrimSpace(state)
+}
+
+func isReportResearchStatusNewer(candidate, current *ReportResearchStatus) bool {
 	if candidate == nil {
 		return false
 	}
@@ -2471,9 +1603,9 @@ func isRecommendationResearchStatusNewer(candidate, current *RecommendationResea
 	return candidateAt.After(currentAt)
 }
 
-func (s *AnalyticsService) setRecommendationResearchStatusLocked(projectID string, status RecommendationResearchStatus) {
+func (s *AnalyticsService) setReportResearchStatusLocked(projectID string, status ReportResearchStatus) {
 	status.ProjectID = projectID
-	s.AnalyticsStore.recommendationResearch[projectID] = &status
+	s.AnalyticsStore.reportResearch[projectID] = &status
 }
 
 func humanizeDurationMS(value int) string {
@@ -2516,19 +1648,6 @@ func queryCountForSession(session *SessionSummary) int {
 		return len(session.RawQueries)
 	}
 	return 1
-}
-
-func splitSessionsByApplyTime(sessions []*SessionSummary, appliedAt time.Time) ([]*SessionSummary, []*SessionSummary) {
-	before := make([]*SessionSummary, 0)
-	after := make([]*SessionSummary, 0)
-	for _, session := range sessions {
-		if session.Timestamp.Before(appliedAt) {
-			before = append(before, session)
-			continue
-		}
-		after = append(after, session)
-	}
-	return before, after
 }
 
 type sessionSummaryStats struct {
@@ -2588,60 +1707,33 @@ func summarizeSessions(sessions []*SessionSummary) sessionSummaryStats {
 	}
 }
 
-func interpretImpact(before, after sessionSummaryStats, afterCount int) string {
-	if afterCount == 0 {
-		return "Waiting for post-apply sessions."
+func buildDashboardActionSummary(activeReports int, researchStatus *ReportResearchStatus) string {
+	if researchStatus != nil && strings.EqualFold(strings.TrimSpace(researchStatus.State), "running") {
+		return "A fresh feedback report is currently being prepared."
 	}
-	if before.QueryCount == 0 {
-		return "Collect a few more baseline sessions to compare token usage before and after the rollout."
-	}
-
 	switch {
-	case after.AvgInputTokensPerQuery < before.AvgInputTokensPerQuery:
-		return "Prompt-side token usage per query is trending down after the rollout."
-	case after.AvgInputTokensPerQuery > before.AvgInputTokensPerQuery:
-		return "Prompt-side token usage per query is trending up after the rollout."
-	case after.AvgOutputTokensPerQuery < before.AvgOutputTokensPerQuery:
-		return "Response-side token usage per query is trending down after the rollout."
-	case after.AvgOutputTokensPerQuery > before.AvgOutputTokensPerQuery:
-		return "Response-side token usage per query is trending up after the rollout."
-	case after.AvgTokensPerQuery < before.AvgTokensPerQuery:
-		return "Follow-up sessions are reaching answers with fewer tokens per query."
-	case after.AvgTokensPerQuery > before.AvgTokensPerQuery:
-		return "Follow-up sessions are spending more tokens per query so far."
-	case after.AvgTokensPerSession < before.AvgTokensPerSession:
-		return "Per-session token usage is trending down after the rollout."
-	case after.AvgTokensPerSession > before.AvgTokensPerSession:
-		return "Per-session token usage is trending up after the rollout."
+	case activeReports > 0:
+		return fmt.Sprintf("%d feedback report(s) are ready to review.", activeReports)
 	default:
-		return "Token usage looks flat so far; collect more sessions for a clearer comparison."
+		return "No feedback report is waiting right now."
 	}
 }
 
-func buildDashboardActionSummary(pendingReview, approvedQueue, activeRecommendations int) string {
-	switch {
-	case pendingReview > 0 && approvedQueue > 0:
-		return fmt.Sprintf("%d plan(s) need approval and %d more are ready for the next local sync.", pendingReview, approvedQueue)
-	case pendingReview > 0:
-		return fmt.Sprintf("%d plan(s) are waiting for approval.", pendingReview)
-	case approvedQueue > 0:
-		return fmt.Sprintf("%d approved plan(s) are ready for the next local sync.", approvedQueue)
-	case activeRecommendations > 0:
-		return fmt.Sprintf("%d recommendation(s) are ready to review.", activeRecommendations)
-	default:
-		return "No rollout action is waiting right now."
+func buildDashboardOutcomeSummary(totalSessions, activeReports int, researchStatus *ReportResearchStatus) string {
+	state := ""
+	if researchStatus != nil {
+		state = strings.ToLower(strings.TrimSpace(researchStatus.State))
 	}
-}
-
-func buildDashboardOutcomeSummary(successfulRollouts, failedExecutions int, rollbackRate float64) string {
 	switch {
-	case failedExecutions > 0:
-		return fmt.Sprintf("%d rollout(s) need attention after failing local execution.", failedExecutions)
-	case successfulRollouts == 0:
-		return "No completed rollouts yet. Approve a change to start measuring workflow impact."
-	case rollbackRate >= 0.25:
-		return "Recent rollouts are being reversed too often. Narrow the next configuration change."
+	case state == "failed":
+		return "The latest analysis pass needs attention before the next report can be published."
+	case activeReports > 0:
+		return "Recent sessions are giving the research engine enough signal to compare usage patterns over time."
+	case totalSessions == 0:
+		return "Upload sessions so the system can start building workflow feedback."
+	case state == "running":
+		return "The latest uploaded sessions are being analyzed for the next workflow report."
 	default:
-		return "Recent configuration changes are landing. Keep uploading sessions to measure workflow impact."
+		return "Keep uploading sessions so the system can build sharper usage feedback."
 	}
 }

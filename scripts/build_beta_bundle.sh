@@ -14,24 +14,15 @@ STAGE_DIR="$RELEASE_DIR/$BUNDLE_NAME"
 ARCHIVE_PATH="$RELEASE_DIR/$BUNDLE_NAME.tar.gz"
 CHECKSUM_PATH="$ARCHIVE_PATH.sha256"
 MANIFEST_PATH="$RELEASE_DIR/$BUNDLE_NAME.json"
-RUNNER_DIR="$ROOT_DIR/tools/codex-runner"
 
 mkdir -p "$RELEASE_DIR"
 rm -rf "$STAGE_DIR" "$ARCHIVE_PATH" "$CHECKSUM_PATH" "$MANIFEST_PATH"
-mkdir -p "$STAGE_DIR/tools/codex-runner"
-
-if [[ ! -d "$RUNNER_DIR/node_modules" ]]; then
-  (cd "$RUNNER_DIR" && npm ci --omit=dev)
-fi
+mkdir -p "$STAGE_DIR"
 
 (cd "$ROOT_DIR" && GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" go build \
   -ldflags "-X github.com/Royaltyprogram/aiops/pkg/buildinfo.Version=$VERSION_LABEL -X github.com/Royaltyprogram/aiops/pkg/buildinfo.Commit=$GIT_COMMIT -X github.com/Royaltyprogram/aiops/pkg/buildinfo.Date=$BUILD_DATE" \
   -o "$STAGE_DIR/agentopt" ./cmd/agentopt)
 
-cp "$RUNNER_DIR/run.mjs" "$STAGE_DIR/tools/codex-runner/"
-cp "$RUNNER_DIR/package.json" "$STAGE_DIR/tools/codex-runner/"
-cp "$RUNNER_DIR/package-lock.json" "$STAGE_DIR/tools/codex-runner/"
-cp -R "$RUNNER_DIR/node_modules" "$STAGE_DIR/tools/codex-runner/"
 sed \
   -e "s/__VERSION__/$VERSION_LABEL/g" \
   -e "s/__COMMIT__/$GIT_COMMIT/g" \

@@ -238,7 +238,7 @@ func uploadSessionSummaries(st state, client *apiClient, reqs []request.SessionS
 			req.Timestamp = time.Now().UTC()
 		}
 		fmt.Fprintf(os.Stderr, "[%d/%d] Uploading session %s\n", idx+1, len(reqs), firstNonEmpty(strings.TrimSpace(req.SessionID), "pending-id"))
-		fmt.Fprintln(os.Stderr, "    The server may spend a while fetching recommendations after this upload.")
+		fmt.Fprintln(os.Stderr, "    The server may spend a while generating the next feedback report after this upload.")
 
 		var uploaded response.SessionIngestResp
 		if err := client.doJSON(http.MethodPost, "/api/v1/session-summaries", req, &uploaded); err != nil {
@@ -252,27 +252,28 @@ func uploadSessionSummaries(st state, client *apiClient, reqs []request.SessionS
 	return items, nil
 }
 
-func formatResearchStatusSummary(status *response.RecommendationResearchStatusResp) string {
+func formatResearchStatusSummary(status *response.ReportResearchStatusResp) string {
 	if status == nil {
 		return "Upload recorded."
 	}
+	reportCount := status.ReportCount
 	summary := strings.TrimSpace(status.Summary)
 	if summary != "" {
 		return summary
 	}
 	switch strings.TrimSpace(status.State) {
 	case "waiting_for_min_sessions":
-		return fmt.Sprintf("Collected %d of %d sessions needed before fetching recommendations.", status.SessionCount, status.MinimumSessions)
+		return fmt.Sprintf("Collected %d of %d sessions needed before generating the first feedback report.", status.SessionCount, status.MinimumSessions)
 	case "disabled":
-		return "Recommendation research is disabled on the server."
+		return "Feedback report research is disabled on the server."
 	case "running":
-		return "Upload recorded. Waiting for the suggestion in the dashboard while the server analyzes sessions in the background."
+		return "Upload recorded. The dashboard will show the next feedback report after the server analyzes the new sessions."
 	case "succeeded":
-		return fmt.Sprintf("Fetched %d recommendation(s).", status.RecommendationCount)
-	case "no_recommendations":
-		return "Finished analyzing sessions but did not produce recommendations."
+		return fmt.Sprintf("Published %d feedback report(s).", reportCount)
+	case "no_reports":
+		return "Finished analyzing sessions but did not publish a new feedback report."
 	case "failed":
-		return firstNonEmpty(strings.TrimSpace(status.LastError), "Recommendation research failed.")
+		return firstNonEmpty(strings.TrimSpace(status.LastError), "Feedback report research failed.")
 	default:
 		return "Upload recorded."
 	}

@@ -36,16 +36,8 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.POST("/session-summaries", r.uploadSessionSummary)
 	api.GET("/session-summaries", r.listSessionSummaries)
 	api.GET("/projects", r.listProjects)
-	api.GET("/recommendations", r.listRecommendations)
-	api.GET("/impact", r.impactSummary)
+	api.GET("/reports", r.listReports)
 	api.GET("/audits", r.auditList)
-	api.POST("/recommendations/apply", r.applyRecommendation)
-	api.GET("/change-plans", r.listChangePlans)
-	api.GET("/experiments", r.listExperiments)
-	api.POST("/change-plans/review", r.reviewChangePlan)
-	api.GET("/applies/pending", r.pendingApplies)
-	api.GET("/applies", r.applyHistory)
-	api.POST("/applies/result", r.reportApplyResult)
 	api.GET("/dashboard/overview", r.dashboardOverview)
 	api.GET("/dashboard/project-insights", r.dashboardProjectInsights)
 }
@@ -155,12 +147,12 @@ func (r *AnalyticsRoute) listSessionSummaries(c *echo.Context) error {
 	return common.WrapResp(c)(r.AnalyticsService.ListSessionSummaries(c.Request().Context(), &req))
 }
 
-func (r *AnalyticsRoute) listRecommendations(c *echo.Context) error {
-	var req request.RecommendationListReq
+func (r *AnalyticsRoute) listReports(c *echo.Context) error {
+	var req request.ReportListReq
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	return common.WrapResp(c)(r.AnalyticsService.ListRecommendations(c.Request().Context(), &req))
+	return common.WrapResp(c)(r.AnalyticsService.ListReports(c.Request().Context(), &req))
 }
 
 func (r *AnalyticsRoute) listProjects(c *echo.Context) error {
@@ -171,76 +163,12 @@ func (r *AnalyticsRoute) listProjects(c *echo.Context) error {
 	return common.WrapResp(c)(r.AnalyticsService.ListProjects(c.Request().Context(), &req))
 }
 
-func (r *AnalyticsRoute) applyRecommendation(c *echo.Context) error {
-	var req request.ApplyRecommendationReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.CreateApplyPlan(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) pendingApplies(c *echo.Context) error {
-	var req request.PendingApplyReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.PendingApplies(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) listChangePlans(c *echo.Context) error {
-	var req request.ChangePlanListReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ListChangePlans(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) listExperiments(c *echo.Context) error {
-	var req request.ExperimentListReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ListExperiments(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) reviewChangePlan(c *echo.Context) error {
-	var req request.ReviewChangePlanReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ReviewChangePlan(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) applyHistory(c *echo.Context) error {
-	var req request.ApplyHistoryReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ApplyHistory(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) impactSummary(c *echo.Context) error {
-	var req request.ImpactSummaryReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ImpactSummary(c.Request().Context(), &req))
-}
-
 func (r *AnalyticsRoute) auditList(c *echo.Context) error {
 	var req request.AuditListReq
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.AuditList(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) reportApplyResult(c *echo.Context) error {
-	var req request.ApplyResultReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ReportApplyResult(c.Request().Context(), &req))
 }
 
 func (r *AnalyticsRoute) dashboardOverview(c *echo.Context) error {

@@ -1,9 +1,0 @@
-{
-  "name": "agentopt-codex-runner",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@openai/codex": "0.112.0",
-    "@openai/codex-sdk": "0.112.0"
-  }
-}

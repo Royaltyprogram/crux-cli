@@ -92,9 +92,6 @@ tar_listing="$(tar -tzf "$ARCHIVE_PATH")"
 required_entries=(
   "$BUNDLE_NAME/agentopt"
   "$BUNDLE_NAME/README.md"
-  "$BUNDLE_NAME/tools/codex-runner/run.mjs"
-  "$BUNDLE_NAME/tools/codex-runner/package.json"
-  "$BUNDLE_NAME/tools/codex-runner/package-lock.json"
 )
 for entry in "${required_entries[@]}"; do
   if ! grep -Fxq "$entry" <<<"$tar_listing"; then
@@ -102,9 +99,5 @@ for entry in "${required_entries[@]}"; do
     exit 1
   fi
 done
-if ! grep -Fq "$BUNDLE_NAME/tools/codex-runner/node_modules/" <<<"$tar_listing"; then
-  echo "bundle missing codex-runner node_modules" >&2
-  exit 1
-fi
 
 echo "verified beta bundle: $ARCHIVE_PATH"
