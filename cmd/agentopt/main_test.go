@@ -936,30 +936,6 @@ func TestPreflightLocalApplyAllowsAgentoptSkillTarget(t *testing.T) {
 	require.Equal(t, filepath.Join(home, ".codex", "skills", "agentopt-repo-discovery", "SKILL.md"), result.Steps[0].TargetFile)
 }
 
-func TestPreflightLocalApplyAllowsRepoLocalTestTargets(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTOPT_HOME", root)
-
-	result, err := preflightLocalApply(state{WorkspaceID: "project-1", RepoPath: root}, "apply-tests", []response.PatchPreviewItem{
-		{
-			FilePath:       "internal/calculator/add_test.go",
-			Operation:      "text_replace",
-			ContentPreview: "package calculator\n",
-		},
-		{
-			FilePath:       ".codex/skills/agentopt-test-harness/SKILL.md",
-			Operation:      "text_replace",
-			ContentPreview: "---\nname: agentopt-test-harness\n",
-		},
-	}, "")
-	require.NoError(t, err)
-	require.True(t, result.Allowed)
-	require.Len(t, result.Steps, 2)
-	require.True(t, result.Steps[0].Allowed)
-	require.True(t, result.Steps[1].Allowed)
-	require.Equal(t, filepath.Join(root, "internal", "calculator", "add_test.go"), result.Steps[0].TargetFile)
-}
-
 func TestPreflightLocalApplyRejectsNonAgentoptSkillTarget(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

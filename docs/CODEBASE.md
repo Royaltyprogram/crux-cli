@@ -152,7 +152,6 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`, a
 12. `harness run`
    - discovers repo-local AgentOpt harness specs under `.agentopt/harness/`
    - executes allowlisted validation commands such as `go test`, reports pass/fail, and uploads the result when the repo is connected
-   - is intended for explicit verification, not automatic post-apply gating
 
 ## Persistence Model
 

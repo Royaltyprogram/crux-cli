@@ -29,7 +29,6 @@ Do not use canned recommendation categories. Generate recommendations directly f
 - Prefer abstract harness goals and representative checks over repository-specific implementation details. The approved change will later be handed to the local coding agent, which can write the actual tests and skills.
 - When repeated verification, regression checking, or acceptance-criteria drift appears in the sessions, prefer installing a repo-local test harness over adding more prose defaults.
 - If the session looks like a one-off edit or there is no clear reusable harness/workflow improvement, return `{"recommendations":[]}`.
-- When a reusable harness is needed, prefer change plans that help the local coding agent create concrete repo-local test assets plus a reusable harness skill for future tasks.
 - Recommendations must target the coding-agent system or harness, such as:
   - test harness creation
   - harness execution defaults
@@ -48,7 +47,6 @@ Do not use canned recommendation categories. Generate recommendations directly f
 - Use these target files when relevant:
   - `.agentopt/harness/agentopt-default.json`
   - `.codex/skills/agentopt-test-harness/SKILL.md`
-  - repo-local test files such as `*_test.go`, `test_*.py`, `tests/...`, `test/...`, `__tests__/...`
   - `AGENTS.md`
   - `.codex/skills/agentopt-repo-discovery/SKILL.md`
   - `.codex/config.json`
@@ -65,7 +63,6 @@ Do not use canned recommendation categories. Generate recommendations directly f
   - `assertions`
   - `anti_goals`
 - `test_commands` may stay high-level placeholders when the main value is the abstract contract and the local coding agent still needs to write the concrete tests later.
-- If you target repo-local test files in `change_plan`, keep the change abstract enough that the local coding agent can fill in stack-specific details during apply.
 - When a recommendation is primarily about adding or tightening a repo-local harness, also include a structured `harness_spec` object that matches the intended JSON file contents.
 - `score` must be between `0.0` and `1.0`.
 - `risk` should be a short natural-language string such as `Low. ...` or `Medium. ...`.
