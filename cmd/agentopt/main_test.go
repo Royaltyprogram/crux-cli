@@ -52,7 +52,114 @@ import path from "node:path";
 const requestPath = process.argv[2];
 const request = JSON.parse(await readFile(requestPath, "utf8"));
 const mode = process.env.AGENTOPT_STUB_MODE || "apply";
+const materialize = process.env.AGENTOPT_STUB_MATERIALIZE_TESTS === "1";
+const rewriteText = process.env.AGENTOPT_STUB_REWRITE_TEXT === "1";
 const changed = [];
+
+function normalizeTarget(target) {
+  return path.posix.normalize(String(target || "").replaceAll("\\", "/"));
+}
+
+function isRepoTestTarget(target) {
+  const normalized = normalizeTarget(target);
+  const base = path.posix.basename(normalized);
+  if (
+    base.endsWith("_test.go") ||
+    base.endsWith(".test.ts") ||
+    base.endsWith(".test.tsx") ||
+    base.endsWith(".test.js") ||
+    base.endsWith(".test.jsx") ||
+    base.endsWith(".spec.ts") ||
+    base.endsWith(".spec.tsx") ||
+    base.endsWith(".spec.js") ||
+    base.endsWith(".spec.jsx")
+  ) {
+    return true;
+  }
+  if (base.startsWith("test_") && base.endsWith(".py")) {
+    return true;
+  }
+  return (
+    normalized.startsWith("tests/") ||
+    normalized.startsWith("test/") ||
+    normalized.startsWith("__tests__/") ||
+    normalized.includes("/tests/") ||
+    normalized.includes("/test/") ||
+    normalized.includes("/__tests__/")
+  );
+}
+
+function isHarnessSkillTarget(target) {
+  const normalized = normalizeTarget(target);
+  return (
+    normalized === ".codex/skills/agentopt-test-harness/SKILL.md" ||
+    normalized === "~/.codex/skills/agentopt-test-harness/SKILL.md" ||
+    normalized.includes("/.codex/skills/agentopt-test-harness/SKILL.md")
+  );
+}
+
+function isMaterializationTarget(target) {
+  return isRepoTestTarget(target) || isHarnessSkillTarget(target);
+}
+
+function materializedContent(step) {
+  const normalized = normalizeTarget(step.target_file);
+  if (normalized.endsWith("_test.go")) {
+    return [
+      "package calculator",
+      "",
+      "import \"testing\"",
+      "",
+      "func TestMaterializedHarness(t *testing.T) {",
+      "  if got := 2 + 3; got != 5 {",
+      "    t.Fatalf(\"want 5, got %d\", got)",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+  }
+  if (normalized.endsWith(".py")) {
+    return [
+      "def test_materialized_harness():",
+      "    assert 2 + 3 == 5",
+      "",
+    ].join("\n");
+  }
+  if (
+    normalized.endsWith(".test.ts") ||
+    normalized.endsWith(".test.tsx") ||
+    normalized.endsWith(".test.js") ||
+    normalized.endsWith(".test.jsx") ||
+    normalized.endsWith(".spec.ts") ||
+    normalized.endsWith(".spec.tsx") ||
+    normalized.endsWith(".spec.js") ||
+    normalized.endsWith(".spec.jsx")
+  ) {
+    return [
+      "describe(\"materialized harness\", () => {",
+      "  it(\"checks a representative example\", () => {",
+      "    expect(2 + 3).toBe(5);",
+      "  });",
+      "});",
+      "",
+    ].join("\n");
+  }
+  if (isHarnessSkillTarget(normalized)) {
+    return [
+      "---",
+      "name: agentopt-test-harness",
+      "description: Materialized repo-local harness guidance.",
+      "---",
+      "",
+      "# AgentOpt Test Harness",
+      "",
+      "- Load the calculator regression tests when arithmetic behavior changes.",
+      "- Keep the contract in .agentopt/harness/*.json and the executable truth in repo-native tests.",
+      "",
+    ].join("\n");
+  }
+  return step.content_preview || "";
+}
 
 if (process.env.AGENTOPT_STUB_REQUIRE_RESUME === "1" && !request.resume_thread_id) {
   process.stderr.write("missing resume_thread_id\n");
@@ -72,13 +179,23 @@ for (const step of request.steps || []) {
     try {
       original = await readFile(step.target_file, "utf8");
     } catch {}
+    const nextContent = materialize && isMaterializationTarget(step.target_file)
+      ? materializedContent(step)
+      : rewriteText
+        ? "stub rewrote content\n"
+      : (step.content_preview || "");
     let next = original;
-    if (!next.includes(step.content_preview || "")) {
-      next += step.content_preview || "";
+    if (!next.includes(nextContent)) {
+      next += nextContent;
     }
     await writeFile(step.target_file, next, "utf8");
   } else if (step.operation === "text_replace") {
-    await writeFile(step.target_file, step.content_preview || "", "utf8");
+    const nextContent = materialize && isMaterializationTarget(step.target_file)
+      ? materializedContent(step)
+      : rewriteText
+        ? "stub rewrote content\n"
+      : (step.content_preview || "");
+    await writeFile(step.target_file, nextContent, "utf8");
   } else {
     let current = {};
     try {
@@ -897,6 +1014,62 @@ func TestExecuteLocalApplyInstallsAgentoptSkillFile(t *testing.T) {
 	require.Equal(t, "stub applied request", backup.CodexSummary)
 	require.False(t, backup.Files[0].OriginalExists)
 	require.Equal(t, "text_replace", backup.Files[0].FileKind)
+}
+
+func TestExecuteLocalApplyMaterializesRepoLocalHarnessTargets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+	t.Setenv("AGENTOPT_STUB_MATERIALIZE_TESTS", "1")
+	useStubCodexRunner(t, "apply")
+
+	result, err := executeLocalApply(state{WorkspaceID: "project-1", RepoPath: root}, "apply-materialized-harness", []response.PatchPreviewItem{
+		{
+			FilePath:       "internal/calculator/add_test.go",
+			Operation:      "text_replace",
+			ContentPreview: "Representative example: 2 + 3 should equal 5.\n",
+		},
+		{
+			FilePath:       ".codex/skills/agentopt-test-harness/SKILL.md",
+			Operation:      "text_replace",
+			ContentPreview: "Load arithmetic regression checks when calculator behavior changes.\n",
+		},
+	}, "", "")
+	require.NoError(t, err)
+	require.Len(t, result.FilePaths, 2)
+
+	testTarget := filepath.Join(root, "internal", "calculator", "add_test.go")
+	testData, err := os.ReadFile(testTarget)
+	require.NoError(t, err)
+	require.Contains(t, string(testData), "func TestMaterializedHarness")
+	require.NotContains(t, string(testData), "Representative example")
+
+	skillTarget := filepath.Join(root, ".codex", "skills", "agentopt-test-harness", "SKILL.md")
+	skillData, err := os.ReadFile(skillTarget)
+	require.NoError(t, err)
+	require.Contains(t, string(skillData), "# AgentOpt Test Harness")
+	require.Contains(t, string(skillData), "Load the calculator regression tests")
+	require.NotContains(t, string(skillData), "Load arithmetic regression checks")
+}
+
+func TestExecuteLocalApplyKeepsExactValidationForNonHarnessTextTargets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTOPT_HOME", root)
+	t.Setenv("AGENTOPT_STUB_REWRITE_TEXT", "1")
+	useStubCodexRunner(t, "apply")
+
+	target := filepath.Join(root, "AGENTS.md")
+	err := os.WriteFile(target, []byte("# Existing\n"), 0o644)
+	require.NoError(t, err)
+
+	_, err = executeLocalApply(state{WorkspaceID: "project-1", RepoPath: root}, "apply-exact-guard", []response.PatchPreviewItem{
+		{
+			FilePath:       "AGENTS.md",
+			Operation:      "text_replace",
+			ContentPreview: "# Expected\n\nKeep verification manual.\n",
+		},
+	}, "", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not match approved content")
 }
 
 func TestPreflightLocalApplyRejectsUnsafeTarget(t *testing.T) {

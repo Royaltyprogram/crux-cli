@@ -139,6 +139,7 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`, a
    - creates a change plan in `awaiting_review`
    - low-risk single-file config merges may be auto-approved by policy
    - when execution starts, the Go CLI now hands the approved local patch plan to a Codex SDK runner
+   - approved harness-oriented test targets are handed off as abstract contract seeds so the local Codex runner can materialize concrete repo-native tests and repo-local harness skill guidance
    - suggested harness specs stay repo-local artifacts for later/manual use; they are not auto-executed during apply
 8. `review`
    - approves or rejects the plan
@@ -176,7 +177,7 @@ Persisted entities:
 - API auth is still a shared token
 - raw query history is uploaded for recommendation analysis, but no raw code is collected
 - live web search and external research integration are intentionally deferred in this branch
-- the local CLI executor only applies allowlisted config files such as `AGENTS.md`, `.codex/skills/agentopt-*/SKILL.md`, `.agentopt/harness/*.json`, `.mcp.json`, `.codex/config.json`, and `.claude/settings.local.json`
+- the local CLI executor only applies allowlisted config files and harness assets such as `AGENTS.md`, `.codex/skills/agentopt-*/SKILL.md`, `.agentopt/harness/*.json`, repo-local test files, `.mcp.json`, `.codex/config.json`, and `.claude/settings.local.json`
 - the actual file-edit execution step is delegated to `tools/codex-runner/run.mjs`, which wraps the official Codex SDK
 - Go still owns preflight, file allowlist enforcement, backup, rollback, and apply-result reporting
 - approved change plans may contain multiple local patch steps, and rollback restores them in reverse order

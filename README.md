@@ -41,6 +41,7 @@ Detailed codebase documentation:
 - Local apply supports both `JSON merge patches` and safe `text append` patches such as `AGENTS.md`
 - `agentopt harness run` executes repo-local AgentOpt harness specs from `.agentopt/harness/*.json` and uploads results back to AgentOpt when the repo is connected
 - `sync` and `apply --yes` now hand approved repo-local changes to the local Codex runner without auto-executing suggested harness specs
+- approved abstract harness suggestions can now be materialized by the local Codex runner into concrete repo-native test files and repo-local harness skill guidance
 - Local apply is executed through a `Codex SDK` runner while preflight, allowlist checks, backup, and rollback stay in the Go CLI
 
 ## Quickstart
@@ -126,6 +127,7 @@ Bootstrap users are now treated as managed closed beta identities: removing a us
 In this MVP each connected repository is tracked as its own project within the organization. `agentopt connect` reuses the existing project for the same repo and updates the active local project mapping, so `pending`, `sync`, `history`, and `impact` follow the rollout stream for the repo you are currently inside.
 Recommendation patches now prefer repo-local agent files such as `AGENTS.md` and `.codex/skills/agentopt-*` instead of editing `~/.codex` global defaults by default.
 Repo-local harness recommendations can now install `.agentopt/harness/*.json` specs, concrete repo-local test assets, and `.codex/skills/agentopt-test-harness/SKILL.md`, expose the intended contract as structured `harness_spec` metadata, then run them with `agentopt harness run` when verification is explicitly needed.
+When those approved changes target repo-local test assets or the harness skill, AgentOpt sends the abstract contract seed to the local Codex runner and lets it translate that seed into concrete repo-native tests and reusable skill instructions.
 When the repo is already connected with `agentopt connect`, harness runs are uploaded to the server as analytics events and appear in the audit stream.
 The dashboard overview and project analytics now surface harness health directly, including pass rate, latest status, and recent failing specs.
 
