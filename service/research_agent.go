@@ -57,14 +57,8 @@ type researchRecommendation struct {
 	RawSuggestion   string
 }
 
-type researchAnalysisResult struct {
-	Recommendations        []researchRecommendation
-	NoRecommendationReason string
-}
-
 type researchRecommendationPayload struct {
-	Recommendations        []json.RawMessage `json:"recommendations"`
-	NoRecommendationReason string            `json:"no_recommendation_reason"`
+	Recommendations []json.RawMessage `json:"recommendations"`
 }
 
 type researchRecommendationItemPayload struct {
@@ -98,15 +92,8 @@ type researchHarnessSpecPayload struct {
 	TargetPaths   []string                          `json:"target_paths"`
 	SetupCommands []string                          `json:"setup_commands"`
 	TestCommands  []string                          `json:"test_commands"`
-	Examples      []researchHarnessExamplePayload   `json:"examples"`
 	Assertions    []researchHarnessAssertionPayload `json:"assertions"`
 	AntiGoals     []string                          `json:"anti_goals"`
-}
-
-type researchHarnessExamplePayload struct {
-	Summary  string `json:"summary"`
-	Input    string `json:"input"`
-	Expected string `json:"expected"`
 }
 
 type researchHarnessAssertionPayload struct {
@@ -212,16 +199,16 @@ func NewCloudResearchAgentPlaceholder(conf *configs.Config) *CloudResearchAgent 
 	return NewCloudResearchAgent(conf)
 }
 
-func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) (researchAnalysisResult, error) {
+func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*SessionSummary, snapshots []*ConfigSnapshot) ([]researchRecommendation, error) {
 	_ = snapshots
 
 	rawQueries := collectRawQueries(sessions)
 	rawQueries = normalizeQueriesForResearchPrompt(rawQueries)
 	if len(rawQueries) == 0 {
-		return researchAnalysisResult{}, nil
+		return nil, nil
 	}
 	if strings.TrimSpace(a.apiKey) == "" {
-		return researchAnalysisResult{}, nil
+		return nil, nil
 	}
 
 	usageSummary := buildResearchUsageSummary(sessions, rawQueries)
@@ -229,14 +216,14 @@ func (a *CloudResearchAgent) AnalyzeProject(project *Project, sessions []*Sessio
 	interactionSamples := buildResearchInteractionSamples(sessions, defaultResearchEvidenceLimit)
 	recommendations, err := a.generateRecommendations(project, sampledQueries, interactionSamples, usageSummary)
 	if err != nil {
-		return researchAnalysisResult{}, err
+		return nil, err
 	}
-	recommendations.Recommendations = localizeResearchRecommendations(project, recommendations.Recommendations)
-	sort.Slice(recommendations.Recommendations, func(i, j int) bool {
-		if recommendations.Recommendations[i].Score == recommendations.Recommendations[j].Score {
-			return recommendations.Recommendations[i].Title < recommendations.Recommendations[j].Title
+	recommendations = localizeResearchRecommendations(project, recommendations)
+	sort.Slice(recommendations, func(i, j int) bool {
+		if recommendations[i].Score == recommendations[j].Score {
+			return recommendations[i].Title < recommendations[j].Title
 		}
-		return recommendations.Recommendations[i].Score > recommendations.Recommendations[j].Score
+		return recommendations[i].Score > recommendations[j].Score
 	})
 	return recommendations, nil
 }
@@ -341,9 +328,9 @@ func collectRawQueries(sessions []*SessionSummary) []string {
 	return out
 }
 
-func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) (researchAnalysisResult, error) {
+func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQueries []string, interactionSamples []researchInteractionSample, usageSummary researchUsageSummary) ([]researchRecommendation, error) {
 	if len(sampledQueries) == 0 {
-		return researchAnalysisResult{}, fmt.Errorf("no sampled queries available")
+		return nil, fmt.Errorf("no sampled queries available")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultResearchRequestTimeout)
@@ -351,7 +338,7 @@ func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQu
 
 	prompt, err := buildRecommendationsPrompt(project, sampledQueries, interactionSamples, usageSummary)
 	if err != nil {
-		return researchAnalysisResult{}, err
+		return nil, err
 	}
 
 	resp, err := a.client.Responses.New(ctx, responses.ResponseNewParams{
@@ -361,7 +348,7 @@ func (a *CloudResearchAgent) generateRecommendations(project *Project, sampledQu
 		},
 	})
 	if err != nil {
-		return researchAnalysisResult{}, err
+		return nil, err
 	}
 	return parseResearchRecommendations(resp.OutputText())
 }
@@ -387,7 +374,7 @@ func sampleRawQueries(queries []string, limit int, rng *rand.Rand) []string {
 	return append([]string(nil), pool[:limit]...)
 }
 
-func parseResearchRecommendations(raw string) (researchAnalysisResult, error) {
+func parseResearchRecommendations(raw string) ([]researchRecommendation, error) {
 	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.TrimPrefix(cleaned, "```json")
 	cleaned = strings.TrimPrefix(cleaned, "```")
@@ -396,13 +383,10 @@ func parseResearchRecommendations(raw string) (researchAnalysisResult, error) {
 
 	var payload researchRecommendationPayload
 	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
-		return researchAnalysisResult{}, err
+		return nil, err
 	}
 	if len(payload.Recommendations) == 0 {
-		return researchAnalysisResult{
-			Recommendations:        nil,
-			NoRecommendationReason: strings.TrimSpace(payload.NoRecommendationReason),
-		}, nil
+		return nil, nil
 	}
 
 	items := make([]researchRecommendation, 0, len(payload.Recommendations))
@@ -417,12 +401,9 @@ func parseResearchRecommendations(raw string) (researchAnalysisResult, error) {
 		}
 	}
 	if len(items) == 0 {
-		return researchAnalysisResult{}, fmt.Errorf("no valid recommendations returned")
+		return nil, fmt.Errorf("no valid recommendations returned")
 	}
-	return researchAnalysisResult{
-		Recommendations:        items,
-		NoRecommendationReason: strings.TrimSpace(payload.NoRecommendationReason),
-	}, nil
+	return items, nil
 }
 
 func sanitizeResearchRecommendation(item researchRecommendationItemPayload, rawSuggestion string) (researchRecommendation, bool) {
@@ -522,20 +503,6 @@ func sanitizeResearchHarnessSpec(item *researchHarnessSpecPayload) *HarnessSpec 
 			NotContains: strings.TrimSpace(assertion.NotContains),
 		})
 	}
-	examples := make([]HarnessExample, 0, len(item.Examples))
-	for _, example := range item.Examples {
-		summary := strings.TrimSpace(example.Summary)
-		input := strings.TrimSpace(example.Input)
-		expected := strings.TrimSpace(example.Expected)
-		if summary == "" && input == "" && expected == "" {
-			continue
-		}
-		examples = append(examples, HarnessExample{
-			Summary:  summary,
-			Input:    input,
-			Expected: expected,
-		})
-	}
 	version := item.Version
 	if version <= 0 {
 		version = 1
@@ -547,7 +514,6 @@ func sanitizeResearchHarnessSpec(item *researchHarnessSpecPayload) *HarnessSpec 
 		TargetPaths:   normalizeResearchStringSlice(item.TargetPaths),
 		SetupCommands: setupCommands,
 		TestCommands:  testCommands,
-		Examples:      examples,
 		Assertions:    assertions,
 		AntiGoals:     normalizeResearchStringSlice(item.AntiGoals),
 	}

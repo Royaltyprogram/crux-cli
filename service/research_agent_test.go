@@ -56,7 +56,7 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 			ResponsesModel: "gpt-5.4",
 		},
 	})
-	result, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
+	recs, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
 		TokenIn:  1200,
 		TokenOut: 400,
 		RawQueries: []string{
@@ -79,7 +79,6 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 		},
 	}}, nil)
 	require.NoError(t, err)
-	recs := result.Recommendations
 
 	require.Len(t, recs, 1)
 	require.Equal(t, "repo-orientation-defaults", recs[0].Kind)
@@ -95,14 +94,15 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 
 func TestCloudResearchAgentAnalyzeProjectRequiresOpenAIForRecommendations(t *testing.T) {
 	agent := NewCloudResearchAgent(&configs.Config{})
-	result, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
+	recs, err := agent.AnalyzeProject(&Project{Name: "demo-workspace"}, []*SessionSummary{{
 		RawQueries: []string{
 			"Inspect the analytics flow before editing it.",
 			"List the exact tests to run after the patch.",
 		},
 	}}, nil)
 	require.NoError(t, err)
-	require.Nil(t, result.Recommendations)
+
+	require.Nil(t, recs)
 }
 
 func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
@@ -165,12 +165,12 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 	require.Contains(t, prompt, "## Raw Queries (2)")
 	require.Contains(t, prompt, "sample_query_1: Inspect the analytics route.")
 	require.Contains(t, prompt, "sample_query_2: List the exact verification steps.")
-	require.Contains(t, prompt, `{"recommendations":[],"no_recommendation_reason":"..."}`)
+	require.Contains(t, prompt, `{"recommendations":[]}`)
 	require.Contains(t, prompt, "repo-local test files such as `*_test.go`")
 }
 
 func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
-	result, err := parseResearchRecommendations(`{
+	recs, err := parseResearchRecommendations(`{
   "recommendations": [
     {
       "kind": "empty-plan",
@@ -202,7 +202,6 @@ func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
   ]
 }`)
 	require.NoError(t, err)
-	recs := result.Recommendations
 	require.Len(t, recs, 1)
 	require.Equal(t, "valid", recs[0].Kind)
 	require.Equal(t, 1.0, recs[0].Score)
@@ -210,14 +209,13 @@ func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
 }
 
 func TestParseResearchRecommendationsAllowsNoRecommendations(t *testing.T) {
-	result, err := parseResearchRecommendations(`{"recommendations":[],"no_recommendation_reason":"one-off bugfix with no reusable harness need"}`)
+	recs, err := parseResearchRecommendations(`{"recommendations":[]}`)
 	require.NoError(t, err)
-	require.Nil(t, result.Recommendations)
-	require.Equal(t, "one-off bugfix with no reusable harness need", result.NoRecommendationReason)
+	require.Nil(t, recs)
 }
 
 func TestParseResearchRecommendationsCapturesHarnessSpec(t *testing.T) {
-	result, err := parseResearchRecommendations(`{
+	recs, err := parseResearchRecommendations(`{
   "recommendations": [
     {
       "kind": "harness-seed",
@@ -237,10 +235,6 @@ func TestParseResearchRecommendationsCapturesHarnessSpec(t *testing.T) {
         "target_paths": ["service/", "cmd/agentopt/"],
         "setup_commands": ["go test ./service -run TestSmoke -count=1"],
         "test_commands": ["go test ./cmd/agentopt -run TestApproval -count=1"],
-        "examples": [
-          {"summary":"approve a valid request","input":"approved request payload","expected":"request succeeds"},
-          {"summary":"reject an invalid request","input":"invalid approval state","expected":"request fails with validation error"}
-        ],
         "assertions": [{"kind": "exit_code", "equals": 0}],
         "anti_goals": ["do not broaden patch scope"]
       },
@@ -257,17 +251,12 @@ func TestParseResearchRecommendationsCapturesHarnessSpec(t *testing.T) {
   ]
 }`)
 	require.NoError(t, err)
-	recs := result.Recommendations
 	require.Len(t, recs, 1)
 	require.NotNil(t, recs[0].HarnessSpec)
 	require.Equal(t, "approval-regression", recs[0].HarnessSpec.Name)
 	require.Equal(t, []string{"service/", "cmd/agentopt/"}, recs[0].HarnessSpec.TargetPaths)
 	require.Equal(t, []string{"go test ./service -run TestSmoke -count=1"}, recs[0].HarnessSpec.SetupCommands)
 	require.Equal(t, []string{"go test ./cmd/agentopt -run TestApproval -count=1"}, recs[0].HarnessSpec.TestCommands)
-	require.Len(t, recs[0].HarnessSpec.Examples, 2)
-	require.Equal(t, "approve a valid request", recs[0].HarnessSpec.Examples[0].Summary)
-	require.Equal(t, "approved request payload", recs[0].HarnessSpec.Examples[0].Input)
-	require.Equal(t, "request succeeds", recs[0].HarnessSpec.Examples[0].Expected)
 	require.Len(t, recs[0].HarnessSpec.Assertions, 1)
 	require.Equal(t, "exit_code", recs[0].HarnessSpec.Assertions[0].Kind)
 	require.Equal(t, 0, recs[0].HarnessSpec.Assertions[0].Equals)
