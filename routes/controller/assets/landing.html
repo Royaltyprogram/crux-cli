@@ -481,7 +481,7 @@
     </div>
     <h1>An AI agent that <em>tunes your coding agent</em> for you.</h1>
     <p class="hero-sub">
-      Suggests better <strong>instructions</strong>, <strong>skills</strong>, and <strong>MCP configs</strong> based on your real usage.
+      Suggests better <strong>test harnesses</strong>, <strong>skills</strong>, and <strong>MCP configs</strong> based on your real usage.
       One change at a time. Auto-rollback if it doesn't help.
     </p>
     <div class="hero-actions">
@@ -509,13 +509,13 @@
 
         <div class="mock-suggestion">
           <div class="mock-suggestion-header">
-            <span class="mock-suggestion-title">Add shared instruction block</span>
+            <span class="mock-suggestion-title">Install approval regression harness</span>
             <span class="mock-pill mock-pill--risk">Low risk</span>
           </div>
           <div class="mock-diff">
-            <span class="line-ctx">  # AGENTS.md</span><br>
-            <span class="line-add">+ Always check existing tests before writing new ones.</span><br>
-            <span class="line-add">+ Run `git status` before any commit operation.</span>
+            <span class="line-ctx">  .agentopt/harness/agentopt-default.json</span><br>
+            <span class="line-add">+ "goal": "approval flow should stay green end-to-end"</span><br>
+            <span class="line-add">+ "test_commands": ["go test ./cmd/agentopt -run TestApproval -count=1"]</span>
           </div>
           <div class="mock-impact">
             <div class="mock-impact-card">
@@ -626,15 +626,15 @@
     </div>
 
     <div class="config-row">
-      <div class="config-item">
-        <div class="config-item-icon" style="background: var(--support-light); color: var(--support);">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1H5a2 2 0 00-2 2v14l3.5-2.5L10 17l3.5-2.5L17 17V3a2 2 0 00-2-2z"/></svg>
+        <div class="config-item">
+          <div class="config-item-icon" style="background: var(--support-light); color: var(--support);">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1H5a2 2 0 00-2 2v14l3.5-2.5L10 17l3.5-2.5L17 17V3a2 2 0 00-2-2z"/></svg>
+          </div>
+          <div class="config-item-text">
+            <h3>Harnesses</h3>
+            <p>.agentopt/harness, validation commands</p>
+          </div>
         </div>
-        <div class="config-item-text">
-          <h3>Instructions</h3>
-          <p>AGENTS.md, .cursorrules</p>
-        </div>
-      </div>
       <div class="config-item">
         <div class="config-item-icon" style="background: var(--accent-light); color: var(--accent);">
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 1L1 6l9 4.5L19 6 10-1z"/><path d="M1 14l9 4.5L19 14"/><path d="M1 10l9 4.5L19 10"/></svg>
@@ -677,7 +677,7 @@
     <div class="ba-container">
       <div class="ba-card">
         <div class="ba-header">
-          <span class="ba-header-title">Example: Add test-checking instruction</span>
+          <span class="ba-header-title">Example: Add approval regression harness</span>
           <span class="mock-pill mock-pill--improved">Improved</span>
         </div>
         <div class="ba-body">
@@ -693,7 +693,7 @@
               <div class="ba-step-marker ba-step-marker--suggest">2</div>
               <div class="ba-step-content">
                 <h4>AgentOpt suggests</h4>
-                <p>"Always check existing tests before writing new ones."</p>
+                <p>"Install a repo-local harness and run the approval regression before and after apply."</p>
               </div>
             </div>
             <div class="ba-step">
