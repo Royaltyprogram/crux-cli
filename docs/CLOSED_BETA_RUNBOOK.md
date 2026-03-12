@@ -47,7 +47,7 @@ Notes:
 - In the MVP, each connected repository is tracked as its own project within the organization.
 - `agentopt connect` reuses the existing project for the same repo and updates the local CLI's active project mapping.
 - `agentopt harness run` executes repo-local harness specs and uploads the result to the server when the repo is connected.
-- If repo-local harness specs exist, `agentopt sync` and `agentopt apply --yes` do not auto-run them; use `agentopt harness run` explicitly when you want the local coding agent to exercise them.
+- If repo-local harness specs exist, `agentopt sync` and `agentopt apply --yes` run them before and after the local patch; a failing post-check triggers an automatic rollback attempt.
 - `agentopt daemon enable --bootstrap-recent 10` uploads recent local sessions once during onboarding, then installs background collection plus automatic local sync on macOS via `launchd`.
 - `pending`, `history`, `sync`, and `impact` follow the rollout stream for the connected repo you are currently inside.
 

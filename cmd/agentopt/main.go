@@ -81,6 +81,15 @@ type apiClient struct {
 	http    *http.Client
 }
 
+type guardedApplyLabels struct {
+	SuccessNote              string
+	ApplyFailurePrefix       string
+	PreHarnessFailurePrefix  string
+	PostHarnessFailurePrefix string
+	RollbackFailurePrefix    string
+	RollbackSuccessNote      string
+}
+
 const defaultAPIClientTimeout = 90 * time.Second
 
 func main() {
@@ -710,7 +719,14 @@ func runSyncOnce(st state, client *apiClient, targetConfig, reasoningEffort stri
 			continue
 		}
 
-		result, err := executeReportedLocalApply(st, client, item.ApplyID, item.PatchPreview, targetConfig, reasoningEffort, "applied by agentopt sync")
+		result, err := executeGuardedLocalApply(st, client, item.ApplyID, item.RecommendationID, item.PatchPreview, targetConfig, reasoningEffort, guardedApplyLabels{
+			SuccessNote:              "applied by agentopt sync",
+			ApplyFailurePrefix:       "local apply failed during sync",
+			PreHarnessFailurePrefix:  "pre-apply harness failed during sync",
+			PostHarnessFailurePrefix: "post-apply harness failed during sync",
+			RollbackFailurePrefix:    "automatic rollback failed during sync",
+			RollbackSuccessNote:      "auto-rolled back by agentopt sync after post-apply harness failure",
+		})
 		if err != nil {
 			if result.ApplyID == "" {
 				return err
@@ -784,7 +800,14 @@ func runApply(args []string) error {
 		}
 	}
 
-	result, err := executeReportedLocalApply(st, client, plan.ApplyID, plan.PatchPreview, *targetConfig, resolvedReasoningEffort, *note)
+	result, err := executeGuardedLocalApply(st, client, plan.ApplyID, plan.Recommendation.ID, plan.PatchPreview, *targetConfig, resolvedReasoningEffort, guardedApplyLabels{
+		SuccessNote:              *note,
+		ApplyFailurePrefix:       "local apply failed",
+		PreHarnessFailurePrefix:  "pre-apply harness failed",
+		PostHarnessFailurePrefix: "post-apply harness failed",
+		RollbackFailurePrefix:    "automatic rollback failed",
+		RollbackSuccessNote:      "auto-rolled back after post-apply harness failure",
+	})
 	if err != nil {
 		if result.ApplyID != "" {
 			_ = prettyPrint(result)
@@ -794,17 +817,37 @@ func runApply(args []string) error {
 	return prettyPrint(result)
 }
 
-func executeReportedLocalApply(st state, client *apiClient, applyID string, previews []response.PatchPreviewItem, targetConfig, reasoningEffort, successNote string) (response.ApplyResultResp, error) {
+func executeGuardedLocalApply(st state, client *apiClient, applyID, recommendationID string, previews []response.PatchPreviewItem, targetConfig, reasoningEffort string, labels guardedApplyLabels) (response.ApplyResultResp, error) {
+	preHarness, err := runHarnessGate(st, client, applyID, recommendationID)
+	if err != nil {
+		note := fmt.Sprintf("%s: %v", labels.PreHarnessFailurePrefix, err)
+		return reportFailedGuardedApply(client, applyID, note)
+	}
+	if preHarness.Executed && !preHarness.Passed {
+		note := fmt.Sprintf("%s: %s", labels.PreHarnessFailurePrefix, summarizeHarnessFailure(preHarness.Results))
+		return reportFailedGuardedApply(client, applyID, note)
+	}
+
 	localResult, err := executeLocalApply(st, applyID, previews, targetConfig, reasoningEffort)
 	if err != nil {
-		note := fmt.Sprintf("local apply failed: %v", err)
-		return reportFailedLocalApply(client, applyID, note)
+		note := fmt.Sprintf("%s: %v", labels.ApplyFailurePrefix, err)
+		return reportFailedGuardedApply(client, applyID, note)
+	}
+
+	postHarness, err := runHarnessGate(st, client, applyID, recommendationID)
+	if err != nil {
+		note := fmt.Sprintf("%s: %v", labels.PostHarnessFailurePrefix, err)
+		return rollbackAfterHarnessFailure(client, applyID, note, labels)
+	}
+	if postHarness.Executed && !postHarness.Passed {
+		note := fmt.Sprintf("%s: %s", labels.PostHarnessFailurePrefix, summarizeHarnessFailure(postHarness.Results))
+		return rollbackAfterHarnessFailure(client, applyID, note, labels)
 	}
 
 	result, err := reportApplyResult(client, request.ApplyResultReq{
 		ApplyID:         applyID,
 		Success:         true,
-		Note:            successNote,
+		Note:            labels.SuccessNote,
 		AppliedFile:     localResult.FilePath,
 		AppliedSettings: localResult.AppliedSettings,
 		AppliedText:     localResult.AppliedText,
@@ -815,7 +858,40 @@ func executeReportedLocalApply(st state, client *apiClient, applyID string, prev
 	return result, nil
 }
 
-func reportFailedLocalApply(client *apiClient, applyID, note string) (response.ApplyResultResp, error) {
+func rollbackAfterHarnessFailure(client *apiClient, applyID, harnessNote string, labels guardedApplyLabels) (response.ApplyResultResp, error) {
+	rollbackResult, rollbackErr := executeLocalRollback(applyID)
+	if rollbackErr != nil {
+		note := fmt.Sprintf("%s; %s: %v", harnessNote, labels.RollbackFailurePrefix, rollbackErr)
+		result, err := reportApplyResult(client, request.ApplyResultReq{
+			ApplyID: applyID,
+			Success: false,
+			Note:    note,
+		})
+		if err != nil {
+			return response.ApplyResultResp{}, fmt.Errorf("%s; failed to report result: %w", note, err)
+		}
+		return result, errors.New(note)
+	}
+
+	result, err := reportApplyResult(client, request.ApplyResultReq{
+		ApplyID:         applyID,
+		Success:         true,
+		Note:            fmt.Sprintf("%s: %s", labels.RollbackSuccessNote, harnessNote),
+		AppliedFile:     rollbackResult.FilePath,
+		AppliedSettings: rollbackResult.AppliedSettings,
+		AppliedText:     rollbackResult.AppliedText,
+		RolledBack:      true,
+	})
+	if err != nil {
+		return response.ApplyResultResp{}, err
+	}
+	if err := deleteApplyBackup(applyID); err != nil {
+		return result, err
+	}
+	return result, errors.New(harnessNote)
+}
+
+func reportFailedGuardedApply(client *apiClient, applyID, note string) (response.ApplyResultResp, error) {
 	result, err := reportApplyResult(client, request.ApplyResultReq{
 		ApplyID: applyID,
 		Success: false,

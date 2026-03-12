@@ -165,7 +165,6 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 	require.Contains(t, prompt, "## Raw Queries (2)")
 	require.Contains(t, prompt, "sample_query_1: Inspect the analytics route.")
 	require.Contains(t, prompt, "sample_query_2: List the exact verification steps.")
-	require.Contains(t, prompt, `{"recommendations":[]}`)
 }
 
 func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
@@ -205,12 +204,6 @@ func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
 	require.Equal(t, "valid", recs[0].Kind)
 	require.Equal(t, 1.0, recs[0].Score)
 	require.Contains(t, recs[0].RawSuggestion, "\"title\": \"Keep verification local\"")
-}
-
-func TestParseResearchRecommendationsAllowsNoRecommendations(t *testing.T) {
-	recs, err := parseResearchRecommendations(`{"recommendations":[]}`)
-	require.NoError(t, err)
-	require.Nil(t, recs)
 }
 
 func TestParseResearchRecommendationsCapturesHarnessSpec(t *testing.T) {

@@ -77,6 +77,14 @@ type harnessUploadOptions struct {
 	TriggeredBy      string
 }
 
+type harnessGateResult struct {
+	Root     string
+	Executed bool
+	Passed   bool
+	Results  []harnessSpecResult
+	Uploads  []response.HarnessRunResp
+}
+
 func runHarness(args []string) error {
 	if len(args) == 0 || args[0] == "run" {
 		runArgs := args
@@ -328,6 +336,47 @@ func maybeUploadHarnessResults(root string, results []harnessSpecResult, options
 	return uploads, nil
 }
 
+func runHarnessGate(st state, client *apiClient, applyID, recommendationID string) (harnessGateResult, error) {
+	root, files, found, err := discoverHarnessFiles(st.repoPath())
+	if err != nil {
+		return harnessGateResult{}, err
+	}
+	if !found {
+		return harnessGateResult{}, nil
+	}
+
+	results := make([]harnessSpecResult, 0, len(files))
+	allPassed := true
+	for _, path := range files {
+		spec, err := loadHarnessSpec(path)
+		if err != nil {
+			return harnessGateResult{}, err
+		}
+		result := executeHarnessSpec(root, path, spec, 10*time.Minute)
+		if !result.Passed {
+			allPassed = false
+		}
+		results = append(results, result)
+	}
+	uploads, err := maybeUploadHarnessResults(root, results, harnessUploadOptions{
+		Client:           client,
+		ProjectID:        st.workspaceID(),
+		RecommendationID: recommendationID,
+		ApplyID:          applyID,
+		TriggeredBy:      st.UserID,
+	})
+	if err != nil {
+		return harnessGateResult{}, err
+	}
+	return harnessGateResult{
+		Root:     root,
+		Executed: true,
+		Passed:   allPassed,
+		Results:  results,
+		Uploads:  uploads,
+	}, nil
+}
+
 func discoverHarnessFiles(rootOverride string) (string, []string, bool, error) {
 	start := strings.TrimSpace(rootOverride)
 	if start == "" {
@@ -362,6 +411,19 @@ func discoverHarnessFiles(rootOverride string) (string, []string, bool, error) {
 		return root, nil, false, nil
 	}
 	return root, files, true, nil
+}
+
+func summarizeHarnessFailure(results []harnessSpecResult) string {
+	for _, item := range results {
+		if item.Passed {
+			continue
+		}
+		return strings.TrimSpace(fmt.Sprintf("%s: %s", firstNonEmpty(item.Name, filepath.Base(item.File)), firstNonEmpty(item.Reason, "failed")))
+	}
+	if len(results) == 0 {
+		return "no harness results"
+	}
+	return "one or more harness specs failed"
 }
 
 func shouldSkipHarnessUpload(err error) bool {

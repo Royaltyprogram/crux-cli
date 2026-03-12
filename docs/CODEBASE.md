@@ -139,12 +139,12 @@ The CLI acts as `collector + sync client + execution agent + rollback helper`, a
    - creates a change plan in `awaiting_review`
    - low-risk single-file config merges may be auto-approved by policy
    - when execution starts, the Go CLI now hands the approved local patch plan to a Codex SDK runner
-   - suggested harness specs stay repo-local artifacts for later/manual use; they are not auto-executed during apply
+   - if repo-local harness specs exist, they run before and after the apply; a red post-check triggers an automatic rollback attempt
 8. `review`
    - approves or rejects the plan
 9. `sync`
    - applies approved plans locally from the active project's queue
-   - does not auto-execute suggested harness specs while syncing approved changes
+   - uses the same pre/post harness gate as `apply --yes`
 10. `preflight`
    - validates a queued change plan against local guard rules before execution
 11. `impact`
