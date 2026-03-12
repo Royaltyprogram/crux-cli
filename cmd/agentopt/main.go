@@ -1601,6 +1601,7 @@ func isAllowedOperation(operation string) bool {
 func isAllowedTarget(previewPath, resolvedPath string, roots ...string) bool {
 	allowSkillTarget := isAllowedAgentoptSkillTarget(previewPath) || isAllowedAgentoptSkillTarget(resolvedPath)
 	allowHarnessTarget := isAllowedHarnessTarget(previewPath) || isAllowedHarnessTarget(resolvedPath)
+	allowRepoTestTarget := isAllowedRepoTestTarget(previewPath) || isAllowedRepoTestTarget(resolvedPath)
 	allowedRelative := map[string]struct{}{
 		filepath.Clean(".codex/config.json"):          {},
 		filepath.Clean(".claude/settings.local.json"): {},
@@ -1611,7 +1612,7 @@ func isAllowedTarget(previewPath, resolvedPath string, roots ...string) bool {
 	}
 
 	if !filepath.IsAbs(previewPath) {
-		if _, ok := allowedRelative[filepath.Clean(previewPath)]; !ok && !allowSkillTarget && !allowHarnessTarget {
+		if _, ok := allowedRelative[filepath.Clean(previewPath)]; !ok && !allowSkillTarget && !allowHarnessTarget && !allowRepoTestTarget {
 			return false
 		}
 	}
@@ -1626,7 +1627,7 @@ func isAllowedTarget(previewPath, resolvedPath string, roots ...string) bool {
 		"SKILL.md":            {},
 	}
 	if _, ok := allowedBase[base]; !ok {
-		if !(allowHarnessTarget && strings.EqualFold(filepath.Ext(base), ".json")) {
+		if !(allowHarnessTarget && strings.EqualFold(filepath.Ext(base), ".json")) && !allowRepoTestTarget {
 			return false
 		}
 	}
@@ -1685,6 +1686,37 @@ func isAllowedAgentoptSkillTarget(target string) bool {
 	case strings.HasPrefix(cleaned, "~/.codex/skills/agentopt-"):
 		return true
 	case strings.Contains(cleaned, "/.codex/skills/agentopt-"):
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedRepoTestTarget(target string) bool {
+	cleaned := filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
+	if cleaned == "" {
+		return false
+	}
+	base := filepath.Base(cleaned)
+	switch {
+	case strings.HasSuffix(base, "_test.go"),
+		strings.HasSuffix(base, ".test.ts"),
+		strings.HasSuffix(base, ".test.tsx"),
+		strings.HasSuffix(base, ".test.js"),
+		strings.HasSuffix(base, ".test.jsx"),
+		strings.HasSuffix(base, ".spec.ts"),
+		strings.HasSuffix(base, ".spec.tsx"),
+		strings.HasSuffix(base, ".spec.js"),
+		strings.HasSuffix(base, ".spec.jsx"):
+		return true
+	case strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py"):
+		return true
+	case strings.HasPrefix(cleaned, "tests/"),
+		strings.HasPrefix(cleaned, "test/"),
+		strings.HasPrefix(cleaned, "__tests__/"),
+		strings.Contains(cleaned, "/tests/"),
+		strings.Contains(cleaned, "/test/"),
+		strings.Contains(cleaned, "/__tests__/"):
 		return true
 	default:
 		return false

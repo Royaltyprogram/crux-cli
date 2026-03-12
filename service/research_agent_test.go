@@ -166,6 +166,7 @@ func TestBuildRecommendationsPromptLoadsTemplate(t *testing.T) {
 	require.Contains(t, prompt, "sample_query_1: Inspect the analytics route.")
 	require.Contains(t, prompt, "sample_query_2: List the exact verification steps.")
 	require.Contains(t, prompt, `{"recommendations":[]}`)
+	require.Contains(t, prompt, "repo-local test files such as `*_test.go`")
 }
 
 func TestParseResearchRecommendationsRejectsInvalidEntries(t *testing.T) {
