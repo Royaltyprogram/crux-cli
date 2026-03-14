@@ -11,10 +11,10 @@ curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/script
 Install a specific release:
 
 ```bash
-CRUX_VERSION=0.1.0-beta.1-46-g87fa853 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+CRUX_VERSION=0.1.0-beta.1-50-gef562b7 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
 ```
 
 Source build:
 - source repository: `Royaltyprogram/aiops`
-- source commit: `87fa853`
-- published version: `0.1.0-beta.1-46-g87fa853`
+- source commit: `ef562b7`
+- published version: `0.1.0-beta.1-50-gef562b7`
