@@ -199,6 +199,20 @@ func TestRunSetupBackfillsFullCodexHistoryOnFirstWorkspaceSetup(t *testing.T) {
 					CapturedAt: time.Now().UTC(),
 				}),
 			}))
+		case r.Method == http.MethodPost && r.URL.Path == sessionSummaryBatchPath:
+			var batchReq request.SessionSummaryBatchReq
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&batchReq))
+			for _, sessionReq := range batchReq.Sessions {
+				sessionIDs = append(sessionIDs, sessionReq.SessionID)
+			}
+			items := make([]response.SessionBatchIngestItemResp, 0, len(batchReq.Sessions))
+			for _, sessionReq := range batchReq.Sessions {
+				items = append(items, uploadedSessionBatchItem(sessionReq))
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, sessionBatchResp("project-1", items...)),
+			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/session-summaries":
 			var sessionReq request.SessionSummaryReq
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&sessionReq))
@@ -330,6 +344,119 @@ func TestRunSetupKeepsRecentIncrementalUploadWhenWorkspaceAlreadyConfigured(t *t
 	require.Equal(t, "uploaded", payload.Collect.SessionStatus)
 	require.Equal(t, 1, payload.Collect.SessionUploaded)
 	require.Equal(t, []string{"codex-session-2"}, sessionIDs)
+}
+
+func TestRunSetupReusesSavedLoginWithoutPromptingForCLIToken(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	repoPath := filepath.Join(root, "workspace")
+	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+
+	codexHome := filepath.Join(root, ".codex")
+	writeCodexSessionFixture(t, filepath.Join(codexHome, "sessions", "2026", "03", "12", "latest.jsonl"), time.Date(2026, 3, 12, 8, 0, 0, 0, time.UTC), []string{
+		`{"timestamp":"2026-03-12T08:00:00Z","type":"session_meta","payload":{"id":"codex-session-setup","timestamp":"2026-03-12T08:00:00Z","model_provider":"openai"}}`,
+		`{"timestamp":"2026-03-12T08:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"## My request for Codex:\nReuse the saved login state."}}`,
+	})
+
+	sessionIDs := make([]string, 0, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/cli/login":
+			t.Fatalf("setup should reuse the saved device login instead of calling /auth/cli/login")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
+			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ProjectRegistrationResp{
+					ProjectID:   "project-1",
+					Status:      "connected",
+					ConnectedAt: time.Now().UTC(),
+				}),
+			}))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/config-snapshots":
+			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ConfigSnapshotListResp{}),
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/config-snapshots":
+			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.ConfigSnapshotResp{
+					SnapshotID: "snapshot-1",
+					ProjectID:  "project-1",
+					CapturedAt: time.Now().UTC(),
+				}),
+			}))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/session-summaries":
+			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			var sessionReq request.SessionSummaryReq
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&sessionReq))
+			sessionIDs = append(sessionIDs, sessionReq.SessionID)
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.SessionIngestResp{
+					SessionID:  sessionReq.SessionID,
+					ProjectID:  sessionReq.ProjectID,
+					RecordedAt: sessionReq.Timestamp,
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL:    server.URL,
+		AccessToken:  "saved-access",
+		RefreshToken: "saved-refresh",
+		TokenType:    "Bearer",
+		OrgID:        "org-1",
+		UserID:       "user-1",
+		AgentID:      "agent-1",
+	}))
+
+	output := captureStdout(t, func() {
+		require.NoError(t, run([]string{
+			"setup",
+			"--repo-path", repoPath,
+			"--codex-home", codexHome,
+			"--background=false",
+		}))
+	})
+
+	var payload setupResp
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	require.Equal(t, "reused", payload.Login.Status)
+	require.Equal(t, "project-1", payload.WorkspaceID)
+	require.Equal(t, []string{"codex-session-setup"}, sessionIDs)
+}
+
+func TestRunSetupRejectsExplicitServerMismatchWithoutCLIToken(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	require.NoError(t, saveState(state{
+		ServerURL:    "https://saved.example.com",
+		AccessToken:  "saved-access",
+		RefreshToken: "saved-refresh",
+		TokenType:    "Bearer",
+		OrgID:        "org-1",
+		UserID:       "user-1",
+		AgentID:      "agent-1",
+	}))
+
+	err := run([]string{
+		"setup",
+		"--server", "https://other.example.com",
+		"--background=false",
+	})
+	require.EqualError(t, err, "saved cli state is for https://saved.example.com, but setup requested https://other.example.com; run `crux login --server https://other.example.com --token <CLI_TOKEN_FROM_DASHBOARD>` or `crux reset` first")
 }
 
 func TestRunSetupEnablesBackgroundWhenInstalledBinaryAndLaunchctlAreAvailable(t *testing.T) {
@@ -480,6 +607,15 @@ func TestRunWithoutArgsShowsStatusWhenConfigured(t *testing.T) {
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.DashboardOverviewResp{
 					OrgID: "org-1",
+					ActiveImportJob: &response.SessionImportJobResp{
+						SchemaVersion:     reportAPISchemaVersion,
+						JobID:             "import-1",
+						ProjectID:         "project-1",
+						Status:            "running",
+						TotalSessions:     12,
+						ReceivedSessions:  12,
+						ProcessedSessions: 5,
+					},
 				}),
 			}))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/reports":
@@ -513,9 +649,10 @@ func TestRunWithoutArgsShowsStatusWhenConfigured(t *testing.T) {
 	})
 
 	var payload struct {
-		WorkspaceID               string               `json:"workspace_id"`
-		WorkspaceName             string               `json:"workspace_name"`
-		LastUploadedSessionCursor *sessionUploadCursor `json:"last_uploaded_session_cursor"`
+		WorkspaceID               string                         `json:"workspace_id"`
+		WorkspaceName             string                         `json:"workspace_name"`
+		LastUploadedSessionCursor *sessionUploadCursor           `json:"last_uploaded_session_cursor"`
+		Overview                  response.DashboardOverviewResp `json:"overview"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(output), &payload))
 	require.Equal(t, "project-1", payload.WorkspaceID)
@@ -523,6 +660,189 @@ func TestRunWithoutArgsShowsStatusWhenConfigured(t *testing.T) {
 	require.NotNil(t, payload.LastUploadedSessionCursor)
 	require.Equal(t, "session-123", payload.LastUploadedSessionCursor.SessionID)
 	require.Equal(t, int64(321), payload.LastUploadedSessionCursor.TailSize)
+	require.NotNil(t, payload.Overview.ActiveImportJob)
+	require.Equal(t, "import-1", payload.Overview.ActiveImportJob.JobID)
+	require.Equal(t, "running", payload.Overview.ActiveImportJob.Status)
+}
+
+func TestRunImportsListsWorkspaceScopedImportJobs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/session-import-jobs":
+			require.Equal(t, "project-1", r.URL.Query().Get("project_id"))
+			require.Equal(t, "running", r.URL.Query().Get("status"))
+			require.Equal(t, "5", r.URL.Query().Get("limit"))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.SessionImportJobListResp{
+					Items: []response.SessionImportJobResp{{
+						SchemaVersion:     reportAPISchemaVersion,
+						JobID:             "import-1",
+						ProjectID:         "project-1",
+						Status:            "running",
+						TotalSessions:     12,
+						ReceivedSessions:  12,
+						ProcessedSessions: 7,
+						UploadedSessions:  7,
+						CreatedAt:         time.Now().UTC(),
+					}},
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL:   server.URL,
+		APIToken:    "token",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		AgentID:     "agent-1",
+		WorkspaceID: "project-1",
+	}))
+
+	output := captureStdout(t, func() {
+		require.NoError(t, run([]string{"imports", "--status", "running", "--limit", "5"}))
+	})
+
+	var payload struct {
+		WorkspaceID   string                          `json:"workspace_id"`
+		WorkspaceName string                          `json:"workspace_name"`
+		Items         []response.SessionImportJobResp `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	require.Equal(t, "project-1", payload.WorkspaceID)
+	require.Equal(t, sharedWorkspaceName, payload.WorkspaceName)
+	require.Len(t, payload.Items, 1)
+	require.Equal(t, "import-1", payload.Items[0].JobID)
+	require.Equal(t, "running", payload.Items[0].Status)
+	require.Equal(t, 12, payload.Items[0].TotalSessions)
+}
+
+func TestRunImportsSupportsCursorFailedOnlyProjectAndAgentFilters(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/session-import-jobs":
+			require.Equal(t, "project-2", r.URL.Query().Get("project_id"))
+			require.Equal(t, "agent-2", r.URL.Query().Get("agent_id"))
+			require.Equal(t, "true", r.URL.Query().Get("failed_only"))
+			require.Equal(t, "import-cursor-1", r.URL.Query().Get("cursor"))
+			require.Equal(t, "1", r.URL.Query().Get("limit"))
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.SessionImportJobListResp{
+					Items: []response.SessionImportJobResp{{
+						SchemaVersion:     reportAPISchemaVersion,
+						JobID:             "import-2",
+						ProjectID:         "project-2",
+						Status:            "failed",
+						TotalSessions:     8,
+						ReceivedSessions:  8,
+						ProcessedSessions: 5,
+						UploadedSessions:  3,
+						FailedSessions:    2,
+						CreatedAt:         time.Now().UTC(),
+					}},
+					NextCursor: "import-cursor-2",
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL:   server.URL,
+		APIToken:    "token",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		AgentID:     "agent-1",
+		WorkspaceID: "project-1",
+	}))
+
+	output := captureStdout(t, func() {
+		require.NoError(t, run([]string{"imports", "--project-id", "project-2", "--agent-id", "agent-2", "--failed-only", "--cursor", "import-cursor-1", "--limit", "1"}))
+	})
+
+	var payload struct {
+		WorkspaceID   string                          `json:"workspace_id"`
+		WorkspaceName string                          `json:"workspace_name"`
+		NextCursor    string                          `json:"next_cursor"`
+		Items         []response.SessionImportJobResp `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	require.Equal(t, "project-2", payload.WorkspaceID)
+	require.Equal(t, sharedWorkspaceName, payload.WorkspaceName)
+	require.Equal(t, "import-cursor-2", payload.NextCursor)
+	require.Len(t, payload.Items, 1)
+	require.Equal(t, "import-2", payload.Items[0].JobID)
+	require.Equal(t, "failed", payload.Items[0].Status)
+}
+
+func TestRunImportsCancelCancelsImportJob(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/session-import-jobs/import-9/cancel":
+			require.NoError(t, json.NewEncoder(w).Encode(envelope{
+				Code: 0,
+				Data: mustJSONRawMessage(t, response.SessionImportJobResp{
+					SchemaVersion: reportAPISchemaVersion,
+					JobID:         "import-9",
+					ProjectID:     "project-1",
+					Status:        "canceled",
+					TotalSessions: 12,
+					CreatedAt:     time.Now().UTC(),
+					LastError:     "session import job canceled by operator",
+				}),
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	require.NoError(t, saveState(state{
+		ServerURL:   server.URL,
+		APIToken:    "token",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		AgentID:     "agent-1",
+		WorkspaceID: "project-1",
+	}))
+
+	output := captureStdout(t, func() {
+		require.NoError(t, run([]string{"imports", "cancel", "import-9"}))
+	})
+
+	var payload struct {
+		WorkspaceID   string                        `json:"workspace_id"`
+		WorkspaceName string                        `json:"workspace_name"`
+		Job           response.SessionImportJobResp `json:"job"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	require.Equal(t, "project-1", payload.WorkspaceID)
+	require.Equal(t, sharedWorkspaceName, payload.WorkspaceName)
+	require.Equal(t, "import-9", payload.Job.JobID)
+	require.Equal(t, "canceled", payload.Job.Status)
+	require.Contains(t, payload.Job.LastError, "canceled")
 }
 
 func TestRunWorkspaceIncludesLastUploadedSessionCursor(t *testing.T) {
