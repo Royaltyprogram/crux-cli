@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Royaltyprogram/aiops/configs"
@@ -127,6 +128,15 @@ type setupResp struct {
 	Background    backgroundSetupResp              `json:"background"`
 }
 
+type resetResp struct {
+	HomeDir            string              `json:"home_dir"`
+	StatePath          string              `json:"state_path"`
+	StateRemoved       bool                `json:"state_removed"`
+	StateAlreadyAbsent bool                `json:"state_already_absent,omitempty"`
+	Background         backgroundResetResp `json:"background"`
+	Warnings           []string            `json:"warnings,omitempty"`
+}
+
 const defaultAPIClientTimeout = 90 * time.Second
 
 func main() {
@@ -151,6 +161,8 @@ func run(args []string) error {
 		return runLogin(args[1:])
 	case "connect":
 		return runConnect(args[1:])
+	case "reset":
+		return runReset(args[1:])
 	case "snapshot":
 		return runSnapshot(args[1:])
 	case "session":
@@ -232,6 +244,7 @@ Advanced commands:
   version           print the CLI build version
   login             authenticate with an issued CLI token and register this device
   connect           connect a local repo to the shared workspace for the current org
+  reset             remove saved cli auth/workspace state and background collector artifacts on this machine
   snapshot          upload a config snapshot from a JSON file
   session           upload one or more session summaries from a JSON file or local Codex session files
   workspace         show the shared workspace connected to the current org
@@ -407,6 +420,44 @@ func runSetup(args []string) error {
 		Collect:       collectResp,
 		Background:    backgroundResp,
 	})
+}
+
+func runReset(args []string) error {
+	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	statePath, err := stateFilePath()
+	if err != nil {
+		return err
+	}
+	homeDir := filepath.Dir(statePath)
+
+	resp := resetResp{
+		HomeDir:   homeDir,
+		StatePath: statePath,
+	}
+
+	if err := os.Remove(statePath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			resp.StateAlreadyAbsent = true
+		} else {
+			return err
+		}
+	} else {
+		resp.StateRemoved = true
+	}
+
+	background := resetBackgroundCollection(homeDir)
+	resp.Background = background
+	resp.Warnings = append(resp.Warnings, background.Warnings...)
+
+	if err := removeDirIfEmpty(homeDir); err != nil {
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to prune empty crux home dir: %v", err))
+	}
+
+	return prettyPrint(resp)
 }
 
 func shouldBackfillFullHistoryOnSetup() bool {
@@ -764,11 +815,14 @@ func loginAndSaveState(opts loginOptions) (state, response.CLILoginResp, error) 
 	if err := client.doJSON(http.MethodPost, "/api/v1/auth/cli/login", req, &resp); err != nil {
 		return state{}, response.CLILoginResp{}, err
 	}
+	if err := validateCLILoginResp(resp); err != nil {
+		return state{}, response.CLILoginResp{}, err
+	}
 
 	st := state{
 		ServerURL:        strings.TrimRight(serverURL, "/"),
-		APIToken:         firstNonEmpty(strings.TrimSpace(resp.AccessToken), cliToken),
-		AccessToken:      firstNonEmpty(strings.TrimSpace(resp.AccessToken), cliToken),
+		APIToken:         strings.TrimSpace(resp.AccessToken),
+		AccessToken:      strings.TrimSpace(resp.AccessToken),
 		RefreshToken:     strings.TrimSpace(resp.RefreshToken),
 		TokenType:        defaultString(strings.TrimSpace(resp.TokenType), "Bearer"),
 		AccessExpiresAt:  cloneTime(resp.AccessExpiresAt),
@@ -844,12 +898,12 @@ func (c *apiClient) doJSON(method, path string, body any, out any) error {
 	if err := c.doJSONOnce(method, path, body, out, c.authToken()); err != nil {
 		var apiErr *apiError
 		if c.state == nil || !errors.As(err, &apiErr) || apiErr.Code != service.ErrCodeDeviceAccessTokenExpired || strings.TrimSpace(c.state.RefreshToken) == "" || path == "/api/v1/auth/cli/refresh" {
-			return err
+			return c.annotateStateAuthError(err)
 		}
 		if refreshErr := c.refreshAccessToken(); refreshErr != nil {
-			return refreshErr
+			return c.annotateStateAuthError(refreshErr)
 		}
-		return c.doJSONOnce(method, path, body, out, c.authToken())
+		return c.annotateStateAuthError(c.doJSONOnce(method, path, body, out, c.authToken()))
 	}
 	return nil
 }
@@ -941,6 +995,38 @@ func (c *apiClient) refreshAccessToken() error {
 		c.state.AgentID = strings.TrimSpace(resp.AgentID)
 	}
 	return saveState(*c.state)
+}
+
+func validateCLILoginResp(resp response.CLILoginResp) error {
+	if strings.TrimSpace(resp.AccessToken) == "" || strings.TrimSpace(resp.RefreshToken) == "" {
+		return errors.New("cli login succeeded but server did not return device tokens; update the CLI/server pair and retry `crux login` after clearing stale state")
+	}
+	return nil
+}
+
+func (c *apiClient) annotateStateAuthError(err error) error {
+	if err == nil || c == nil || c.state == nil {
+		return err
+	}
+
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+
+	token := strings.TrimSpace(c.state.accessToken())
+	if apiErr.Code == 1001 && token != "" && strings.TrimSpace(c.state.RefreshToken) == "" {
+		statePath, pathErr := stateFilePath()
+		if pathErr != nil {
+			statePath = "~/.crux/state.json"
+		}
+		if isLegacyEnrollmentToken(token) {
+			return fmt.Errorf("%w; saved cli state still contains a legacy enrollment token (%s). Remove %s and run `crux login` or `crux setup` again", err, tokenPreview(token), statePath)
+		}
+		return fmt.Errorf("%w; saved cli state looks stale and has no refresh token. Remove %s and run `crux login` or `crux setup` again", err, statePath)
+	}
+
+	return err
 }
 
 func loadState() (state, error) {
@@ -1070,8 +1156,33 @@ func (s *state) setWorkspaceID(id string) {
 	s.WorkspaceID = strings.TrimSpace(id)
 }
 
+func isLegacyEnrollmentToken(token string) bool {
+	token = strings.TrimSpace(token)
+	return strings.HasPrefix(token, "agt_enr_") || strings.HasPrefix(token, "agt_cli_")
+}
+
+func tokenPreview(token string) string {
+	token = strings.TrimSpace(token)
+	if len(token) <= 14 {
+		return token
+	}
+	return token[:14]
+}
+
 func ensureStateFilePermissions(path string) error {
 	return os.Chmod(path, 0o600)
+}
+
+func removeDirIfEmpty(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	err := os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTEMPTY) {
+		return nil
+	}
+	return err
 }
 
 func cloneTime(value *time.Time) *time.Time {

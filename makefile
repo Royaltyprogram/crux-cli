@@ -67,3 +67,6 @@ build: generate
 	go mod tidy -v
 	go build -ldflags "$(CRUX_LDFLAGS)" -o=output/server main.go wire_gen.go
 	go build -ldflags "$(CRUX_LDFLAGS)" -o=output/crux ./cmd/crux
+
+install-cli-dev:
+	./scripts/install_local_dev.sh

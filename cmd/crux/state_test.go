@@ -141,3 +141,66 @@ func TestAPIClientRefreshesExpiredDeviceAccessToken(t *testing.T) {
 	require.Equal(t, "new-access", loaded.AccessToken)
 	require.Equal(t, "new-refresh", loaded.RefreshToken)
 }
+
+func TestLoginAndSaveStateRejectsIncompleteDeviceTokenResponse(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, "setup-token", r.Header.Get("X-Crux-Token"))
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code: 0,
+			Data: mustJSONRawMessage(t, response.CLILoginResp{
+				AgentID:      "device-1",
+				DeviceID:     "device-1",
+				OrgID:        "org-1",
+				UserID:       "user-1",
+				Status:       "registered",
+				RegisteredAt: time.Now().UTC(),
+			}),
+		}))
+	}))
+	defer server.Close()
+
+	_, _, err := loginAndSaveState(loginOptions{
+		ServerURL: server.URL,
+		Token:     "setup-token",
+	})
+	require.EqualError(t, err, "cli login succeeded but server did not return device tokens; update the CLI/server pair and retry `crux login` after clearing stale state")
+
+	_, loadErr := loadState()
+	require.ErrorIs(t, loadErr, errStateNotFound)
+}
+
+func TestAPIClientHintsWhenLegacyEnrollmentTokenIsSaved(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code:    1001,
+			Message: "invalid api token",
+		}))
+	}))
+	defer server.Close()
+
+	st := state{
+		ServerURL:   server.URL,
+		APIToken:    "agt_enr_legacydeadbeef",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
+	}
+	require.NoError(t, saveState(st))
+
+	client := newStateAPIClient(&st)
+	var resp response.ConfigSnapshotListResp
+	err := client.doJSON(http.MethodGet, "/api/v1/config-snapshots?project_id=project-1", nil, &resp)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "saved cli state still contains a legacy enrollment token")
+	require.Contains(t, err.Error(), filepath.Join(root, "state.json"))
+	require.Contains(t, err.Error(), "run `crux login` or `crux setup` again")
+}

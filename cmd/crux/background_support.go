@@ -29,6 +29,18 @@ type backgroundSetupResp struct {
 	Interval   string `json:"interval,omitempty"`
 }
 
+type backgroundResetResp struct {
+	Status          string   `json:"status"`
+	Label           string   `json:"label,omitempty"`
+	PlistPath       string   `json:"plist_path,omitempty"`
+	PlistRemoved    bool     `json:"plist_removed,omitempty"`
+	UnloadAttempted bool     `json:"unload_attempted,omitempty"`
+	UnloadSucceeded bool     `json:"unload_succeeded,omitempty"`
+	LogDir          string   `json:"log_dir,omitempty"`
+	LogsRemoved     bool     `json:"logs_removed,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
+}
+
 type backgroundSetupOptions struct {
 	Enabled   bool
 	CodexHome string
@@ -348,6 +360,64 @@ func cruxHomeDir() (string, error) {
 		return "", err
 	}
 	return filepath.Dir(path), nil
+}
+
+func resetBackgroundCollection(homeDir string) backgroundResetResp {
+	resp := backgroundResetResp{
+		Status: "not_configured",
+	}
+
+	trimmedHome := strings.TrimSpace(homeDir)
+	if trimmedHome == "" {
+		return resp
+	}
+
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		resp.Status = "cleanup_failed"
+		resp.Warnings = append(resp.Warnings, err.Error())
+		return resp
+	}
+
+	label := backgroundLaunchdLabel(trimmedHome)
+	plistPath := filepath.Join(userHome, "Library", "LaunchAgents", label+".plist")
+	logDir := filepath.Join(trimmedHome, "logs")
+
+	resp.Label = label
+	resp.PlistPath = plistPath
+	resp.LogDir = logDir
+
+	if fileExists(plistPath) {
+		resp.Status = "removed"
+		if runtime.GOOS == "darwin" || strings.TrimSpace(os.Getenv("CRUX_LAUNCHCTL_BIN")) != "" {
+			resp.UnloadAttempted = true
+			if err := runLaunchctl("unload", plistPath); err != nil {
+				resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to unload background collector: %v", err))
+			} else {
+				resp.UnloadSucceeded = true
+			}
+		}
+		if err := os.Remove(plistPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			resp.Status = "cleanup_failed"
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to remove plist: %v", err))
+		} else {
+			resp.PlistRemoved = true
+		}
+	}
+
+	if fileExists(logDir) {
+		if err := os.RemoveAll(logDir); err != nil {
+			resp.Status = "cleanup_failed"
+			resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to remove logs: %v", err))
+		} else {
+			resp.LogsRemoved = true
+			if resp.Status == "not_configured" {
+				resp.Status = "removed"
+			}
+		}
+	}
+
+	return resp
 }
 
 func joinShellArgs(values []string) string {

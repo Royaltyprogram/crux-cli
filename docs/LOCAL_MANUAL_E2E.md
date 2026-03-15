@@ -91,6 +91,16 @@ go run ./cmd/crux setup --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_D
 go run ./cmd/crux workspace
 ```
 
+If you need the installed `crux` command to test the current repository build rather than the latest published release, run this once before setup:
+
+```bash
+./scripts/install_local_dev.sh
+crux reset
+crux version
+```
+
+The expected `crux version` should match the current repo `git describe`, not the latest GitHub release version.
+
 ## 6. Upload A Snapshot
 
 ```bash

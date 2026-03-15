@@ -69,6 +69,16 @@ go run ./cmd/crux reports
 go run ./cmd/crux audit
 ```
 
+If you want the plain `crux` command to point at the current repository build instead of the latest published release, install the local dev build explicitly:
+
+```bash
+./scripts/install_local_dev.sh
+crux reset
+crux version
+```
+
+This path updates `~/.local/bin/crux` to the current repo build under `~/.local/share/crux/current`. Use it when validating unreleased CLI changes locally.
+
 For beta or production user machines, install the released CLI and run `crux` directly instead of `go run`:
 
 ```bash

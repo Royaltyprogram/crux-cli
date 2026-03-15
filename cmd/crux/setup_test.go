@@ -16,6 +16,25 @@ import (
 	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
+func testCLILoginResp(deviceID, orgID, userID string) response.CLILoginResp {
+	now := time.Now().UTC()
+	accessExpiresAt := now.Add(24 * time.Hour)
+	refreshExpiresAt := now.Add(30 * 24 * time.Hour)
+	return response.CLILoginResp{
+		AccessToken:      "agt_dva_" + deviceID,
+		AccessExpiresAt:  &accessExpiresAt,
+		RefreshToken:     "agt_dvr_" + deviceID,
+		RefreshExpiresAt: &refreshExpiresAt,
+		TokenType:        "Bearer",
+		AgentID:          deviceID,
+		DeviceID:         deviceID,
+		OrgID:            orgID,
+		UserID:           userID,
+		Status:           "registered",
+		RegisteredAt:     now,
+	}
+}
+
 func TestRunSetupLogsInConnectsAndCollects(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CRUX_HOME", root)
@@ -46,16 +65,10 @@ func TestRunSetupLogsInConnectsAndCollects(t *testing.T) {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&loginReq))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
-				Data: mustJSONRawMessage(t, response.CLILoginResp{
-					AgentID:      "agent-1",
-					DeviceID:     "device-1",
-					OrgID:        "org-1",
-					UserID:       "user-1",
-					Status:       "registered",
-					RegisteredAt: time.Now().UTC(),
-				}),
+				Data: mustJSONRawMessage(t, testCLILoginResp("device-1", "org-1", "user-1")),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
+			require.Equal(t, "agt_dva_device-1", r.Header.Get("X-Crux-Token"))
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&projectReq))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
@@ -161,14 +174,7 @@ func TestRunSetupBackfillsFullCodexHistoryOnFirstWorkspaceSetup(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/cli/login":
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
-				Data: mustJSONRawMessage(t, response.CLILoginResp{
-					AgentID:      "agent-1",
-					DeviceID:     "device-1",
-					OrgID:        "org-1",
-					UserID:       "user-1",
-					Status:       "registered",
-					RegisteredAt: time.Now().UTC(),
-				}),
+				Data: mustJSONRawMessage(t, testCLILoginResp("device-1", "org-1", "user-1")),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
@@ -264,14 +270,7 @@ func TestRunSetupKeepsRecentIncrementalUploadWhenWorkspaceAlreadyConfigured(t *t
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/cli/login":
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
-				Data: mustJSONRawMessage(t, response.CLILoginResp{
-					AgentID:      "agent-2",
-					DeviceID:     "device-2",
-					OrgID:        "org-1",
-					UserID:       "user-1",
-					Status:       "registered",
-					RegisteredAt: time.Now().UTC(),
-				}),
+				Data: mustJSONRawMessage(t, testCLILoginResp("device-2", "org-1", "user-1")),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
@@ -374,14 +373,7 @@ func TestRunSetupEnablesBackgroundWhenInstalledBinaryAndLaunchctlAreAvailable(t 
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&loginReq))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
-				Data: mustJSONRawMessage(t, response.CLILoginResp{
-					AgentID:      "agent-1",
-					DeviceID:     "device-1",
-					OrgID:        "org-1",
-					UserID:       "user-1",
-					Status:       "registered",
-					RegisteredAt: time.Now().UTC(),
-				}),
+				Data: mustJSONRawMessage(t, testCLILoginResp("device-1", "org-1", "user-1")),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&projectReq))
