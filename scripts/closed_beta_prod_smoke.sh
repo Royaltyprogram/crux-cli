@@ -14,11 +14,19 @@ JWT_SECRET_VALUE="${JWT_SECRET_VALUE:-closed-beta-prod-smoke-secret}"
 JWT_SECRET_FILE_OVERRIDE="${JWT_SECRET_FILE_OVERRIDE:-}"
 AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE="${AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE:-}"
 OPENAI_API_KEY_FILE_OVERRIDE="${OPENAI_API_KEY_FILE_OVERRIDE:-}"
+DB_DSN_FILE_OVERRIDE="${DB_DSN_FILE_OVERRIDE:-}"
 EXPECT_RESEARCH_MODE="${EXPECT_RESEARCH_MODE:-}"
 GOOGLE_STUB_HOST="${GOOGLE_STUB_HOST:-127.0.0.1}"
 GOOGLE_STUB_PORT="${GOOGLE_STUB_PORT:-19090}"
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-smoke-google-client-id}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-smoke-google-client-secret}"
+MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:8.4}"
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+MYSQL_PORT="${MYSQL_PORT:-13306}"
+MYSQL_DATABASE="${MYSQL_DATABASE:-crux}"
+MYSQL_USER="${MYSQL_USER:-crux}"
+MYSQL_PASSWORD="${MYSQL_PASSWORD:-crux-pass}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-crux-root-pass}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 KEEP_RUNTIME="${KEEP_RUNTIME:-false}"
 RUNTIME_DIR="$(mktemp -d)"
@@ -28,6 +36,7 @@ SERVER_LOG_PATH="${SERVER_LOG_PATH:-$RUNTIME_DIR/server.log}"
 GOOGLE_STUB_LOG_PATH="${GOOGLE_STUB_LOG_PATH:-$RUNTIME_DIR/google-oauth-stub.log}"
 SERVER_PID=""
 GOOGLE_STUB_PID=""
+MYSQL_CONTAINER_NAME=""
 
 cleanup() {
   if [[ -n "$SERVER_PID" ]]; then
@@ -38,6 +47,9 @@ cleanup() {
     kill "$GOOGLE_STUB_PID" >/dev/null 2>&1 || true
     wait "$GOOGLE_STUB_PID" >/dev/null 2>&1 || true
   fi
+  if [[ -n "$MYSQL_CONTAINER_NAME" ]]; then
+    docker rm -f "$MYSQL_CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
   if [[ "$KEEP_RUNTIME" != "true" ]]; then
     rm -rf "$RUNTIME_DIR"
   fi
@@ -47,7 +59,6 @@ trap cleanup EXIT
 mkdir -p "$DATA_DIR" "$SECRET_DIR"
 
 printf "%s\n" "$JWT_SECRET_VALUE" > "$SECRET_DIR/jwt-secret"
-printf "%s\n" "$DATA_DIR/crux-prod.db?_fk=1" > "$SECRET_DIR/db-dsn"
 cat > "$SECRET_DIR/bootstrap-users.json" <<EOF
 [
   {
@@ -63,11 +74,46 @@ EOF
 
 JWT_SECRET_FILE_PATH="$SECRET_DIR/jwt-secret"
 AUTH_BOOTSTRAP_USERS_FILE_PATH="$SECRET_DIR/bootstrap-users.json"
+DB_DSN_FILE_PATH="$SECRET_DIR/db-dsn"
 if [[ -n "$JWT_SECRET_FILE_OVERRIDE" ]]; then
   JWT_SECRET_FILE_PATH="$JWT_SECRET_FILE_OVERRIDE"
 fi
 if [[ -n "$AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE" ]]; then
   AUTH_BOOTSTRAP_USERS_FILE_PATH="$AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE"
+fi
+if [[ -n "$DB_DSN_FILE_OVERRIDE" ]]; then
+  DB_DSN_FILE_PATH="$DB_DSN_FILE_OVERRIDE"
+else
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "closed_beta_prod_smoke.sh requires docker unless DB_DSN_FILE_OVERRIDE is set to a MySQL DSN secret file" >&2
+    exit 1
+  fi
+
+  MYSQL_CONTAINER_NAME="crux-prod-smoke-mysql-$$"
+  docker run -d --rm \
+    --name "$MYSQL_CONTAINER_NAME" \
+    -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+    -e MYSQL_DATABASE="$MYSQL_DATABASE" \
+    -e MYSQL_USER="$MYSQL_USER" \
+    -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+    -p "${MYSQL_HOST}:${MYSQL_PORT}:3306" \
+    "$MYSQL_IMAGE" \
+    --character-set-server=utf8mb4 \
+    --collation-server=utf8mb4_unicode_ci >/dev/null
+
+  printf "%s\n" "$MYSQL_USER:$MYSQL_PASSWORD@tcp(${MYSQL_HOST}:${MYSQL_PORT})/${MYSQL_DATABASE}?charset=utf8mb4&parseTime=True&loc=UTC" > "$DB_DSN_FILE_PATH"
+
+  for attempt in $(seq 1 60); do
+    if docker exec "$MYSQL_CONTAINER_NAME" mysqladmin ping -h 127.0.0.1 -uroot "-p$MYSQL_ROOT_PASSWORD" --silent >/dev/null 2>&1; then
+      break
+    fi
+    if [[ "$attempt" == "60" ]]; then
+      docker logs "$MYSQL_CONTAINER_NAME" >&2 || true
+      echo "mysql smoke container did not become ready" >&2
+      exit 1
+    fi
+    sleep 1
+  done
 fi
 
 if [[ "$SKIP_BUILD" != "true" ]]; then
@@ -86,7 +132,7 @@ GOOGLE_STUB_PID=$!
 APP_MODE=prod \
 APP_ADDR="$SERVER_ADDR" \
 JWT_SECRET_FILE="$JWT_SECRET_FILE_PATH" \
-DB_DSN_FILE="$SECRET_DIR/db-dsn" \
+DB_DSN_FILE="$DB_DSN_FILE_PATH" \
 AUTH_BOOTSTRAP_USERS_FILE="$AUTH_BOOTSTRAP_USERS_FILE_PATH" \
 AUTH_GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
 AUTH_GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \

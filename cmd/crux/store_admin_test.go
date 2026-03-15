@@ -46,13 +46,13 @@ func TestStoreExportImportCommandsRoundTrip(t *testing.T) {
 		AnalyticsStore:    sourceStore,
 		ReportMinSessions: 1,
 	})
-	ctx := service.WithAuthIdentity(context.Background(), service.AuthIdentity{
+	bootstrapCtx := service.WithAuthIdentity(context.Background(), service.AuthIdentity{
 		OrgID:     "demo-org",
 		UserID:    "demo-user",
 		TokenKind: service.TokenKindCLI,
 	})
 
-	agentResp, err := svc.RegisterAgent(ctx, &request.RegisterAgentReq{
+	agentResp, err := svc.RegisterAgent(bootstrapCtx, &request.RegisterAgentReq{
 		OrgID:      "demo-org",
 		OrgName:    "Demo Org",
 		UserID:     "demo-user",
@@ -66,7 +66,14 @@ func TestStoreExportImportCommandsRoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	projectResp, err := svc.RegisterProject(ctx, &request.RegisterProjectReq{
+	deviceCtx := service.WithAuthIdentity(context.Background(), service.AuthIdentity{
+		OrgID:     "demo-org",
+		UserID:    "demo-user",
+		AgentID:   agentResp.DeviceID,
+		TokenKind: service.TokenKindDeviceAccess,
+	})
+
+	projectResp, err := svc.RegisterProject(deviceCtx, &request.RegisterProjectReq{
 		OrgID:       "demo-org",
 		AgentID:     agentResp.DeviceID,
 		Name:        "backup-project",
@@ -77,7 +84,7 @@ func TestStoreExportImportCommandsRoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = svc.UploadSessionSummary(ctx, &request.SessionSummaryReq{
+	_, err = svc.UploadSessionSummary(deviceCtx, &request.SessionSummaryReq{
 		ProjectID:  projectResp.ProjectID,
 		SessionID:  "session-backup",
 		Tool:       "codex",
@@ -115,7 +122,7 @@ func TestStoreExportImportCommandsRoundTrip(t *testing.T) {
 		AnalyticsStore:    targetStore,
 		ReportMinSessions: 1,
 	})
-	sessions, err := targetSvc.ListSessionSummaries(ctx, &request.SessionSummaryListReq{
+	sessions, err := targetSvc.ListSessionSummaries(deviceCtx, &request.SessionSummaryListReq{
 		ProjectID: projectResp.ProjectID,
 		Limit:     10,
 	})

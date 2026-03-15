@@ -22,10 +22,13 @@ type AnalyticsStore struct {
 	mu sync.RWMutex
 
 	db             *sql.DB
+	dbDialect      string
 	filePath       string
 	allowDemoUser  bool
 	bootstrapUsers []configs.BootstrapUser
 	seq            uint64
+	lastSeenDirty  bool
+	lastSeenFlush  bool
 
 	organizations    map[string]*Organization
 	users            map[string]*User
@@ -215,8 +218,14 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 		return nil, err
 	}
 
+	dialect := strings.TrimSpace(conf.DB.Dialect)
+	if dialect == "" {
+		dialect = "sqlite3"
+	}
+
 	store := &AnalyticsStore{
 		db:               db,
+		dbDialect:        dialect,
 		filePath:         conf.App.StorePath,
 		allowDemoUser:    conf.AllowsDemoUser(),
 		bootstrapUsers:   append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
@@ -307,6 +316,48 @@ func (s *AnalyticsStore) ImportStateJSON(data []byte) error {
 	return s.ensureBootstrapData()
 }
 
+func (s *AnalyticsStore) MarkAccessTokenSeenAsync(tokenID string, seenAt time.Time) {
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return
+	}
+
+	s.mu.Lock()
+	record := s.accessTokens[tokenID]
+	if record == nil {
+		s.mu.Unlock()
+		return
+	}
+	seenAt = seenAt.UTC()
+	if record.LastSeenAt != nil && !seenAt.After(record.LastSeenAt.UTC()) {
+		s.mu.Unlock()
+		return
+	}
+	record.LastSeenAt = cloneTime(&seenAt)
+	s.lastSeenDirty = true
+	if s.lastSeenFlush {
+		s.mu.Unlock()
+		return
+	}
+	s.lastSeenFlush = true
+	s.mu.Unlock()
+
+	go s.flushLastSeenAsync()
+}
+
+func (s *AnalyticsStore) flushLastSeenAsync() {
+	time.Sleep(500 * time.Millisecond)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.lastSeenDirty {
+		s.lastSeenDirty = false
+		_ = s.persistLocked()
+	}
+	s.lastSeenFlush = false
+}
+
 func (s *AnalyticsStore) nextID(prefix string) string {
 	s.seq++
 	return fmt.Sprintf("%s_%06d", prefix, s.seq)
@@ -376,20 +427,37 @@ func (s *AnalyticsStore) initDB() error {
 
 	if _, err := s.db.ExecContext(
 		ctx,
-		fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL)", analyticsStoreMetaTable),
+		analyticsStoreMetaTableDDL(s.dbDialect),
 	); err != nil {
 		return err
 	}
 	if _, err := s.db.ExecContext(
 		ctx,
-		fmt.Sprintf(
-			"CREATE TABLE IF NOT EXISTS %s (record_type TEXT NOT NULL, scope_id TEXT NOT NULL, record_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(record_type, scope_id, record_id))",
-			analyticsStoreRecordTable,
-		),
+		analyticsStoreRecordTableDDL(s.dbDialect),
 	); err != nil {
 		return err
 	}
 	return nil
+}
+
+func analyticsStoreMetaTableDDL(dialect string) string {
+	if strings.TrimSpace(dialect) == "mysql" {
+		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (meta_key VARCHAR(191) PRIMARY KEY, meta_value LONGTEXT NOT NULL)", analyticsStoreMetaTable)
+	}
+	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (meta_key TEXT PRIMARY KEY, meta_value TEXT NOT NULL)", analyticsStoreMetaTable)
+}
+
+func analyticsStoreRecordTableDDL(dialect string) string {
+	if strings.TrimSpace(dialect) == "mysql" {
+		return fmt.Sprintf(
+			"CREATE TABLE IF NOT EXISTS %s (record_type VARCHAR(191) NOT NULL, scope_id VARCHAR(191) NOT NULL, record_id VARCHAR(191) NOT NULL, payload LONGTEXT NOT NULL, PRIMARY KEY(record_type, scope_id, record_id))",
+			analyticsStoreRecordTable,
+		)
+	}
+	return fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS %s (record_type TEXT NOT NULL, scope_id TEXT NOT NULL, record_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(record_type, scope_id, record_id))",
+		analyticsStoreRecordTable,
+	)
 }
 
 type analyticsDBRecord struct {

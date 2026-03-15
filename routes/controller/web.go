@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -29,6 +30,7 @@ func (r *DashboardRoute) RegisterRoute(router *echo.Group) {
 	router.GET("/login", r.login)
 	router.GET("/dashboard", r.dashboard)
 	router.GET("/admin", r.admin)
+	router.GET("/favicon.ico", r.favicon)
 	router.GET("/assets/:name", r.asset)
 }
 
@@ -72,12 +74,20 @@ func (r *DashboardRoute) admin(c *echo.Context) error {
 	return c.HTML(http.StatusOK, string(page))
 }
 
+func (r *DashboardRoute) favicon(c *echo.Context) error {
+	return r.serveAsset(c, "logo.ico")
+}
+
 func (r *DashboardRoute) asset(c *echo.Context) error {
 	name := c.Param("name")
 	if name == "" || path.Base(name) != name {
 		return echo.ErrNotFound
 	}
 
+	return r.serveAsset(c, name)
+}
+
+func (r *DashboardRoute) serveAsset(c *echo.Context, name string) error {
 	body, err := uiFS.ReadFile(path.Join("assets", name))
 	if err != nil {
 		return echo.ErrNotFound
@@ -106,5 +116,6 @@ func (r *DashboardRoute) webSessionIdentity(c *echo.Context) (service.AuthIdenti
 	if identity.TokenKind != service.TokenKindWebSession {
 		return service.AuthIdentity{}, false
 	}
+	r.AnalyticsService.AnalyticsStore.MarkAccessTokenSeenAsync(identity.TokenID, time.Now().UTC())
 	return *identity, true
 }
