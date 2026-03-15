@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Royaltyprogram/aiops/dto/request"
 	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
@@ -27,6 +28,7 @@ type Client struct {
 	HTTP            *http.Client
 	explicitBaseURL bool
 	APIToken        string
+	EnrollmentToken string
 	AuthOrgID       string
 	AuthUserID      string
 }
@@ -37,12 +39,7 @@ func NewClientFromEnv() *Client {
 		baseURL = "http://127.0.0.1:8082"
 	}
 	apiToken := strings.TrimSpace(os.Getenv("E2E_API_TOKEN"))
-	if apiToken == "" {
-		apiToken = strings.TrimSpace(os.Getenv("E2E_CLI_TOKEN"))
-	}
-	if apiToken == "" && (!ok || baseURL == "http://127.0.0.1:8082") {
-		apiToken = "crux-dev-token"
-	}
+	enrollmentToken := strings.TrimSpace(os.Getenv("E2E_CLI_TOKEN"))
 	jar, _ := cookiejar.New(nil)
 	return &Client{
 		BaseURL: baseURL,
@@ -52,6 +49,7 @@ func NewClientFromEnv() *Client {
 		},
 		explicitBaseURL: ok && baseURL != "",
 		APIToken:        apiToken,
+		EnrollmentToken: enrollmentToken,
 	}
 }
 
@@ -108,12 +106,54 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (int, [
 }
 
 func (c *Client) TryAuthenticate(ctx context.Context) (bool, error) {
-	_ = ctx
+	if strings.TrimSpace(c.EnrollmentToken) != "" {
+		fullURL, err := c.buildURL("/api/v1/auth/cli/login", nil)
+		if err != nil {
+			return false, err
+		}
 
-	if strings.TrimSpace(c.APIToken) != "" {
+		body, err := json.Marshal(request.CLILoginReq{
+			DeviceName: "e2e-device",
+			Hostname:   "e2e.local",
+			Platform:   "darwin/arm64",
+			CLIVersion: "e2e",
+			Tools:      []string{"codex"},
+		})
+		if err != nil {
+			return false, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+		if err != nil {
+			return false, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Crux-Token", c.EnrollmentToken)
+
+		rsp, err := c.HTTP.Do(req)
+		if err != nil {
+			return false, err
+		}
+		defer rsp.Body.Close()
+
+		raw, err := io.ReadAll(rsp.Body)
+		if err != nil {
+			return false, err
+		}
+		env, data, err := decodeEnvelope[response.CLILoginResp](raw)
+		if err != nil {
+			return false, err
+		}
+		if rsp.StatusCode != http.StatusOK || env.Code != 0 || data == nil || strings.TrimSpace(data.AccessToken) == "" {
+			return false, nil
+		}
+
+		c.APIToken = strings.TrimSpace(data.AccessToken)
+		c.AuthOrgID = data.OrgID
+		c.AuthUserID = data.UserID
 		return true, nil
 	}
-	return false, nil
+	return strings.TrimSpace(c.APIToken) != "", nil
 }
 
 func postEnvelope[T any](ctx context.Context, c *Client, path string, payload any, withAuth bool) (*T, int, error) {

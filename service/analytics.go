@@ -451,6 +451,18 @@ func (s *AnalyticsService) requireUserIdentity(ctx context.Context, allowedKinds
 	return identity, nil
 }
 
+func (s *AnalyticsService) requireDeviceAccessIdentity(ctx context.Context) (AuthIdentity, error) {
+	return s.requireUserIdentity(ctx, TokenKindDeviceAccess)
+}
+
+func (s *AnalyticsService) ensureAgentBinding(identity AuthIdentity, agentID string) error {
+	agentID = strings.TrimSpace(agentID)
+	if strings.TrimSpace(identity.AgentID) == "" || agentID == "" || identity.AgentID != agentID {
+		return ecode.Forbidden(ErrCodeAgentBindingMismatch, "device token cannot access a different agent")
+	}
+	return nil
+}
+
 func (s *AnalyticsService) requireAdminUserLocked(ctx context.Context) (AuthIdentity, *User, error) {
 	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
 	if err != nil {
@@ -485,6 +497,17 @@ func (s *AnalyticsService) authorizeProject(ctx context.Context, project *Projec
 		return ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown workspace"))
 	}
 	return s.authorizeOrg(ctx, project.OrgID)
+}
+
+func (s *AnalyticsService) authorizeProjectAgentBinding(ctx context.Context, project *Project) error {
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return err
+	}
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || identity.TokenKind != TokenKindDeviceAccess {
+		return nil
+	}
+	return s.ensureAgentBinding(identity, project.AgentID)
 }
 
 func (s *AnalyticsService) findWorkspaceForOrgLocked(orgID string) *Project {
@@ -645,10 +668,20 @@ func (s *AnalyticsService) RegisterAgent(ctx context.Context, req *request.Regis
 }
 
 func (s *AnalyticsService) RegisterProject(ctx context.Context, req *request.RegisterProjectReq) (*response.ProjectRegistrationResp, error) {
+	identity, err := s.requireDeviceAccessIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureAgentBinding(identity, req.AgentID); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
+
+	req.AgentID = identity.AgentID
 
 	agent, ok := s.AnalyticsStore.agents[req.AgentID]
 	if !ok {
@@ -659,6 +692,9 @@ func (s *AnalyticsService) RegisterProject(ctx context.Context, req *request.Reg
 	}
 	if agent.OrgID != req.OrgID {
 		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("agent_id does not belong to org_id"))
+	}
+	if agent.UserID != identity.UserID {
+		return nil, ecode.Forbidden(ErrCodeAgentBindingMismatch, "device token cannot access a different agent")
 	}
 
 	project := s.findWorkspaceForOrgLocked(req.OrgID)
@@ -703,6 +739,10 @@ func (s *AnalyticsService) RegisterProject(ctx context.Context, req *request.Reg
 }
 
 func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *request.ConfigSnapshotReq) (*response.ConfigSnapshotResp, error) {
+	if _, err := s.requireDeviceAccessIdentity(ctx); err != nil {
+		return nil, err
+	}
+
 	s.AnalyticsStore.mu.Lock()
 	defer s.AnalyticsStore.mu.Unlock()
 
@@ -710,7 +750,7 @@ func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *reques
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizeProject(ctx, project); err != nil {
+	if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
 		return nil, err
 	}
 	req.ProjectID = project.ID
@@ -802,6 +842,10 @@ func (s *AnalyticsService) ListConfigSnapshots(ctx context.Context, req *request
 }
 
 func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *request.SessionSummaryReq) (*response.SessionIngestResp, error) {
+	if _, err := s.requireDeviceAccessIdentity(ctx); err != nil {
+		return nil, err
+	}
+
 	s.AnalyticsStore.mu.Lock()
 
 	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
@@ -809,7 +853,7 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 		s.AnalyticsStore.mu.Unlock()
 		return nil, err
 	}
-	if err := s.authorizeProject(ctx, project); err != nil {
+	if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return nil, err
 	}

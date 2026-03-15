@@ -59,6 +59,32 @@ func requireTokenByKind(t *testing.T, items []response.CLITokenItemResp, kind st
 	return response.CLITokenItemResp{}
 }
 
+func loginCLICollectorForRouteTest(t *testing.T, echo *echo.Echo, googleCode, label string) response.CLILoginResp {
+	t.Helper()
+
+	sessionCookie := loginWithGoogleControllerTest(t, echo, googleCode)
+	cliTokenResp := postJSON[response.CLITokenIssueResp](t, echo, "", http.MethodPost, "/api/v1/auth/cli-tokens", request.IssueCLITokenReq{
+		Label: label,
+	}, sessionCookie)
+
+	return postJSON[response.CLILoginResp](t, echo, cliTokenResp.Token, http.MethodPost, "/api/v1/auth/cli/login", request.CLILoginReq{
+		DeviceName: label,
+		Hostname:   sanitizeForRouteTest(label) + ".local",
+		Platform:   "darwin/arm64",
+		CLIVersion: "0.1.0-dev",
+		Tools:      []string{"codex"},
+	})
+}
+
+func sanitizeForRouteTest(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, " ", "-")
+	if value == "" {
+		return "route-device"
+	}
+	return value
+}
+
 func waitForDashboardResearchStatus(
 	t *testing.T,
 	echo *echo.Echo,
@@ -89,6 +115,14 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	conf := newRouteResearchConfig(t)
 	conf.App.APIToken = "route-token"
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "route-login",
+		Subject:  "google-route-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -107,23 +141,19 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	})
 	route.RegisterRoute(echo.Group(""))
 
-	agentResp := postJSON[response.AgentRegistrationResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/agents/register", request.RegisterAgentReq{
-		OrgID:      "org-route",
-		UserID:     "user-route",
-		DeviceName: "mbp",
-	})
-	require.Equal(t, "registered", agentResp.Status)
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "route-login", "route-device")
+	deviceToken := cliLoginResp.AccessToken
 
-	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
-		OrgID:       "org-route",
-		AgentID:     agentResp.AgentID,
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
 		Name:        "route-project",
 		RepoHash:    "route-project-hash",
 		DefaultTool: "codex",
 	})
 	require.Equal(t, "connected", projectResp.Status)
 
-	snapshotResp := postJSON[response.ConfigSnapshotResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/config-snapshots", request.ConfigSnapshotReq{
+	snapshotResp := postJSON[response.ConfigSnapshotResp](t, echo, deviceToken, http.MethodPost, "/api/v1/config-snapshots", request.ConfigSnapshotReq{
 		ProjectID: projectResp.ProjectID,
 		Tool:      "codex",
 		ProfileID: "baseline",
@@ -131,7 +161,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	})
 	require.Equal(t, "baseline", snapshotResp.ProfileID)
 
-	ingestResp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+	ingestResp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID:             projectResp.ProjectID,
 		Tool:                  "codex",
 		TokenIn:               1000,
@@ -164,18 +194,18 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Equal(t, "report-api.v1", ingestResp.SchemaVersion)
 	require.Equal(t, "running", ingestResp.ResearchStatus.State)
 
-	status := waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-route", func(item *response.ReportResearchStatusResp) bool {
+	status := waitForDashboardResearchStatus(t, echo, deviceToken, cliLoginResp.OrgID, func(item *response.ReportResearchStatusResp) bool {
 		return item != nil && item.State == "succeeded"
 	})
 	require.Equal(t, "report-api.v1", status.SchemaVersion)
 	require.Equal(t, 1, status.ReportCount)
 
-	snapshotList := getJSON[response.ConfigSnapshotListResp](t, echo, conf.App.APIToken, "/api/v1/config-snapshots", url.Values{
+	snapshotList := getJSON[response.ConfigSnapshotListResp](t, echo, deviceToken, "/api/v1/config-snapshots", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.NotEmpty(t, snapshotList.Items)
 
-	sessionList := getJSON[response.SessionSummaryListResp](t, echo, conf.App.APIToken, "/api/v1/session-summaries", url.Values{
+	sessionList := getJSON[response.SessionSummaryListResp](t, echo, deviceToken, "/api/v1/session-summaries", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 		"limit":      []string{"5"},
 	})
@@ -195,7 +225,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Equal(t, []string{"The analytics route registers auth, ingestion, and dashboard handlers in one place."}, sessionList.Items[0].AssistantResponses)
 	require.Equal(t, []string{"Checking route flow and test expectations before proposing the patch."}, sessionList.Items[0].ReasoningSummaries)
 
-	recResp := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
+	recResp := getJSON[response.ReportListResp](t, echo, deviceToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.Equal(t, "report-api.v1", recResp.SchemaVersion)
@@ -204,7 +234,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NotEmpty(t, recResp.Items[0].UserIntent)
 	require.NotEmpty(t, recResp.Items[0].ModelInterpretation)
 
-	postApplySession := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+	postApplySession := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID: projectResp.ProjectID,
 		Tool:      "codex",
 		TokenIn:   700,
@@ -216,18 +246,18 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 		Timestamp: time.Now().UTC().Add(2 * time.Hour),
 	})
 	require.NotEmpty(t, postApplySession.SessionID)
-	waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-route", func(item *response.ReportResearchStatusResp) bool {
+	waitForDashboardResearchStatus(t, echo, deviceToken, cliLoginResp.OrgID, func(item *response.ReportResearchStatusResp) bool {
 		return item != nil && item.State == "succeeded"
 	})
 
-	recRespAfterSecondSession := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
+	recRespAfterSecondSession := getJSON[response.ReportListResp](t, echo, deviceToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.NotEmpty(t, recRespAfterSecondSession.Items)
 	require.NotEmpty(t, recRespAfterSecondSession.Items[0].Summary)
 
-	overviewResp := getJSON[response.DashboardOverviewResp](t, echo, conf.App.APIToken, "/api/v1/dashboard/overview", url.Values{
-		"org_id": []string{"org-route"},
+	overviewResp := getJSON[response.DashboardOverviewResp](t, echo, deviceToken, "/api/v1/dashboard/overview", url.Values{
+		"org_id": []string{cliLoginResp.OrgID},
 	})
 	require.Equal(t, "report-api.v1", overviewResp.SchemaVersion)
 	require.Greater(t, overviewResp.AvgTokensPerQuery, 0.0)
@@ -239,7 +269,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NotEmpty(t, overviewResp.ActionSummary)
 	require.NotEmpty(t, overviewResp.OutcomeSummary)
 
-	insightsResp := getJSON[response.DashboardProjectInsightsResp](t, echo, conf.App.APIToken, "/api/v1/dashboard/project-insights", url.Values{
+	insightsResp := getJSON[response.DashboardProjectInsightsResp](t, echo, deviceToken, "/api/v1/dashboard/project-insights", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.Equal(t, "report-api.v1", insightsResp.SchemaVersion)
@@ -284,8 +314,8 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NotEmpty(t, insightsResp.Providers)
 	require.Equal(t, "openai", insightsResp.Providers[0].Provider)
 
-	auditResp := getJSON[response.AuditListResp](t, echo, conf.App.APIToken, "/api/v1/audits", url.Values{
-		"org_id": []string{"org-route"},
+	auditResp := getJSON[response.AuditListResp](t, echo, deviceToken, "/api/v1/audits", url.Values{
+		"org_id": []string{cliLoginResp.OrgID},
 	})
 	require.NotEmpty(t, auditResp.Items)
 }
@@ -294,6 +324,14 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	conf := newRouteResearchConfig(t)
 	conf.App.APIToken = "route-token"
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "batch-login",
+		Subject:  "google-batch-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -312,14 +350,12 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	})
 	route.RegisterRoute(echo.Group(""))
 
-	agentResp := postJSON[response.AgentRegistrationResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/agents/register", request.RegisterAgentReq{
-		OrgID:      "org-batch",
-		UserID:     "user-batch",
-		DeviceName: "batch-mbp",
-	})
-	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
-		OrgID:       "org-batch",
-		AgentID:     agentResp.AgentID,
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "batch-login", "batch-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
 		Name:        "batch-project",
 		RepoHash:    "batch-project-hash",
 		DefaultTool: "codex",
@@ -327,7 +363,7 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 
 	baseTime := time.Now().UTC().Round(time.Second)
 	for i := 1; i <= 9; i++ {
-		resp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+		resp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 			ProjectID: projectResp.ProjectID,
 			Tool:      "codex",
 			RawQueries: []string{
@@ -341,7 +377,7 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 		require.Equal(t, i, resp.ResearchStatus.SessionCount)
 	}
 
-	tenthResp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+	tenthResp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID: projectResp.ProjectID,
 		Tool:      "codex",
 		RawQueries: []string{
@@ -352,18 +388,18 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	require.NotNil(t, tenthResp.ResearchStatus)
 	require.Equal(t, "running", tenthResp.ResearchStatus.State)
 
-	statusAfterTen := waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-batch", func(item *response.ReportResearchStatusResp) bool {
+	statusAfterTen := waitForDashboardResearchStatus(t, echo, deviceToken, cliLoginResp.OrgID, func(item *response.ReportResearchStatusResp) bool {
 		return item != nil && item.State == "succeeded" && item.SessionCount == 10
 	})
 	require.Equal(t, 1, statusAfterTen.ReportCount)
 
-	reportsAfterTen := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
+	reportsAfterTen := getJSON[response.ReportListResp](t, echo, deviceToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.Len(t, reportsAfterTen.Items, 1)
 	firstReportID := reportsAfterTen.Items[0].ID
 
-	eleventhResp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+	eleventhResp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID: projectResp.ProjectID,
 		Tool:      "codex",
 		RawQueries: []string{
@@ -376,14 +412,14 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	require.Equal(t, 11, eleventhResp.ResearchStatus.SessionCount)
 	require.Contains(t, eleventhResp.ResearchStatus.Summary, "20 sessions")
 
-	reportsAfterEleven := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
+	reportsAfterEleven := getJSON[response.ReportListResp](t, echo, deviceToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.Len(t, reportsAfterEleven.Items, 1)
 	require.Equal(t, firstReportID, reportsAfterEleven.Items[0].ID)
 
 	for i := 12; i <= 19; i++ {
-		resp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+		resp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 			ProjectID: projectResp.ProjectID,
 			Tool:      "codex",
 			RawQueries: []string{
@@ -395,7 +431,7 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 		require.Equal(t, "waiting_for_next_batch", resp.ResearchStatus.State)
 	}
 
-	twentiethResp := postJSON[response.SessionIngestResp](t, echo, conf.App.APIToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+	twentiethResp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID: projectResp.ProjectID,
 		Tool:      "codex",
 		RawQueries: []string{
@@ -406,12 +442,12 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	require.NotNil(t, twentiethResp.ResearchStatus)
 	require.Equal(t, "running", twentiethResp.ResearchStatus.State)
 
-	statusAfterTwenty := waitForDashboardResearchStatus(t, echo, conf.App.APIToken, "org-batch", func(item *response.ReportResearchStatusResp) bool {
+	statusAfterTwenty := waitForDashboardResearchStatus(t, echo, deviceToken, cliLoginResp.OrgID, func(item *response.ReportResearchStatusResp) bool {
 		return item != nil && item.State == "succeeded" && item.SessionCount == 20
 	})
 	require.Equal(t, 1, statusAfterTwenty.ReportCount)
 
-	reportsAfterTwenty := getJSON[response.ReportListResp](t, echo, conf.App.APIToken, "/api/v1/reports", url.Values{
+	reportsAfterTwenty := getJSON[response.ReportListResp](t, echo, deviceToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
 	require.Len(t, reportsAfterTwenty.Items, 1)
@@ -644,6 +680,88 @@ func TestAnalyticsRouteCLIRefreshRotatesDeviceTokens(t *testing.T) {
 	duplicateRefreshRec := httptest.NewRecorder()
 	echo.ServeHTTP(duplicateRefreshRec, duplicateRefreshReq)
 	require.Equal(t, http.StatusUnauthorized, duplicateRefreshRec.Code)
+}
+
+func TestAnalyticsRouteRejectsAgentBindingMismatch(t *testing.T) {
+	conf := newRouteResearchConfig(t)
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "binding-login",
+		Subject:  "google-binding-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	sessionCookie := loginWithGoogleControllerTest(t, echo, "binding-login")
+	firstTokenResp := postJSON[response.CLITokenIssueResp](t, echo, "", http.MethodPost, "/api/v1/auth/cli-tokens", request.IssueCLITokenReq{
+		Label: "binding-device-1",
+	}, sessionCookie)
+	firstLoginResp := postJSON[response.CLILoginResp](t, echo, firstTokenResp.Token, http.MethodPost, "/api/v1/auth/cli/login", request.CLILoginReq{
+		DeviceName: "binding-device-1",
+		Hostname:   "binding-1.local",
+		Platform:   "darwin/arm64",
+		CLIVersion: "0.1.0-dev",
+		Tools:      []string{"codex"},
+	})
+
+	secondTokenResp := postJSON[response.CLITokenIssueResp](t, echo, "", http.MethodPost, "/api/v1/auth/cli-tokens", request.IssueCLITokenReq{
+		Label: "binding-device-2",
+	}, sessionCookie)
+	secondLoginResp := postJSON[response.CLILoginResp](t, echo, secondTokenResp.Token, http.MethodPost, "/api/v1/auth/cli/login", request.CLILoginReq{
+		DeviceName: "binding-device-2",
+		Hostname:   "binding-2.local",
+		Platform:   "darwin/arm64",
+		CLIVersion: "0.1.0-dev",
+		Tools:      []string{"codex"},
+	})
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, firstLoginResp.AccessToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       firstLoginResp.OrgID,
+		AgentID:     firstLoginResp.AgentID,
+		Name:        "binding-project",
+		RepoHash:    "binding-project-hash",
+		DefaultTool: "codex",
+	})
+
+	mismatchedProjectRec := postJSONExpectCode(t, echo, firstLoginResp.AccessToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       firstLoginResp.OrgID,
+		AgentID:     secondLoginResp.AgentID,
+		Name:        "binding-project",
+		RepoHash:    "binding-project-hash",
+		DefaultTool: "codex",
+	}, http.StatusForbidden)
+	var projectEnv envelope
+	require.NoError(t, json.Unmarshal(mismatchedProjectRec.Body.Bytes(), &projectEnv))
+	require.Equal(t, service.ErrCodeAgentBindingMismatch, projectEnv.Code)
+
+	mismatchedSnapshotRec := postJSONExpectCode(t, echo, secondLoginResp.AccessToken, http.MethodPost, "/api/v1/config-snapshots", request.ConfigSnapshotReq{
+		ProjectID: projectResp.ProjectID,
+		Tool:      "codex",
+		ProfileID: "binding",
+		Settings:  map[string]any{"instructions_pack": "binding"},
+	}, http.StatusForbidden)
+	var snapshotEnv envelope
+	require.NoError(t, json.Unmarshal(mismatchedSnapshotRec.Body.Bytes(), &snapshotEnv))
+	require.Equal(t, service.ErrCodeAgentBindingMismatch, snapshotEnv.Code)
 }
 
 func TestAnalyticsRouteGoogleSignupFlow(t *testing.T) {
