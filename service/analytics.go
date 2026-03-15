@@ -2055,12 +2055,6 @@ func (s *AnalyticsService) ListReports(ctx context.Context, req *request.ReportL
 		}
 		items = append(items, toReportResp(rec))
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Score == items[j].Score {
-			return items[i].ID < items[j].ID
-		}
-		return items[i].Score > items[j].Score
-	})
 
 	return &response.ReportListResp{
 		SchemaVersion: reportAPISchemaVersion,
@@ -2706,6 +2700,9 @@ func (s *AnalyticsService) currentReportsLocked(projectID string) []*Report {
 		if !ok || rec == nil {
 			continue
 		}
+		if rec.Status != "active" {
+			continue
+		}
 		items = append(items, rec)
 	}
 	return items
@@ -2878,7 +2875,7 @@ func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 		return
 	}
 
-	previousIDs := s.AnalyticsStore.projectReports[job.project.ID]
+	previousIDs := append([]string(nil), s.AnalyticsStore.projectReports[job.project.ID]...)
 	for _, id := range previousIDs {
 		if rec, ok := s.AnalyticsStore.reports[id]; ok && rec.Status == "active" {
 			rec.Status = "superseded"
@@ -2895,7 +2892,7 @@ func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 		ids = append(ids, candidate.ID)
 		s.AnalyticsStore.reports[candidate.ID] = candidate
 	}
-	s.AnalyticsStore.projectReports[job.project.ID] = ids
+	s.AnalyticsStore.projectReports[job.project.ID] = append(ids, previousIDs...)
 	status.ReportCount = len(ids)
 	status.LastError = ""
 	if len(ids) == 0 {

@@ -265,7 +265,7 @@ func printUsage() {
 
 Common commands:
   status            print org overview and shared workspace feedback reports
-  reports           list active feedback reports for the shared workspace
+  reports           list feedback reports for the shared workspace
   imports           list recent async session import jobs, or run crux imports cancel <job_id>
   collect           upload local usage data now and optionally keep collecting on an interval
   sessions          list recent session summaries for the shared workspace

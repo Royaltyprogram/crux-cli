@@ -324,7 +324,6 @@
         <li><a href="#run-setup">Run Setup</a></li>
         <li><a href="#cli-commands">CLI Commands</a></li>
         <li><a href="#dashboard">Dashboard</a></li>
-        <li><a href="#faq">FAQ</a></li>
       </ul>
     </aside>
 
@@ -333,8 +332,8 @@
 
       <h1 id="setup">How to Setup</h1>
       <p class="docs-lead">
-        Crux를 처음 사용하거나 온보딩을 건너뛴 경우, 이 가이드를 따라 설정을 완료할 수 있습니다.
-        3단계만 완료하면 Codex 세션 분석을 시작할 수 있습니다.
+        If you're new to Crux or skipped the onboarding, follow this guide to complete the setup.
+        Just three steps and you'll be ready to start analyzing Codex sessions.
       </p>
 
       <!-- Step 1 -->
@@ -343,19 +342,19 @@
         <div class="step-card">
           <div class="step-num step-num--teal">1</div>
           <div class="step-body">
-            <h3>CLI 설치</h3>
-            <p>분석할 머신에 Crux CLI를 설치합니다. CLI는 백그라운드에서 Codex 세션 데이터를 수집합니다.</p>
+            <h3>Install the CLI</h3>
+            <p>Install the Crux CLI on the machine you want to analyze. The CLI collects Codex session data in the background.</p>
           </div>
         </div>
 
-        <p>터미널을 열고 아래 명령어를 실행하세요:</p>
+        <p>Open a terminal and run the following command:</p>
         <div class="cmd">
           <button class="cmd-copy" type="button" onclick="copyCommand(this)">Copy</button>
           curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh
         </div>
 
         <div class="info-box info-box--tip">
-          <p><strong>Tip:</strong> 설치가 완료되면 <code>crux --version</code>을 실행하여 정상 설치를 확인할 수 있습니다.</p>
+          <p><strong>Tip:</strong> After installation, run <code>crux --version</code> to verify that the CLI was installed correctly.</p>
         </div>
       </section>
 
@@ -365,21 +364,21 @@
         <div class="step-card">
           <div class="step-num step-num--accent">2</div>
           <div class="step-body">
-            <h3>CLI 토큰 발급</h3>
-            <p>대시보드에서 CLI 인증용 토큰을 생성합니다. 이 토큰은 CLI가 서버와 통신할 때 사용됩니다.</p>
+            <h3>Create a CLI Token</h3>
+            <p>Generate an authentication token from the dashboard. This token is used by the CLI to communicate with the server.</p>
           </div>
         </div>
 
-        <h3>토큰 발급 방법</h3>
+        <h3>How to Create a Token</h3>
         <ol>
-          <li><a href="/login">Crux 대시보드</a>에 로그인합니다.</li>
-          <li>상단 탭에서 <strong>Settings</strong>를 클릭합니다.</li>
-          <li><strong>Create CLI token</strong> 버튼을 클릭합니다.</li>
-          <li>생성된 토큰을 복사해둡니다.</li>
+          <li>Log in to the <a href="/login">Crux dashboard</a>.</li>
+          <li>Click the <strong>Settings</strong> tab at the top.</li>
+          <li>Click the <strong>Create CLI token</strong> button.</li>
+          <li>Copy the generated token.</li>
         </ol>
 
         <div class="info-box info-box--warn">
-          <p><strong>Important:</strong> 토큰은 생성 시 <strong>한 번만</strong> 표시됩니다. 반드시 복사해두세요. 토큰은 30일 후 만료됩니다.</p>
+          <p><strong>Important:</strong> The token is displayed <strong>only once</strong> when created. Make sure to copy it. Tokens expire after 30 days.</p>
         </div>
       </section>
 
@@ -389,27 +388,27 @@
         <div class="step-card">
           <div class="step-num step-num--green">3</div>
           <div class="step-body">
-            <h3>프로젝트 연결</h3>
-            <p>분석할 레포지토리에서 setup 명령을 실행합니다. 디바이스 등록, 프로젝트 연결, 로컬 세션 업로드가 자동으로 처리됩니다.</p>
+            <h3>Connect Your Project</h3>
+            <p>Run the setup command in the repository you want to analyze. Device registration, project connection, and local session upload are handled automatically.</p>
           </div>
         </div>
 
-        <p>분석할 레포지토리 디렉토리에서 실행하세요:</p>
+        <p>Run this in the repository directory you want to analyze:</p>
         <div class="cmd">
           <button class="cmd-copy" type="button" onclick="copyCommand(this)">Copy</button>
           crux setup
         </div>
-        <p>실행하면 앞서 복사한 토큰 입력을 요청합니다. 토큰을 붙여넣으면 설정이 완료됩니다.</p>
+        <p>You'll be prompted to enter the token you copied earlier. Paste it in and setup is complete.</p>
 
         <div class="info-box info-box--tip">
-          <p><strong>Tip:</strong> 자체 호스팅 서버를 사용하는 경우 <code>crux setup --server https://your-server.com</code>으로 서버 주소를 지정할 수 있습니다.</p>
+          <p><strong>Tip:</strong> If you're using a self-hosted server, specify the server address with <code>crux setup --server https://your-server.com</code>.</p>
         </div>
       </section>
 
       <!-- CLI Commands -->
       <section class="docs-section" id="cli-commands">
         <h2>CLI Commands</h2>
-        <p>설정 완료 후 사용할 수 있는 주요 명령어입니다.</p>
+        <p>Here are the key commands available after setup is complete.</p>
 
         <table class="docs-table">
           <thead>
@@ -421,23 +420,23 @@
           <tbody>
             <tr>
               <td><code>crux setup</code></td>
-              <td>디바이스 등록 및 프로젝트 연결을 진행합니다.</td>
+              <td>Register the device and connect the project.</td>
             </tr>
             <tr>
               <td><code>crux collect</code></td>
-              <td>로컬 Codex 세션을 수집하여 서버에 업로드합니다.</td>
+              <td>Collect local Codex sessions and upload them to the server.</td>
             </tr>
             <tr>
               <td><code>crux collect --watch</code></td>
-              <td>백그라운드에서 지속적으로 세션을 수집합니다.</td>
+              <td>Continuously collect sessions in the background.</td>
             </tr>
             <tr>
               <td><code>crux collect --recent 30</code></td>
-              <td>최근 30일간의 세션을 일괄 수집합니다.</td>
+              <td>Batch-collect sessions from the last 30 days.</td>
             </tr>
             <tr>
               <td><code>crux --version</code></td>
-              <td>설치된 CLI 버전을 확인합니다.</td>
+              <td>Check the installed CLI version.</td>
             </tr>
           </tbody>
         </table>
@@ -446,36 +445,19 @@
       <!-- Dashboard -->
       <section class="docs-section" id="dashboard">
         <h2>Dashboard Guide</h2>
-        <p>대시보드는 4개의 주요 탭으로 구성됩니다.</p>
+        <p>The dashboard consists of four main tabs.</p>
 
         <h3>Reports</h3>
-        <p>수집된 Codex 세션의 분석 리포트를 확인합니다. 모델이 의도를 올바르게 이해했는지, 어디서 잘못 해석했는지를 설명합니다.</p>
+        <p>View analysis reports for collected Codex sessions. Reports explain whether the model correctly understood the intent and where it misinterpreted things.</p>
 
         <h3>Usage Analytics</h3>
-        <p>일별 토큰 사용량, 모델/프로바이더 커버리지, 응답 지연 시간, 도구 사용 패턴 등의 사용 통계를 확인합니다.</p>
+        <p>Check usage statistics including daily token usage, model/provider coverage, response latency, and tool usage patterns.</p>
 
         <h3>Sessions</h3>
-        <p>CLI에서 수집된 원시 Codex 세션 목록입니다. 분석 엔진의 입력 데이터로 활용됩니다.</p>
+        <p>A list of raw Codex sessions collected by the CLI. These serve as input data for the analysis engine.</p>
 
         <h3>Settings</h3>
-        <p>CLI 토큰 발급 및 관리, 설정 스냅샷, 최근 활동 기록을 확인합니다.</p>
-      </section>
-
-      <!-- FAQ -->
-      <section class="docs-section" id="faq">
-        <h2>FAQ</h2>
-
-        <h3>온보딩을 건너뛰었는데 다시 볼 수 있나요?</h3>
-        <p>이 문서의 Step 1~3을 따라하면 온보딩과 동일한 설정을 완료할 수 있습니다. 대시보드에서 직접 토큰을 발급받고 CLI로 setup을 실행하면 됩니다.</p>
-
-        <h3>토큰을 잃어버렸어요.</h3>
-        <p>대시보드의 Settings 탭에서 새 토큰을 발급받으세요. 이전 토큰은 Settings &gt; Issued CLI tokens에서 취소할 수 있습니다.</p>
-
-        <h3>여러 프로젝트를 연결할 수 있나요?</h3>
-        <p>네. 각 레포지토리 디렉토리에서 <code>crux setup</code>을 실행하면 됩니다. 동일한 토큰으로 여러 프로젝트를 연결할 수 있습니다.</p>
-
-        <h3>데이터는 어떻게 수집되나요?</h3>
-        <p>CLI가 로컬 Codex 세션 파일을 읽어 서버에 업로드합니다. <code>crux collect --watch</code>를 사용하면 백그라운드에서 자동으로 수집됩니다. 업로드 없이 수동으로만 수집하려면 <code>crux collect</code>를 직접 실행하세요.</p>
+        <p>Manage CLI token creation, view configuration snapshots, and check recent activity logs.</p>
       </section>
 
     </main>
@@ -513,7 +495,7 @@
       });
 
       function update() {
-        var scrollY = window.scrollY + 120;
+        var scrollY = window.scrollY + 200;
         var current = sections[0];
         for (var i = 0; i < sections.length; i++) {
           if (sections[i].el.offsetTop <= scrollY) {

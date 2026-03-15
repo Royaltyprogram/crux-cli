@@ -552,8 +552,11 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	reportsAfterTwenty := getJSON[response.ReportListResp](t, echo, deviceToken, "/api/v1/reports", url.Values{
 		"project_id": []string{projectResp.ProjectID},
 	})
-	require.Len(t, reportsAfterTwenty.Items, 1)
+	require.Len(t, reportsAfterTwenty.Items, 2)
 	require.NotEqual(t, firstReportID, reportsAfterTwenty.Items[0].ID)
+	require.Equal(t, "active", reportsAfterTwenty.Items[0].Status)
+	require.Equal(t, firstReportID, reportsAfterTwenty.Items[1].ID)
+	require.Equal(t, "superseded", reportsAfterTwenty.Items[1].Status)
 }
 
 func TestAnalyticsRouteBatchSessionIngestRefreshesWhenCrossingThreshold(t *testing.T) {

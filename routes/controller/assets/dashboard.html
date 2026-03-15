@@ -99,6 +99,7 @@
         </div>
       </div>
       <div class="top-bar-right">
+        <a class="secondary-button top-bar-btn" href="/docs" target="_blank">Docs</a>
         <a id="adminLink" class="secondary-button top-bar-btn" href="/admin" hidden>Admin</a>
         <button id="loadBtn" class="secondary-button top-bar-btn" type="button" data-action="refresh-dashboard">Refresh</button>
         <button id="signOutBtn" class="ghost-button top-bar-btn" type="button" data-action="sign-out">Sign out</button>
@@ -167,6 +168,7 @@
         <div class="report-workspace">
           <div class="report-subnav" aria-label="Report views">
             <button id="reportPanelToggleBtn" class="report-subtab-button" type="button" data-action="toggle-report-panel">History</button>
+            <button id="reportPanelAllBtn" class="report-subtab-button" type="button" data-action="switch-report-panel" data-report-panel="all">All</button>
           </div>
 
           <section class="report-panel is-active" data-report-panel="actions">
@@ -190,6 +192,17 @@
                 <div class="section-desc">Open individual reports only when you need the full explanation, evidence, and detailed rationale.</div>
               </div>
               <div class="list" id="actionItemList"></div>
+            </div>
+          </section>
+
+          <section class="report-panel" data-report-panel="all" hidden>
+            <div class="section">
+              <div class="section-header">
+                <div class="section-kicker">All reports</div>
+                <div class="section-title">Browse every report at a glance</div>
+                <div class="section-desc">Pick any report to view its full summary.</div>
+              </div>
+              <div class="report-card-grid" id="allReportGrid"></div>
             </div>
           </section>
         </div>

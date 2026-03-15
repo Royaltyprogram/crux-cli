@@ -104,7 +104,39 @@ latest_version() {
   api_url="$1"
   tmpfile="$2/releases.json"
   fetch_to_file "$api_url" "$tmpfile"
-  version="$(tr ',' '\n' <"$tmpfile" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  version=""
+  if command -v python3 >/dev/null 2>&1; then
+    version="$(python3 - "$tmpfile" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    releases = json.load(handle)
+
+best = None
+for item in releases:
+    if item.get("draft"):
+        continue
+    tag = (item.get("tag_name") or "").strip()
+    if not tag:
+        continue
+    key = (
+        item.get("published_at") or "",
+        item.get("created_at") or "",
+        tag,
+    )
+    if best is None or key > best[0]:
+        best = (key, tag)
+
+if best is not None:
+    print(best[1])
+PY
+)"
+  elif command -v jq >/dev/null 2>&1; then
+    version="$(jq -r '[.[] | select(.draft != true and (.tag_name // "") != "")] | sort_by(.published_at // "", .created_at // "", .tag_name // "") | last | .tag_name // empty' "$tmpfile")"
+  else
+    version="$(tr ',' '\n' <"$tmpfile" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  fi
   [ -n "$version" ] || die "unable to determine latest release tag from $api_url"
   printf '%s\n' "$version"
 }

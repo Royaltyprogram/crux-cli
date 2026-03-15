@@ -7,7 +7,7 @@ const STORAGE_KEYS = {
   onboardingDone: "crux_onboarding_done",
 };
 const TAB_IDS = ["overview", "trends", "sessions", "cli"];
-const REPORT_PANEL_IDS = ["actions", "history"];
+const REPORT_PANEL_IDS = ["actions", "history", "all"];
 const WIZARD_STEPS = 4;
 const DEFAULT_SERVER_ORIGIN = "https://cruxai.ai";
 
@@ -173,16 +173,21 @@ function setActiveReportPanel(nextPanel) {
 
 function syncReportPanelToggle() {
   const button = $("reportPanelToggleBtn");
+  const allBtn = $("reportPanelAllBtn");
   if (!button) {
     return;
   }
-  const viewingHistory = state.activeReportPanel === "history";
+  const current = state.activeReportPanel;
+  const viewingHistory = current === "history";
   button.textContent = viewingHistory ? "Summary" : "History";
   button.dataset.targetPanel = viewingHistory ? "actions" : "history";
   button.setAttribute(
     "aria-label",
     viewingHistory ? "Go back to report summary" : "Open report history",
   );
+  if (allBtn) {
+    allBtn.classList.toggle("is-active", current === "all");
+  }
 }
 
 /* ── Session ── */
@@ -3719,10 +3724,42 @@ function renderImpactTimeline(reports) {
     .join("");
 }
 
+function renderAllReports(reports) {
+  const target = $("allReportGrid");
+  if (!target) {
+    return;
+  }
+  const items = toArray(reports);
+  if (!items.length) {
+    target.innerHTML = emptyState(
+      "No reports yet",
+      "Upload Codex sessions and reports will appear here once the analysis engine finishes.",
+    );
+    return;
+  }
+
+  target.innerHTML = items
+    .map((item) => {
+      const isActive =
+        String(item && item.id ? item.id : "") === String(state.activeReportID);
+      const isSuperseded = item.status === "superseded";
+      const date = formatDateTime(item.created_at);
+      return `
+        <button class="report-card${isActive ? " is-selected" : ""}${isSuperseded ? " is-superseded" : ""}"
+                type="button" data-action="open-report" data-report-id="${escapeAttr(item.id)}">
+          <span class="report-card-title">${escapeHTML(item.title || "Feedback report")}</span>
+          <span class="report-card-meta">${escapeHTML(date)}${isSuperseded ? " &middot; superseded" : ""}</span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
 function rerenderReportViews() {
   renderActionFocus(state.reportItems, state.sessionItemsFull);
   renderActionItems(state.reportItems);
   renderImpactTimeline(state.reportItems);
+  renderAllReports(state.reportItems);
 }
 
 function renderSessionSummaries(items) {
@@ -4312,6 +4349,7 @@ async function load(options = {}) {
     renderActionFocus(reports, sessions);
     renderActionItems(reports);
     renderImpactTimeline(reports);
+    renderAllReports(reports);
     renderUsageTrend(insights);
     renderTrendCoverage(insights);
     renderModelCoverage(insights);
