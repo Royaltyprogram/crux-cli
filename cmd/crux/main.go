@@ -26,6 +26,11 @@ import (
 type state struct {
 	ServerURL                 string               `json:"server_url"`
 	APIToken                  string               `json:"api_token"`
+	AccessToken               string               `json:"access_token"`
+	RefreshToken              string               `json:"refresh_token"`
+	TokenType                 string               `json:"token_type"`
+	AccessExpiresAt           *time.Time           `json:"access_expires_at,omitempty"`
+	RefreshExpiresAt          *time.Time           `json:"refresh_expires_at,omitempty"`
 	OrgID                     string               `json:"org_id"`
 	UserID                    string               `json:"user_id"`
 	AgentID                   string               `json:"agent_id"`
@@ -37,7 +42,12 @@ type state struct {
 
 type stateDisk struct {
 	ServerURL                 string               `json:"server_url"`
-	APIToken                  string               `json:"api_token"`
+	AccessToken               string               `json:"access_token,omitempty"`
+	RefreshToken              string               `json:"refresh_token,omitempty"`
+	TokenType                 string               `json:"token_type,omitempty"`
+	AccessExpiresAt           *time.Time           `json:"access_expires_at,omitempty"`
+	RefreshExpiresAt          *time.Time           `json:"refresh_expires_at,omitempty"`
+	APIToken                  string               `json:"api_token,omitempty"`
 	OrgID                     string               `json:"org_id"`
 	UserID                    string               `json:"user_id"`
 	AgentID                   string               `json:"agent_id"`
@@ -353,7 +363,7 @@ func runSetup(args []string) error {
 		} else {
 			fmt.Fprintf(os.Stderr, "Uploading an initial snapshot and the latest %d local Codex sessions\n", *recent)
 		}
-		client := newAPIClient(st.ServerURL, st.APIToken)
+		client := newAPIClient(st.ServerURL, st.accessToken())
 		resp, err := runCollectOnce(&st, client, "", "default", "codex", "", *codexHome, uploadRecent, collectSnapshotModeChanged)
 		if err != nil {
 			return err
@@ -442,7 +452,7 @@ func runSnapshot(args []string) error {
 		RecentConfigChanges: []string{"snapshot_collected_by_cli"},
 		CapturedAt:          time.Now().UTC(),
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 	var resp response.ConfigSnapshotResp
 	if err := client.doJSON(http.MethodPost, "/api/v1/config-snapshots", req, &resp); err != nil {
 		return err
@@ -475,7 +485,7 @@ func runSession(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 
 	items := make([]response.SessionIngestResp, 0, len(reqs))
 	for _, req := range reqs {
@@ -513,7 +523,7 @@ func runSnapshots(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 
 	var resp response.ConfigSnapshotListResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/config-snapshots?project_id="+url.QueryEscape(st.workspaceID()), nil, &resp); err != nil {
@@ -533,7 +543,7 @@ func runSessions(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 
 	var resp response.SessionSummaryListResp
 	path := fmt.Sprintf("/api/v1/session-summaries?project_id=%s&limit=%d", url.QueryEscape(st.workspaceID()), *limit)
@@ -553,7 +563,7 @@ func runReports(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 	path := "/api/v1/reports?project_id=" + url.QueryEscape(st.workspaceID())
 	var resp response.ReportListResp
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
@@ -572,7 +582,7 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 
 	var overview response.DashboardOverviewResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/dashboard/overview?org_id="+url.QueryEscape(st.OrgID), nil, &overview); err != nil {
@@ -603,7 +613,7 @@ func runWorkspace(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 
 	var resp response.ProjectListResp
 	if err := client.doJSON(http.MethodGet, "/api/v1/projects?org_id="+url.QueryEscape(st.OrgID), nil, &resp); err != nil {
@@ -624,7 +634,7 @@ func runAudit(args []string) error {
 	}
 	path := "/api/v1/audits?org_id=" + url.QueryEscape(st.OrgID)
 
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 	var resp response.AuditListResp
 	if err := client.doJSON(http.MethodGet, path, nil, &resp); err != nil {
 		return err
@@ -755,13 +765,18 @@ func loginAndSaveState(opts loginOptions) (state, response.CLILoginResp, error) 
 	}
 
 	st := state{
-		ServerURL:  strings.TrimRight(serverURL, "/"),
-		APIToken:   cliToken,
-		OrgID:      resp.OrgID,
-		UserID:     resp.UserID,
-		AgentID:    firstNonEmpty(resp.DeviceID, resp.AgentID),
-		DeviceName: deviceName,
-		Hostname:   host,
+		ServerURL:        strings.TrimRight(serverURL, "/"),
+		APIToken:         firstNonEmpty(strings.TrimSpace(resp.AccessToken), cliToken),
+		AccessToken:      firstNonEmpty(strings.TrimSpace(resp.AccessToken), cliToken),
+		RefreshToken:     strings.TrimSpace(resp.RefreshToken),
+		TokenType:        defaultString(strings.TrimSpace(resp.TokenType), "Bearer"),
+		AccessExpiresAt:  cloneTime(resp.AccessExpiresAt),
+		RefreshExpiresAt: cloneTime(resp.RefreshExpiresAt),
+		OrgID:            resp.OrgID,
+		UserID:           resp.UserID,
+		AgentID:          firstNonEmpty(resp.DeviceID, resp.AgentID),
+		DeviceName:       deviceName,
+		Hostname:         host,
 	}
 	if err := saveState(st); err != nil {
 		return state{}, response.CLILoginResp{}, err
@@ -770,7 +785,7 @@ func loginAndSaveState(opts loginOptions) (state, response.CLILoginResp, error) 
 }
 
 func connectAndSaveWorkspace(st state, opts connectOptions) (state, response.ProjectRegistrationResp, string, error) {
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 
 	repoRoot, err := normalizeRepoPath(opts.RepoPath)
 	if err != nil {
@@ -878,13 +893,22 @@ func loadState() (state, error) {
 		}
 		return state{}, err
 	}
+	if err := ensureStateFilePermissions(path); err != nil {
+		return state{}, err
+	}
 	var disk stateDisk
 	if err := json.Unmarshal(data, &disk); err != nil {
 		return state{}, err
 	}
+	accessToken := firstNonEmpty(strings.TrimSpace(disk.AccessToken), strings.TrimSpace(disk.APIToken))
 	return state{
 		ServerURL:                 disk.ServerURL,
-		APIToken:                  disk.APIToken,
+		APIToken:                  accessToken,
+		AccessToken:               accessToken,
+		RefreshToken:              strings.TrimSpace(disk.RefreshToken),
+		TokenType:                 strings.TrimSpace(disk.TokenType),
+		AccessExpiresAt:           cloneTime(disk.AccessExpiresAt),
+		RefreshExpiresAt:          cloneTime(disk.RefreshExpiresAt),
 		OrgID:                     disk.OrgID,
 		UserID:                    disk.UserID,
 		AgentID:                   disk.AgentID,
@@ -916,7 +940,11 @@ func saveState(st state) error {
 	}
 	payload := stateDisk{
 		ServerURL:                 st.ServerURL,
-		APIToken:                  st.APIToken,
+		AccessToken:               strings.TrimSpace(st.accessToken()),
+		RefreshToken:              strings.TrimSpace(st.RefreshToken),
+		TokenType:                 strings.TrimSpace(st.TokenType),
+		AccessExpiresAt:           cloneTime(st.AccessExpiresAt),
+		RefreshExpiresAt:          cloneTime(st.RefreshExpiresAt),
 		OrgID:                     st.OrgID,
 		UserID:                    st.UserID,
 		AgentID:                   st.AgentID,
@@ -930,7 +958,10 @@ func saveState(st state) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return ensureStateFilePermissions(path)
 }
 
 func stateFilePath() (string, error) {
@@ -969,8 +1000,24 @@ func (s state) workspaceID() string {
 	return strings.TrimSpace(s.WorkspaceID)
 }
 
+func (s state) accessToken() string {
+	return firstNonEmpty(strings.TrimSpace(s.AccessToken), strings.TrimSpace(s.APIToken))
+}
+
 func (s *state) setWorkspaceID(id string) {
 	s.WorkspaceID = strings.TrimSpace(id)
+}
+
+func ensureStateFilePermissions(path string) error {
+	return os.Chmod(path, 0o600)
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := value.UTC()
+	return &cloned
 }
 
 func prettyPrint(v any) error {

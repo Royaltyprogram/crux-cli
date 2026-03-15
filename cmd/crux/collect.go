@@ -72,7 +72,7 @@ func runCollect(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := newAPIClient(st.ServerURL, st.APIToken)
+	client := newAPIClient(st.ServerURL, st.accessToken())
 	sessionCursorReset := false
 	effectiveRecent := *recent
 	if *resetSessions {
