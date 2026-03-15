@@ -68,8 +68,7 @@ jobs:
 
       - name: Run closed beta smoke
         env:
-          BETA_SMOKE_EMAIL: demo@example.com
-          BETA_SMOKE_PASSWORD: demo1234
+          BETA_SMOKE_API_TOKEN: crux-dev-token
         run: ./scripts/closed_beta_smoke.sh
 
       - name: Run closed beta prod smoke

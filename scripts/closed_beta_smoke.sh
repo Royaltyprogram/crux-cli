@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8082}"
 CLI_TOKEN="${BETA_SMOKE_CLI_TOKEN:-}"
+API_TOKEN="${BETA_SMOKE_API_TOKEN:-${APP_API_TOKEN:-crux-dev-token}}"
 CLI_BIN="${CLI_BIN:-$ROOT_DIR/output/crux}"
 EXPECT_RESEARCH_MODE="${EXPECT_RESEARCH_MODE:-}"
 CRUX_HOME_DIR="$(mktemp -d)"
@@ -15,17 +16,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -z "$CLI_TOKEN" ]]; then
-  echo "BETA_SMOKE_CLI_TOKEN must be set to a dashboard-issued CLI token." >&2
-  exit 1
-fi
-
 if [[ ! -x "$CLI_BIN" ]]; then
   (cd "$ROOT_DIR" && go build -o output/crux ./cmd/crux)
 fi
 
 curl -fsS "$BASE_URL/healthz" >/dev/null
 curl -fsS "$BASE_URL/readyz" >/dev/null
+
+if [[ -z "$CLI_TOKEN" ]]; then
+  token_response="$(curl -fsS \
+    -H 'Content-Type: application/json' \
+    -H "X-Crux-Token: $API_TOKEN" \
+    -d '{"label":"Closed beta smoke"}' \
+    "$BASE_URL/api/v1/auth/cli-tokens")" || true
+  CLI_TOKEN="$(python3 - <<'PY' "$token_response" 2>/dev/null || true
+import json
+import sys
+
+payload = sys.argv[1]
+if not payload:
+    raise SystemExit("")
+
+env = json.loads(payload)
+if env.get("code") != 0:
+    raise SystemExit("")
+
+data = env.get("data") or {}
+token = data.get("token", "").strip()
+if not token:
+    raise SystemExit("")
+print(token)
+PY
+)"
+fi
+
+if [[ -z "$CLI_TOKEN" ]]; then
+  echo "BETA_SMOKE_CLI_TOKEN must be set, or BETA_SMOKE_API_TOKEN must allow issuing a CLI token at $BASE_URL." >&2
+  exit 1
+fi
 
 export CRUX_HOME="$CRUX_HOME_DIR"
 

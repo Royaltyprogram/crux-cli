@@ -136,7 +136,7 @@ func (s *AnalyticsService) Logout(ctx context.Context) (*response.LogoutResp, er
 }
 
 func (s *AnalyticsService) IssueCLIToken(ctx context.Context, req *request.IssueCLITokenReq) (*response.CLITokenIssueResp, error) {
-	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
+	identity, err := s.requireCLITokenManagerIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (s *AnalyticsService) IssueCLIToken(ctx context.Context, req *request.Issue
 }
 
 func (s *AnalyticsService) ListCLITokens(ctx context.Context) (*response.CLITokenListResp, error) {
-	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
+	identity, err := s.requireCLITokenManagerIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (s *AnalyticsService) ListCLITokens(ctx context.Context) (*response.CLIToke
 }
 
 func (s *AnalyticsService) RevokeCLIToken(ctx context.Context, req *request.RevokeCLITokenReq) (*response.CLITokenRevokeResp, error) {
-	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession)
+	identity, err := s.requireCLITokenManagerIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -469,6 +469,19 @@ func (s *AnalyticsService) requireUserIdentity(ctx context.Context, allowedKinds
 		return AuthIdentity{}, ecode.Forbidden(1004, "token type cannot access this route")
 	}
 	return identity, nil
+}
+
+func (s *AnalyticsService) requireCLITokenManagerIdentity(ctx context.Context) (AuthIdentity, error) {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if ok && identity.TokenKind == TokenKindStatic && s.Config != nil && s.Config.AllowsDemoUser() && s.Config.AllowsStaticToken() {
+		return AuthIdentity{
+			TokenKind: TokenKindStatic,
+			OrgID:     defaultDemoOrgID,
+			UserID:    defaultDemoUserID,
+			UserRole:  userRoleAdmin,
+		}, nil
+	}
+	return s.requireUserIdentity(ctx, TokenKindWebSession)
 }
 
 func (s *AnalyticsService) requireDeviceAccessIdentity(ctx context.Context) (AuthIdentity, error) {

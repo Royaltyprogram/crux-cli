@@ -1353,6 +1353,65 @@ func TestAnalyticsRouteGoogleLoginAndCLITokenFlow(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestAnalyticsRouteCLITokenFlowWithStaticLocalToken(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	conf.App.APIToken = "route-token"
+	conf.Auth.AllowDemoUser = true
+	conf.Auth.StaticTokenEnabled = true
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliTokenResp := postJSON[response.CLITokenIssueResp](t, echo, "route-token", http.MethodPost, "/api/v1/auth/cli-tokens", request.IssueCLITokenReq{
+		Label: "CI Mac",
+	})
+	require.NotEmpty(t, cliTokenResp.Token)
+	require.Equal(t, "CI Mac", cliTokenResp.Label)
+
+	tokenListResp := getJSON[response.CLITokenListResp](t, echo, "route-token", "/api/v1/auth/cli-tokens", nil)
+	require.Len(t, tokenListResp.Items, 1)
+	require.Equal(t, service.TokenKindCLIEnrollment, tokenListResp.Items[0].Kind)
+	require.Equal(t, "active", tokenListResp.Items[0].Status)
+
+	cliLoginResp := postJSON[response.CLILoginResp](t, echo, cliTokenResp.Token, http.MethodPost, "/api/v1/auth/cli/login", request.CLILoginReq{
+		DeviceName: "macbook-pro",
+		Hostname:   "ci-mac.local",
+		Platform:   "darwin/arm64",
+		CLIVersion: "0.1.0-dev",
+		Tools:      []string{"codex"},
+	})
+	require.Equal(t, "registered", cliLoginResp.Status)
+	require.Equal(t, "demo-org", cliLoginResp.OrgID)
+	require.Equal(t, "demo-user", cliLoginResp.UserID)
+	require.Equal(t, "demo@example.com", cliLoginResp.UserEmail)
+
+	revokeResp := postJSON[response.CLITokenRevokeResp](t, echo, "route-token", http.MethodPost, "/api/v1/auth/cli-tokens/revoke", request.RevokeCLITokenReq{
+		TokenID: cliTokenResp.TokenID,
+	})
+	require.Equal(t, "revoked", revokeResp.Status)
+
+	revokedTokenList := getJSON[response.CLITokenListResp](t, echo, "route-token", "/api/v1/auth/cli-tokens", nil)
+	require.Len(t, revokedTokenList.Items, 3)
+	for _, item := range revokedTokenList.Items {
+		require.Equal(t, "revoked", item.Status)
+	}
+}
+
 func TestAnalyticsRouteCLIRefreshRotatesDeviceTokens(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
