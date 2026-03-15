@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -61,6 +62,7 @@ type stateDisk struct {
 
 const sharedWorkspaceName = "Shared workspace"
 const defaultServerURL = "https://cruxai.ai"
+const reportAPISchemaVersion = "report-api.v1"
 
 var (
 	errStateNotFound         = errors.New("crux state not found")
@@ -71,11 +73,6 @@ type envelope struct {
 	Code    int             `json:"code"`
 	Message string          `json:"msg"`
 	Data    json.RawMessage `json:"data"`
-}
-
-type sessionBatchIngestResp struct {
-	Uploaded int                          `json:"uploaded"`
-	Items    []response.SessionIngestResp `json:"items"`
 }
 
 type apiClient struct {
@@ -89,10 +86,39 @@ type apiError struct {
 	StatusCode int
 	Code       int
 	Message    string
+	Method     string
+	Path       string
+	Request    string
+	Response   string
+	RetryAfter time.Duration
 }
 
 func (e *apiError) Error() string {
-	return fmt.Sprintf("request failed: %s", e.Message)
+	base := fmt.Sprintf("request failed: %s", e.Message)
+	if !cruxDebugHTTPEnabled() {
+		return base
+	}
+	var builder strings.Builder
+	builder.WriteString(base)
+	if e.Method != "" || e.Path != "" {
+		builder.WriteString("\nhttp request: ")
+		builder.WriteString(strings.TrimSpace(e.Method))
+		if strings.TrimSpace(e.Path) != "" {
+			if strings.TrimSpace(e.Method) != "" {
+				builder.WriteByte(' ')
+			}
+			builder.WriteString(strings.TrimSpace(e.Path))
+		}
+	}
+	if e.Request != "" {
+		builder.WriteString("\nrequest body: ")
+		builder.WriteString(e.Request)
+	}
+	if e.Response != "" {
+		builder.WriteString("\nresponse body: ")
+		builder.WriteString(e.Response)
+	}
+	return builder.String()
 }
 
 type loginOptions struct {
@@ -138,6 +164,8 @@ type resetResp struct {
 }
 
 const defaultAPIClientTimeout = 90 * time.Second
+const sessionSummaryBatchPath = "/api/v1/session-summaries/batch"
+const maxSessionSummaryBatchSize = 25
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -175,6 +203,8 @@ func run(args []string) error {
 		return runSessions(args[1:])
 	case "reports":
 		return runReports(args[1:])
+	case "imports":
+		return runImports(args[1:])
 	case "status":
 		return runStatus(args[1:])
 	case "workspace":
@@ -236,6 +266,7 @@ func printUsage() {
 Common commands:
   status            print org overview and shared workspace feedback reports
   reports           list active feedback reports for the shared workspace
+  imports           list recent async session import jobs, or run crux imports cancel <job_id>
   collect           upload local usage data now and optionally keep collecting on an interval
   sessions          list recent session summaries for the shared workspace
   snapshots         list config snapshots for the shared workspace
@@ -322,6 +353,7 @@ func runConnect(args []string) error {
 }
 
 func runSetup(args []string) error {
+	serverExplicit := flagProvided(args, "server")
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	server := fs.String("server", defaultServerURL, "server base URL")
 	token := fs.String("token", os.Getenv("CRUX_TOKEN"), "CLI token issued from the dashboard")
@@ -343,17 +375,21 @@ func runSetup(args []string) error {
 	}
 	initialWorkspaceSetup := shouldBackfillFullHistoryOnSetup()
 
-	fmt.Fprintf(os.Stderr, "Registering this device with %s\n", strings.TrimRight(*server, "/"))
-	st, loginResp, err := loginAndSaveState(loginOptions{
+	st, loginResp, err := resolveSetupState(loginOptions{
 		ServerURL:  *server,
 		Token:      *token,
 		DeviceName: *device,
 		Tools:      "codex,claude-code",
 		Consent:    "config_snapshot,session_summary,execution_result",
 		CLIVersion: buildinfo.Version,
-	})
+	}, serverExplicit)
 	if err != nil {
 		return err
+	}
+	if loginResp.Status == "reused" {
+		fmt.Fprintf(os.Stderr, "Using saved device login for %s\n", strings.TrimRight(st.ServerURL, "/"))
+	} else {
+		fmt.Fprintf(os.Stderr, "Registering this device with %s\n", strings.TrimRight(st.ServerURL, "/"))
 	}
 
 	fmt.Fprintf(os.Stderr, "Connecting %s to the shared workspace\n", firstNonEmpty(strings.TrimSpace(*repoPath), "."))
@@ -378,7 +414,7 @@ func runSetup(args []string) error {
 			fmt.Fprintf(os.Stderr, "Uploading an initial snapshot and the latest %d local Codex sessions\n", *recent)
 		}
 		client := newStateAPIClient(&st)
-		resp, err := runCollectOnce(&st, client, "", "default", "codex", "", *codexHome, uploadRecent, collectSnapshotModeChanged)
+		resp, err := runCollectOnce(&st, client, "", "default", "codex", "", *codexHome, uploadRecent, collectSnapshotModeChanged, false)
 		if err != nil {
 			return err
 		}
@@ -420,6 +456,56 @@ func runSetup(args []string) error {
 		Collect:       collectResp,
 		Background:    backgroundResp,
 	})
+}
+
+func resolveSetupState(opts loginOptions, serverExplicit bool) (state, response.CLILoginResp, error) {
+	requestedServer := normalizedServerURL(opts.ServerURL)
+	existing, err := loadState()
+	if err == nil {
+		savedServer := normalizedServerURL(existing.ServerURL)
+		if savedServer == "" {
+			savedServer = defaultServerURL
+		}
+
+		if serverExplicit && strings.TrimSpace(opts.Token) == "" && requestedServer != "" && requestedServer != savedServer {
+			return state{}, response.CLILoginResp{}, fmt.Errorf(
+				"saved cli state is for %s, but setup requested %s; run `crux login --server %s --token <CLI_TOKEN_FROM_DASHBOARD>` or `crux reset` first",
+				savedServer,
+				requestedServer,
+				requestedServer,
+			)
+		}
+
+		if !serverExplicit {
+			requestedServer = savedServer
+		}
+
+		if strings.TrimSpace(opts.Token) == "" {
+			if normalizedServerURL(existing.ServerURL) != requestedServer {
+				existing.ServerURL = requestedServer
+				if err := saveState(existing); err != nil {
+					return state{}, response.CLILoginResp{}, err
+				}
+			}
+			return existing, response.CLILoginResp{
+				AgentID:   existing.AgentID,
+				DeviceID:  existing.AgentID,
+				OrgID:     existing.OrgID,
+				UserID:    existing.UserID,
+				Status:    "reused",
+				TokenType: defaultString(strings.TrimSpace(existing.TokenType), "Bearer"),
+			}, nil
+		}
+	}
+	if err != nil && !errors.Is(err, errStateNotFound) {
+		return state{}, response.CLILoginResp{}, err
+	}
+
+	if requestedServer == "" {
+		requestedServer = defaultServerURL
+	}
+	opts.ServerURL = requestedServer
+	return loginAndSaveState(opts)
 }
 
 func runReset(args []string) error {
@@ -539,30 +625,216 @@ func runSession(args []string) error {
 	}
 	client := newStateAPIClient(&st)
 
-	items := make([]response.SessionIngestResp, 0, len(reqs))
+	resp, err := uploadSessionSummariesDetailed(st, client, reqs, *tool)
+	if err != nil {
+		return err
+	}
+
+	if len(resp.Items) == 1 && resp.Failed == 0 {
+		item, ok := sessionIngestRespFromBatchItem(resp.Items[0], resp)
+		if ok {
+			return prettyPrint(item)
+		}
+	}
+	return prettyPrint(resp)
+}
+
+func uploadSessionSummariesDetailed(st state, client *apiClient, reqs []request.SessionSummaryReq, tool string) (*response.SessionBatchIngestResp, error) {
+	aggregated := &response.SessionBatchIngestResp{
+		SchemaVersion: reportAPISchemaVersion,
+		ProjectID:     st.workspaceID(),
+		Items:         make([]response.SessionBatchIngestItemResp, 0, len(reqs)),
+	}
+	if len(reqs) == 0 {
+		return aggregated, nil
+	}
+
+	for start := 0; start < len(reqs); start += maxSessionSummaryBatchSize {
+		end := start + maxSessionSummaryBatchSize
+		if end > len(reqs) {
+			end = len(reqs)
+		}
+
+		chunk := cloneSessionSummaryReqs(reqs[start:end])
+		if len(chunk) == 1 {
+			item, err := uploadSingleSessionSummaryAsBatchItem(st, client, chunk[0], tool, start+1, len(reqs))
+			if err != nil {
+				return nil, err
+			}
+			mergeSessionBatchIngestResp(aggregated, item)
+			continue
+		}
+
+		batchResp, err := uploadSessionSummaryBatch(st, client, chunk, tool, start+1, len(reqs))
+		if err != nil {
+			if !isSessionSummaryBatchUnsupported(err) {
+				return nil, err
+			}
+			for idx, req := range chunk {
+				item, itemErr := uploadSingleSessionSummaryAsBatchItem(st, client, req, tool, start+idx+1, len(reqs))
+				if itemErr != nil {
+					return nil, itemErr
+				}
+				mergeSessionBatchIngestResp(aggregated, item)
+			}
+			continue
+		}
+
+		mergeSessionBatchIngestResp(aggregated, batchResp)
+	}
+
+	return aggregated, nil
+}
+
+func uploadSingleSessionSummaryAsBatchItem(st state, client *apiClient, req request.SessionSummaryReq, tool string, index, total int) (*response.SessionBatchIngestResp, error) {
+	uploaded, err := uploadSessionSummary(st, client, req, tool, index, total)
+	if err != nil {
+		return nil, err
+	}
+
+	recordedAt := uploaded.RecordedAt
+	return &response.SessionBatchIngestResp{
+		SchemaVersion:   uploaded.SchemaVersion,
+		ProjectID:       uploaded.ProjectID,
+		Accepted:        1,
+		Uploaded:        1,
+		ReportCount:     uploaded.ReportCount,
+		LatestReportIDs: cloneStringSlice(uploaded.LatestReportIDs),
+		Items: []response.SessionBatchIngestItemResp{{
+			SessionID:  uploaded.SessionID,
+			ProjectID:  uploaded.ProjectID,
+			Status:     "uploaded",
+			RecordedAt: &recordedAt,
+		}},
+		ResearchStatus: cloneReportResearchStatusResp(uploaded.ResearchStatus),
+	}, nil
+}
+
+func uploadSessionSummaryBatch(st state, client *apiClient, reqs []request.SessionSummaryReq, tool string, startIndex, total int) (*response.SessionBatchIngestResp, error) {
+	if len(reqs) == 0 {
+		return &response.SessionBatchIngestResp{
+			SchemaVersion: reportAPISchemaVersion,
+			ProjectID:     st.workspaceID(),
+		}, nil
+	}
+
+	prepared := cloneSessionSummaryReqs(reqs)
+	for idx := range prepared {
+		prepared[idx] = prepareSessionSummaryReq(st, prepared[idx], tool)
+	}
+
+	endIndex := startIndex + len(prepared) - 1
+	fmt.Fprintf(os.Stderr, "[%d-%d/%d] Uploading %d sessions\n", startIndex, endIndex, total, len(prepared))
+	fmt.Fprintln(os.Stderr, "    The server may spend a while generating the next feedback report after this upload.")
+
+	payload := request.SessionSummaryBatchReq{
+		ProjectID: st.workspaceID(),
+		Sessions:  prepared,
+	}
+	var uploaded response.SessionBatchIngestResp
+	for attempt := 1; ; attempt++ {
+		if err := client.doJSON(http.MethodPost, sessionSummaryBatchPath, payload, &uploaded); err != nil {
+			delay, retry := nextSessionUploadRetryDelay(err, attempt)
+			if !retry {
+				return nil, err
+			}
+			fmt.Fprintf(os.Stderr, "    Server rate limited this upload. Retrying in %s.\n", delay.Round(time.Millisecond))
+			time.Sleep(delay)
+			continue
+		}
+		break
+	}
+	if uploaded.ResearchStatus != nil {
+		fmt.Fprintf(os.Stderr, "    %s\n", formatResearchStatusSummary(uploaded.ResearchStatus))
+	}
+	return &uploaded, nil
+}
+
+func prepareSessionSummaryReq(st state, req request.SessionSummaryReq, tool string) request.SessionSummaryReq {
+	req.ProjectID = st.workspaceID()
+	if strings.TrimSpace(req.Tool) == "" {
+		req.Tool = tool
+	}
+	if req.Timestamp.IsZero() {
+		req.Timestamp = time.Now().UTC()
+	}
+	return req
+}
+
+func cloneSessionSummaryReqs(reqs []request.SessionSummaryReq) []request.SessionSummaryReq {
+	if len(reqs) == 0 {
+		return nil
+	}
+	cloned := make([]request.SessionSummaryReq, 0, len(reqs))
 	for _, req := range reqs {
-		req.ProjectID = st.workspaceID()
-		if req.Tool == "" {
-			req.Tool = *tool
-		}
-		if req.Timestamp.IsZero() {
-			req.Timestamp = time.Now().UTC()
-		}
-
-		var resp response.SessionIngestResp
-		if err := client.doJSON(http.MethodPost, "/api/v1/session-summaries", req, &resp); err != nil {
-			return err
-		}
-		items = append(items, resp)
+		cloned = append(cloned, request.SessionSummaryReq{
+			ProjectID:              strings.TrimSpace(req.ProjectID),
+			SessionID:              strings.TrimSpace(req.SessionID),
+			Tool:                   strings.TrimSpace(req.Tool),
+			TokenIn:                req.TokenIn,
+			TokenOut:               req.TokenOut,
+			CachedInputTokens:      req.CachedInputTokens,
+			ReasoningOutputTokens:  req.ReasoningOutputTokens,
+			FunctionCallCount:      req.FunctionCallCount,
+			ToolErrorCount:         req.ToolErrorCount,
+			SessionDurationMS:      req.SessionDurationMS,
+			ToolWallTimeMS:         req.ToolWallTimeMS,
+			ToolCalls:              cloneIntMap(req.ToolCalls),
+			ToolErrors:             cloneIntMap(req.ToolErrors),
+			ToolWallTimesMS:        cloneIntMap(req.ToolWallTimesMS),
+			RawQueries:             cloneStringSlice(req.RawQueries),
+			Models:                 cloneStringSlice(req.Models),
+			ModelProvider:          strings.TrimSpace(req.ModelProvider),
+			FirstResponseLatencyMS: req.FirstResponseLatencyMS,
+			AssistantResponses:     cloneStringSlice(req.AssistantResponses),
+			ReasoningSummaries:     cloneStringSlice(req.ReasoningSummaries),
+			Timestamp:              req.Timestamp,
+		})
 	}
+	return cloned
+}
 
-	if len(items) == 1 {
-		return prettyPrint(items[0])
+func mergeSessionBatchIngestResp(dst, src *response.SessionBatchIngestResp) {
+	if dst == nil || src == nil {
+		return
 	}
-	return prettyPrint(sessionBatchIngestResp{
-		Uploaded: len(items),
-		Items:    items,
-	})
+	if strings.TrimSpace(dst.SchemaVersion) == "" {
+		dst.SchemaVersion = src.SchemaVersion
+	}
+	if strings.TrimSpace(dst.ProjectID) == "" {
+		dst.ProjectID = src.ProjectID
+	}
+	dst.Accepted += src.Accepted
+	dst.Uploaded += src.Uploaded
+	dst.Updated += src.Updated
+	dst.Failed += src.Failed
+	dst.Items = append(dst.Items, src.Items...)
+	dst.ReportCount = src.ReportCount
+	dst.LatestReportIDs = cloneStringSlice(src.LatestReportIDs)
+	dst.ResearchStatus = cloneReportResearchStatusResp(src.ResearchStatus)
+}
+
+func sessionIngestRespFromBatchItem(item response.SessionBatchIngestItemResp, batch *response.SessionBatchIngestResp) (response.SessionIngestResp, bool) {
+	if strings.TrimSpace(item.Status) == "failed" || item.RecordedAt == nil || batch == nil {
+		return response.SessionIngestResp{}, false
+	}
+	return response.SessionIngestResp{
+		SchemaVersion:   batch.SchemaVersion,
+		SessionID:       item.SessionID,
+		ProjectID:       firstNonEmpty(strings.TrimSpace(item.ProjectID), batch.ProjectID),
+		ReportCount:     batch.ReportCount,
+		LatestReportIDs: cloneStringSlice(batch.LatestReportIDs),
+		RecordedAt:      item.RecordedAt.UTC(),
+		ResearchStatus:  cloneReportResearchStatusResp(batch.ResearchStatus),
+	}, true
+}
+
+func isSessionSummaryBatchUnsupported(err error) bool {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusMethodNotAllowed
 }
 
 func runSnapshots(args []string) error {
@@ -622,6 +894,98 @@ func runReports(args []string) error {
 		return err
 	}
 	return prettyPrint(workspaceScopedItems(st, resp.Items))
+}
+
+func runImports(args []string) error {
+	if len(args) > 0 && strings.TrimSpace(args[0]) == "cancel" {
+		return runImportsCancel(args[1:])
+	}
+
+	fs := flag.NewFlagSet("imports", flag.ContinueOnError)
+	projectID := fs.String("project-id", "", "override workspace/project id")
+	agentID := fs.String("agent-id", "", "filter jobs by agent id")
+	status := fs.String("status", "", "filter jobs by status")
+	failedOnly := fs.Bool("failed-only", false, "show only failed or partially failed jobs")
+	cursor := fs.String("cursor", "", "return the next page after the given import job id")
+	limit := fs.Int("limit", 10, "max number of recent import jobs")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := loadWorkspaceState()
+	if err != nil {
+		return err
+	}
+	client := newStateAPIClient(&st)
+	selectedProjectID := strings.TrimSpace(*projectID)
+	if selectedProjectID == "" {
+		selectedProjectID = st.workspaceID()
+	}
+
+	query := url.Values{
+		"project_id": []string{selectedProjectID},
+		"limit":      []string{strconv.Itoa(*limit)},
+	}
+	if strings.TrimSpace(*agentID) != "" {
+		query.Set("agent_id", strings.TrimSpace(*agentID))
+	}
+	if strings.TrimSpace(*status) != "" {
+		query.Set("status", strings.TrimSpace(*status))
+	}
+	if *failedOnly {
+		query.Set("failed_only", "true")
+	}
+	if strings.TrimSpace(*cursor) != "" {
+		query.Set("cursor", strings.TrimSpace(*cursor))
+	}
+
+	var resp response.SessionImportJobListResp
+	if err := client.doJSON(http.MethodGet, "/api/v1/session-import-jobs?"+query.Encode(), nil, &resp); err != nil {
+		return err
+	}
+	output := map[string]any{
+		"workspace_id":                 selectedProjectID,
+		"workspace_name":               sharedWorkspaceName,
+		"last_uploaded_session_cursor": cloneSessionUploadCursor(st.LastUploadedSessionCursor),
+		"items":                        resp.Items,
+	}
+	if strings.TrimSpace(resp.NextCursor) != "" {
+		output["next_cursor"] = strings.TrimSpace(resp.NextCursor)
+	}
+	return prettyPrint(output)
+}
+
+func runImportsCancel(args []string) error {
+	fs := flag.NewFlagSet("imports cancel", flag.ContinueOnError)
+	jobID := fs.String("job-id", "", "import job id to cancel")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	selectedJobID := strings.TrimSpace(*jobID)
+	if selectedJobID == "" && fs.NArg() > 0 {
+		selectedJobID = strings.TrimSpace(fs.Arg(0))
+	}
+	if selectedJobID == "" {
+		return errors.New("imports cancel requires a job id")
+	}
+
+	st, err := loadWorkspaceState()
+	if err != nil {
+		return err
+	}
+	client := newStateAPIClient(&st)
+
+	var resp response.SessionImportJobResp
+	path := "/api/v1/session-import-jobs/" + url.PathEscape(selectedJobID) + "/cancel"
+	if err := client.doJSON(http.MethodPost, path, request.SessionImportJobCancelReq{}, &resp); err != nil {
+		return err
+	}
+	return prettyPrint(map[string]any{
+		"workspace_id":   st.workspaceID(),
+		"workspace_name": sharedWorkspaceName,
+		"job":            resp,
+	})
 }
 
 func runStatus(args []string) error {
@@ -910,11 +1274,13 @@ func (c *apiClient) doJSON(method, path string, body any, out any) error {
 
 func (c *apiClient) doJSONOnce(method, path string, body any, out any, token string) error {
 	var reader io.Reader
+	requestPreview := ""
 	if body != nil {
 		payload, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
+		requestPreview = compactDebugJSON(payload)
 		reader = bytes.NewReader(payload)
 	}
 
@@ -939,9 +1305,13 @@ func (c *apiClient) doJSONOnce(method, path string, body any, out any, token str
 	if err != nil {
 		return err
 	}
+	responsePreview := compactDebugJSON(raw)
 
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
+		if cruxDebugHTTPEnabled() {
+			return fmt.Errorf("decode envelope: %w\nhttp request: %s %s\nresponse body: %s", err, strings.TrimSpace(method), strings.TrimSpace(path), responsePreview)
+		}
 		return fmt.Errorf("decode envelope: %w", err)
 	}
 	if resp.StatusCode >= 400 || env.Code != 0 {
@@ -952,12 +1322,75 @@ func (c *apiClient) doJSONOnce(method, path string, body any, out any, token str
 			StatusCode: resp.StatusCode,
 			Code:       env.Code,
 			Message:    env.Message,
+			Method:     strings.TrimSpace(method),
+			Path:       strings.TrimSpace(path),
+			Request:    requestPreview,
+			Response:   responsePreview,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
 	if out == nil || len(env.Data) == 0 || string(env.Data) == "null" {
 		return nil
 	}
 	return json.Unmarshal(env.Data, out)
+}
+
+func cruxDebugHTTPEnabled() bool {
+	value := strings.TrimSpace(os.Getenv("CRUX_DEBUG_HTTP"))
+	if value == "" {
+		return false
+	}
+	switch strings.ToLower(value) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+func compactDebugJSON(raw []byte) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, trimmed); err == nil {
+		return truncateDebugPreview(compacted.String(), 4096)
+	}
+	return truncateDebugPreview(string(trimmed), 4096)
+}
+
+func truncateDebugPreview(raw string, limit int) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || limit <= 0 || len(raw) <= limit {
+		return raw
+	}
+	if limit <= len("...(truncated)") {
+		return raw[:limit]
+	}
+	return raw[:limit-len("...(truncated)")] + "...(truncated)"
+}
+
+func parseRetryAfter(raw string, now time.Time) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	retryAt, err := http.ParseTime(raw)
+	if err != nil {
+		return 0
+	}
+	delay := retryAt.Sub(now)
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }
 
 func (c *apiClient) authToken() string {
@@ -1123,6 +1556,25 @@ func stateFilePath() (string, error) {
 	return filepath.Join(home, ".crux", "state.json"), nil
 }
 
+func normalizedServerURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	return strings.TrimRight(trimmed, "/")
+}
+
+func flagProvided(args []string, name string) bool {
+	short := "-" + strings.TrimSpace(name)
+	long := "--" + strings.TrimSpace(name)
+	for _, arg := range args {
+		if arg == short || arg == long || strings.HasPrefix(arg, short+"=") || strings.HasPrefix(arg, long+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeRepoPath(path string) (string, error) {
 	cleaned := filepath.Clean(strings.TrimSpace(path))
 	if cleaned == "" {
@@ -1191,6 +1643,50 @@ func cloneTime(value *time.Time) *time.Time {
 	}
 	cloned := value.UTC()
 	return &cloned
+}
+
+func cloneStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
+}
+
+func cloneIntMap(values map[string]int) map[string]int {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]int, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneReportResearchStatusResp(status *response.ReportResearchStatusResp) *response.ReportResearchStatusResp {
+	if status == nil {
+		return nil
+	}
+	return &response.ReportResearchStatusResp{
+		SchemaVersion:    status.SchemaVersion,
+		State:            status.State,
+		Summary:          status.Summary,
+		Provider:         status.Provider,
+		Model:            status.Model,
+		MinimumSessions:  status.MinimumSessions,
+		SessionCount:     status.SessionCount,
+		RawQueryCount:    status.RawQueryCount,
+		ReportCount:      status.ReportCount,
+		TriggerSessionID: status.TriggerSessionID,
+		LastError:        status.LastError,
+		TriggeredAt:      cloneTime(status.TriggeredAt),
+		StartedAt:        cloneTime(status.StartedAt),
+		CompletedAt:      cloneTime(status.CompletedAt),
+		LastSuccessfulAt: cloneTime(status.LastSuccessfulAt),
+		LastDurationMS:   status.LastDurationMS,
+	}
 }
 
 func prettyPrint(v any) error {

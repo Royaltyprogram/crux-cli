@@ -25,8 +25,8 @@ If one local session is rejected with `Invalid Params`, the collector now skips 
 Current mirrored build:
 
 - source repository: `Royaltyprogram/aiops`
-- source commit: `a9f2436`
-- mirrored version: `0.1.0-beta.2-a9f2436`
-- artifact path: `artifacts/crux-0.1.0-beta.2-a9f2436-darwin-arm64.tar.gz`
+- source commit: `a16a6ad`
+- mirrored version: `0.1.0-beta.2-a16a6ad`
+- artifact path: `artifacts/crux-0.1.0-beta.2-a16a6ad-darwin-arm64.tar.gz`
 
 Mirrored CLI sources from the same `aiops` commit live under `source/`.

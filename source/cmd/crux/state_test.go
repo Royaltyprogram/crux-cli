@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,4 +204,47 @@ func TestAPIClientHintsWhenLegacyEnrollmentTokenIsSaved(t *testing.T) {
 	require.Contains(t, err.Error(), "saved cli state still contains a legacy enrollment token")
 	require.Contains(t, err.Error(), filepath.Join(root, "state.json"))
 	require.Contains(t, err.Error(), "run `crux login` or `crux setup` again")
+}
+
+func TestAPIClientIncludesHTTPDebugContextOnFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+	t.Setenv("CRUX_DEBUG_HTTP", "1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, "/api/v1/session-summaries", r.URL.Path)
+		w.WriteHeader(http.StatusBadRequest)
+		require.NoError(t, json.NewEncoder(w).Encode(envelope{
+			Code:    1000,
+			Message: "Invalid Params",
+		}))
+	}))
+	defer server.Close()
+
+	st := state{
+		ServerURL:   server.URL,
+		AccessToken: "access-token",
+		TokenType:   "Bearer",
+		OrgID:       "org-1",
+		UserID:      "user-1",
+		WorkspaceID: "project-1",
+	}
+	client := newStateAPIClient(&st)
+
+	err := client.doJSON(http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+		ProjectID: "project-1",
+		SessionID: "session-1",
+		Tool:      "codex",
+		RawQueries: []string{
+			"reproduce the invalid params response",
+		},
+	}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "request failed: Invalid Params")
+	require.Contains(t, err.Error(), "http request: POST /api/v1/session-summaries")
+	require.Contains(t, err.Error(), `"session_id":"session-1"`)
+	require.Contains(t, err.Error(), `"tool":"codex"`)
+	require.Contains(t, err.Error(), "response body:")
+	require.True(t, strings.Contains(err.Error(), `"msg":"Invalid Params"`) || strings.Contains(err.Error(), `"Message":"Invalid Params"`))
 }
