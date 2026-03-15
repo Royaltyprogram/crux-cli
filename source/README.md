@@ -2,8 +2,8 @@ This directory mirrors the CLI-related source from [`Royaltyprogram/aiops`](http
 
 Current snapshot:
 
-- Source commit: `a16a6ad`
-- Source version: `0.1.0-beta.2-a16a6ad`
+- Source commit: `627f308`
+- Source version: `0.1.0-beta.2-627f308`
 
 Included here:
 

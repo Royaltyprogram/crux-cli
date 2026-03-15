@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/script
 Install a specific release:
 
 ```bash
-CRUX_VERSION=0.1.0-beta.1-52-gf97bdc8 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+CRUX_VERSION=0.1.0-beta.2-627f308 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
 ```
 
 Re-upload all local Codex sessions after clearing the saved upload cursor:
@@ -25,8 +25,8 @@ If one local session is rejected with `Invalid Params`, the collector now skips 
 Current mirrored build:
 
 - source repository: `Royaltyprogram/aiops`
-- source commit: `a16a6ad`
-- mirrored version: `0.1.0-beta.2-a16a6ad`
-- artifact path: `artifacts/crux-0.1.0-beta.2-a16a6ad-darwin-arm64.tar.gz`
+- source commit: `627f308`
+- mirrored version: `0.1.0-beta.2-627f308`
+- artifact path: `artifacts/crux-0.1.0-beta.2-627f308-linux-amd64.tar.gz`
 
 Mirrored CLI sources from the same `aiops` commit live under `source/`.

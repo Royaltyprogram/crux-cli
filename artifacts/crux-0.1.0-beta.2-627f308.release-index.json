@@ -1,0 +1,19 @@
+{
+  "version": "0.1.0-beta.2-627f308",
+  "commit": "627f308",
+  "generated_at": "2026-03-15T11:44:06Z",
+  "bundles": [
+    {
+      "bundle_name": "crux-0.1.0-beta.2-627f308-linux-amd64",
+      "archive_name": "crux-0.1.0-beta.2-627f308-linux-amd64.tar.gz",
+      "archive_path": "crux-0.1.0-beta.2-627f308-linux-amd64.tar.gz",
+      "checksum_path": "crux-0.1.0-beta.2-627f308-linux-amd64.tar.gz.sha256",
+      "version": "0.1.0-beta.2-627f308",
+      "commit": "627f308",
+      "build_date": "2026-03-15T11:44:02Z",
+      "goos": "linux",
+      "goarch": "amd64",
+      "sha256": "bae8553217e0599b07f2f569ad3d3c1a74ca8a9d0c2d75d6731ffc0186fcceb4"
+    }
+  ]
+}
