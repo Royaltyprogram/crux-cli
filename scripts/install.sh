@@ -103,22 +103,30 @@ fetch_to_stdout() {
 latest_version() {
   api_url="$1"
   tmpfile="$2/releases.json"
+  target_goos="$3"
+  target_goarch="$4"
+  target_archive_name_suffix="-$target_goos-$target_goarch.tar.gz"
   fetch_to_file "$api_url" "$tmpfile"
   version=""
   if command -v python3 >/dev/null 2>&1; then
-    version="$(python3 - "$tmpfile" <<'PY'
+    version="$(python3 - "$tmpfile" "$target_archive_name_suffix" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     releases = json.load(handle)
 
+target_suffix = sys.argv[2]
 best = None
 for item in releases:
     if item.get("draft"):
         continue
     tag = (item.get("tag_name") or "").strip()
     if not tag:
+        continue
+    expected_archive = f"crux-{tag}{target_suffix}"
+    assets = item.get("assets") or []
+    if not any((asset.get("name") or "").strip() == expected_archive for asset in assets):
         continue
     key = (
         item.get("published_at") or "",
@@ -133,11 +141,11 @@ if best is not None:
 PY
 )"
   elif command -v jq >/dev/null 2>&1; then
-    version="$(jq -r '[.[] | select(.draft != true and (.tag_name // "") != "")] | sort_by(.published_at // "", .created_at // "", .tag_name // "") | last | .tag_name // empty' "$tmpfile")"
+    version="$(jq -r --arg suffix "$target_archive_name_suffix" '[.[] | select(.draft != true and (.tag_name // "") != "") | select(any(.assets[]?; (.name // "") == ("crux-" + .tag_name + $suffix)))] | sort_by(.published_at // "", .created_at // "", .tag_name // "") | last | .tag_name // empty' "$tmpfile")"
   else
     version="$(tr ',' '\n' <"$tmpfile" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
   fi
-  [ -n "$version" ] || die "unable to determine latest release tag from $api_url"
+  [ -n "$version" ] || die "unable to determine a latest release tag with a $target_goos/$target_goarch bundle from $api_url"
   printf '%s\n' "$version"
 }
 
@@ -338,7 +346,7 @@ trap cleanup EXIT INT TERM
 
 if [ -z "$VERSION" ]; then
   say "resolving latest release tag from $RELEASES_API_URL"
-  VERSION="$(latest_version "$RELEASES_API_URL" "$TMPDIR_WORK")"
+  VERSION="$(latest_version "$RELEASES_API_URL" "$TMPDIR_WORK" "$GOOS" "$GOARCH")"
 fi
 
 BUNDLE_NAME="crux-$VERSION-$GOOS-$GOARCH"

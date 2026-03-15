@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/script
 Install a specific release:
 
 ```bash
-CRUX_VERSION=0.1.0-beta.2-627f308 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+CRUX_VERSION=<release-tag> curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
 ```
 
 Re-upload all local Codex sessions after clearing the saved upload cursor:
@@ -28,6 +28,8 @@ Current mirrored release artifacts:
 - source commit: `627f308`
 - mirrored version: `0.1.0-beta.2-627f308`
 - artifact path: `artifacts/crux-0.1.0-beta.2-627f308-linux-amd64.tar.gz`
+
+The installer now selects the newest published release that has a bundle for the current platform, so macOS and Linux can resolve different latest tags when the mirrored assets differ by platform.
 
 Current mirrored CLI source snapshot:
 
