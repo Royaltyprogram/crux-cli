@@ -1,10 +1,10 @@
 Current `main` backend build artifact for the local source commit.
 
-- Platform: `darwin/arm64`
-- Source commit: `a16a6ad`
-- Source version: `backend-darwin-arm64-7292472-9-ga16a6ad`
+- Platform: `linux/amd64`
+- Source commit: `627f308`
+- Source version: `backend-linux-amd64-627f308`
 
 Files:
 
-- `server-darwin-arm64`
-- `server-darwin-arm64.sha256`
+- `server-linux-amd64`
+- `server-linux-amd64.sha256`
