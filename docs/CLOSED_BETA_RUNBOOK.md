@@ -191,7 +191,7 @@ Build the container:
 docker build -t crux-beta .
 ```
 
-Run with MySQL-backed beta state:
+Run with MySQL-backed beta state override:
 
 ```bash
 docker run --rm -p 8082:8082 \
@@ -205,7 +205,7 @@ docker run --rm -p 8082:8082 \
   crux-beta
 ```
 
-Run with MySQL-backed beta state:
+Run with MySQL-backed beta state override:
 
 ```bash
 docker run --rm -p 8082:8082 \

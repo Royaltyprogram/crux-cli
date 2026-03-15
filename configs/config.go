@@ -187,9 +187,6 @@ func (c *Config) Validate() error {
 		issues = append(issues, "App.APIToken is required when Auth.StaticTokenEnabled is true")
 	}
 	if c.IsReleaseMode() {
-		if strings.TrimSpace(c.DB.Dialect) == "sqlite3" {
-			issues = append(issues, "DB.Dialect sqlite3 is not allowed in release mode")
-		}
 		if strings.TrimSpace(c.Jwt.Secret) == "" {
 			issues = append(issues, "Jwt.Secret is required in release mode")
 		}

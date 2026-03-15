@@ -162,11 +162,43 @@ func TestConfigValidateRejectsInvalidReleaseSecurityConfig(t *testing.T) {
 
 	err := cfg.Validate()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "DB.Dialect sqlite3 is not allowed in release mode")
 	require.Contains(t, err.Error(), "Jwt.Secret is required in release mode")
 	require.Contains(t, err.Error(), "Auth.AllowDemoUser must be false in release mode")
 	require.Contains(t, err.Error(), "Auth.StaticTokenEnabled must be false in release mode")
 	require.Contains(t, err.Error(), "App.APIToken is required when Auth.StaticTokenEnabled is true")
+}
+
+func TestConfigValidateAllowsReleaseSQLiteConfig(t *testing.T) {
+	cfg := &Config{
+		App: App{
+			Mode: "prod",
+		},
+		DB: DB{
+			Dialect: "sqlite3",
+			DSN:     "data/crux.db?_fk=1",
+		},
+		Jwt: Jwt{
+			Secret: "prod-secret",
+		},
+		Auth: Auth{
+			BootstrapUsers: []BootstrapUser{
+				{
+					ID:      "beta-user-1",
+					OrgID:   "beta-org",
+					OrgName: "Beta Org",
+					Email:   "beta@example.com",
+					Name:    "Beta Operator",
+					Role:    "admin",
+				},
+			},
+			Google: GoogleAuth{
+				ClientID:     "google-client-id",
+				ClientSecret: "google-client-secret",
+			},
+		},
+	}
+
+	require.NoError(t, cfg.Validate())
 }
 
 func TestConfigValidateRejectsInvalidCIDRsAndBootstrapUsers(t *testing.T) {

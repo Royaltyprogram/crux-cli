@@ -279,7 +279,7 @@ go run .
 
 Use `HTTP_ADMIN_ALLOWED_CIDRS` if you want `/admin` and `/api/v1/admin/*` to be stricter than the rest of the app. If `HTTP_TRUSTED_PROXY_CIDRS` is empty, Crux only trusts the direct socket remote address and ignores forwarded IP headers.
 
-`APP_MODE=prod` now fails fast during startup if critical closed beta settings are unsafe or incomplete, including a missing `JWT_SECRET`, a SQLite runtime database, invalid CIDR values, demo-user enablement, static token bypass enablement, or malformed bootstrap users.
+`APP_MODE=prod` now fails fast during startup if critical closed beta settings are unsafe or incomplete, including a missing `JWT_SECRET`, invalid CIDR values, demo-user enablement, static token bypass enablement, or malformed bootstrap users.
 
 `GET /healthz` and `GET /readyz` now also return embedded server build metadata so you can verify the exact beta revision after deploy.
 
