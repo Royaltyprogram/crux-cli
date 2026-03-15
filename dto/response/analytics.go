@@ -332,6 +332,15 @@ type AdminUserListResp struct {
 	Items []AdminUserResp `json:"items"`
 }
 
+type AdminImportJobMetricsResp struct {
+	OrgID          string                       `json:"org_id"`
+	ProjectID      string                       `json:"project_id,omitempty"`
+	GeneratedAt    time.Time                    `json:"generated_at"`
+	Metrics        *SessionImportJobMetricsResp `json:"metrics,omitempty"`
+	ActiveJobs     []SessionImportJobResp       `json:"active_jobs"`
+	RecentFailures []SessionImportJobResp       `json:"recent_failures"`
+}
+
 type AdminUserDeactivateResp struct {
 	Status     string    `json:"status"`
 	UserID     string    `json:"user_id"`

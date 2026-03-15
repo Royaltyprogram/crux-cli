@@ -122,6 +122,11 @@ func TestDashboardAssetRoutesServeSplitAssets(t *testing.T) {
 			bodySnippet: `/api/v1/admin/users`,
 		},
 		{
+			path:        "/assets/admin.js",
+			contentType: "javascript",
+			bodySnippet: `/api/v1/admin/import-job-metrics?limit=6`,
+		},
+		{
 			path:        "/assets/logo.ico",
 			contentType: "image/",
 			bodySnippet: "",
@@ -236,6 +241,7 @@ func TestAdminRouteServesPageForAdminSession(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "User Management")
+	require.Contains(t, rec.Body.String(), "Async import telemetry")
 	require.Contains(t, rec.Body.String(), `<script src="/assets/admin.js"></script>`)
 }
 

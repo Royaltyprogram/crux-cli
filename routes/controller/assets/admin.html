@@ -102,6 +102,54 @@
 
       <section class="section">
         <div class="section-header">
+          <div class="section-kicker">Import ops</div>
+          <div class="section-title">Async import telemetry</div>
+          <div class="section-desc" id="importMetricsSummary">Loading async import metrics...</div>
+        </div>
+        <div class="signals">
+          <div class="signal-cell">
+            <div class="signal-cell-label">Created jobs</div>
+            <div class="signal-cell-value" id="adminImportCreatedJobs">0</div>
+            <div class="signal-cell-meta">All async import jobs seen in this organization.</div>
+          </div>
+          <div class="signal-cell">
+            <div class="signal-cell-label">Active jobs</div>
+            <div class="signal-cell-value" id="adminImportActiveJobs">0</div>
+            <div class="signal-cell-meta">Jobs currently receiving chunks, queued, or running.</div>
+          </div>
+          <div class="signal-cell">
+            <div class="signal-cell-label">Failure rate</div>
+            <div class="signal-cell-value" id="adminImportFailureRate">0%</div>
+            <div class="signal-cell-meta">Failed sessions divided by processed sessions.</div>
+          </div>
+          <div class="signal-cell">
+            <div class="signal-cell-label">Avg duration</div>
+            <div class="signal-cell-value" id="adminImportAvgDuration">0s</div>
+            <div class="signal-cell-meta">Average wall time across completed async imports.</div>
+          </div>
+        </div>
+        <div class="admin-grid">
+          <div class="insight-card">
+            <div class="section-header compact">
+              <div class="section-kicker">Active jobs</div>
+              <div class="section-title">Current import pressure</div>
+              <div class="section-desc">Jobs still receiving chunks or processing sessions right now.</div>
+            </div>
+            <div class="list compact-list" id="adminActiveImportList"></div>
+          </div>
+          <div class="insight-card">
+            <div class="section-header compact">
+              <div class="section-kicker">Recent failures</div>
+              <div class="section-title">Latest degraded imports</div>
+              <div class="section-desc">Most recent partial or failed jobs, including the latest failed session summary.</div>
+            </div>
+            <div class="list compact-list" id="adminFailureImportList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
           <div class="section-kicker">Directory</div>
           <div class="section-title">Search and filter users</div>
           <div class="section-desc">Filters run against the current organization only.</div>

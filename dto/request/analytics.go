@@ -156,6 +156,11 @@ type AdminUserListReq struct {
 	IncludeDeleted bool   `query:"include_deleted"`
 }
 
+type AdminImportJobMetricsReq struct {
+	ProjectID string `query:"project_id"`
+	Limit     int    `query:"limit"`
+}
+
 type AdminUserDeactivateReq struct {
 	UserID string `json:"user_id" validate:"required"`
 }

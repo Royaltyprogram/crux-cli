@@ -5,6 +5,7 @@ const ADMIN_STORAGE_KEYS = {
 
 const adminState = {
   busy: false,
+  importMetrics: null,
   session: null,
   users: [],
 };
@@ -138,6 +139,31 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
+function formatCount(value) {
+  return new Intl.NumberFormat("en-US").format(Number(value || 0));
+}
+
+function formatPercent(value) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
+function formatLatency(value) {
+  const ms = Math.round(Number(value || 0));
+  if (!ms || ms < 0) {
+    return "0s";
+  }
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  if (ms < 60000) {
+    const seconds = ms / 1000;
+    return `${seconds >= 10 ? Math.round(seconds) : seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.round((ms % 60000) / 1000);
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 function pill(label, tone) {
   return `<span class="pill ${toneClass(tone)}">${escapeHTML(label)}</span>`;
 }
@@ -187,6 +213,23 @@ function sourceTone(source) {
   }
 }
 
+function importJobTone(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "succeeded":
+      return "good";
+    case "failed":
+      return "danger";
+    case "partially_failed":
+    case "queued":
+      return "warn";
+    case "receiving_chunks":
+    case "running":
+      return "sky";
+    default:
+      return "sky";
+  }
+}
+
 function emptyState(title, body) {
   return `
     <div class="item">
@@ -194,6 +237,97 @@ function emptyState(title, body) {
       <div class="admin-empty-note">${escapeHTML(body)}</div>
     </div>
   `;
+}
+
+function importFailureSummary(item) {
+  const failures = Array.isArray(item && item.failures) ? item.failures : [];
+  const latest = failures.length ? failures[failures.length - 1] : null;
+  if (!latest) {
+    return String((item && item.last_error) || "").trim();
+  }
+  const parts = [];
+  if (latest.session_id) {
+    parts.push(latest.session_id);
+  }
+  if (latest.error) {
+    parts.push(latest.error);
+  }
+  if (Number(latest.http_status || 0) > 0) {
+    parts.push(`HTTP ${Number(latest.http_status)}`);
+  }
+  if (Number(latest.api_error_code || 0) > 0) {
+    parts.push(`API ${Number(latest.api_error_code)}`);
+  }
+  return parts.join(" - ");
+}
+
+function renderAdminImportMetrics(data) {
+  const metrics = (data && data.metrics) || null;
+  adminState.importMetrics = data || null;
+
+  const created = Number((metrics && metrics.created_jobs) || 0);
+  const active =
+    Number((metrics && metrics.receiving_jobs) || 0) +
+    Number((metrics && metrics.queued_jobs) || 0) +
+    Number((metrics && metrics.running_jobs) || 0);
+  const degraded =
+    Number((metrics && metrics.failed_jobs) || 0) +
+    Number((metrics && metrics.partially_failed_jobs) || 0);
+
+  $("adminImportCreatedJobs").textContent = formatCount(created);
+  $("adminImportActiveJobs").textContent = formatCount(active);
+  $("adminImportFailureRate").textContent = formatPercent((metrics && metrics.failure_rate) || 0);
+  $("adminImportAvgDuration").textContent = formatLatency((metrics && metrics.avg_duration_ms) || 0);
+
+  $("importMetricsSummary").textContent = created > 0
+    ? `Tracking ${formatCount(created)} async import job(s); ${formatCount(active)} active and ${formatCount(degraded)} degraded recently.`
+    : "No async import jobs have been recorded yet for this organization.";
+
+  const activeJobs = Array.isArray(data && data.active_jobs) ? data.active_jobs : [];
+  $("adminActiveImportList").innerHTML = activeJobs.length
+    ? activeJobs.map((item) => `
+        <div class="item">
+          <div class="item-top">
+            <div class="item-title">
+              ${escapeHTML(item.job_id || "Import job")}
+              <small>${escapeHTML(`Project ${item.project_id || "-"}`)}</small>
+            </div>
+            ${pill(item.status || "running", importJobTone(item.status))}
+          </div>
+          <div class="step-list">
+            <div class="step-line">${escapeHTML(`${formatCount(Math.max(Number(item.processed_sessions || 0), Number(item.received_sessions || 0)))} visible progress updates`)} </div>
+            <div class="step-line">${escapeHTML(`Processed ${formatCount(item.processed_sessions || 0)} · Uploaded ${formatCount(Number(item.uploaded_sessions || 0) + Number(item.updated_sessions || 0))}`)}</div>
+            <div class="step-line">${escapeHTML(`Last activity ${formatDateTime(item.completed_at || item.started_at || item.created_at)}`)}</div>
+          </div>
+        </div>
+      `).join("")
+    : emptyState(
+        "No active import jobs",
+        "Receiving, queued, or running jobs will appear here.",
+      );
+
+  const recentFailures = Array.isArray(data && data.recent_failures) ? data.recent_failures : [];
+  $("adminFailureImportList").innerHTML = recentFailures.length
+    ? recentFailures.map((item) => `
+        <div class="item">
+          <div class="item-top">
+            <div class="item-title">
+              ${escapeHTML(item.job_id || "Import job")}
+              <small>${escapeHTML(`Project ${item.project_id || "-"} · Failed ${formatCount(item.failed_sessions || 0)}`)}</small>
+            </div>
+            ${pill(item.status || "failed", importJobTone(item.status))}
+          </div>
+          <div class="step-list">
+            <div class="step-line">${escapeHTML(`Processed ${formatCount(item.processed_sessions || 0)} · Uploaded ${formatCount(Number(item.uploaded_sessions || 0) + Number(item.updated_sessions || 0))}`)}</div>
+            <div class="step-line">${escapeHTML(importFailureSummary(item) || "Latest failure summary unavailable.")}</div>
+            <div class="step-line">${escapeHTML(`Completed ${formatDateTime(item.completed_at || item.created_at)}`)}</div>
+          </div>
+        </div>
+      `).join("")
+    : emptyState(
+        "No recent failed imports",
+        "Partial or failed jobs will show their latest failure summaries here.",
+      );
 }
 
 function renderUsers(items) {
@@ -288,13 +422,17 @@ async function withBusy(task) {
   }
 }
 
-async function loadUsers(message) {
+async function loadAdminData(message) {
   try {
     await withBusy(async () => {
-      setStatus(message || "Loading users...");
-      const data = await requestJSON(buildFilterURL(), {}, "Failed to load users.");
-      renderUsers(Array.isArray(data.items) ? data.items : []);
-      setStatus(`Loaded ${adminState.users.length} user account(s).`);
+      setStatus(message || "Loading admin data...");
+      const [userData, importMetrics] = await Promise.all([
+        requestJSON(buildFilterURL(), {}, "Failed to load users."),
+        requestJSON("/api/v1/admin/import-job-metrics?limit=6", {}, "Failed to load import metrics."),
+      ]);
+      renderUsers(Array.isArray(userData.items) ? userData.items : []);
+      renderAdminImportMetrics(importMetrics);
+      setStatus(`Loaded ${adminState.users.length} user account(s) and import telemetry.`);
     });
   } catch (error) {
     if (isUnauthorized(error)) {
@@ -340,7 +478,7 @@ async function deactivateUser(userID) {
         "Failed to deactivate the user.",
       );
       setStatus("User deactivated.");
-      await loadUsers();
+      await loadAdminData();
     });
   } catch (error) {
     if (isUnauthorized(error)) {
@@ -369,7 +507,7 @@ async function deleteUser(userID) {
         "Failed to delete the user.",
       );
       setStatus("User deleted.");
-      await loadUsers();
+      await loadAdminData();
     });
   } catch (error) {
     if (isUnauthorized(error)) {
@@ -403,9 +541,9 @@ async function signOut() {
 function bindActions() {
   $("filterForm").addEventListener("submit", (event) => {
     event.preventDefault();
-    loadUsers();
+    loadAdminData();
   });
-  $("refreshBtn").addEventListener("click", () => loadUsers("Refreshing users..."));
+  $("refreshBtn").addEventListener("click", () => loadAdminData("Refreshing admin data..."));
   $("signOutBtn").addEventListener("click", signOut);
   $("userList").addEventListener("click", (event) => {
     const target = event.target;
@@ -435,7 +573,7 @@ async function init() {
   if (!ready) {
     return;
   }
-  await loadUsers();
+  await loadAdminData();
 }
 
 init();

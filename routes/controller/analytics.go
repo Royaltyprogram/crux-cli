@@ -49,6 +49,7 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.GET("/projects", r.listProjects)
 	api.GET("/reports", r.listReports)
 	api.GET("/audits", r.auditList)
+	api.GET("/admin/import-job-metrics", r.adminImportJobMetrics)
 	api.GET("/admin/users", r.listAdminUsers)
 	api.POST("/admin/users/deactivate", r.deactivateAdminUser)
 	api.POST("/admin/users/delete", r.deleteAdminUser)
@@ -271,6 +272,14 @@ func (r *AnalyticsRoute) listAdminUsers(c *echo.Context) error {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.ListAdminUsers(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) adminImportJobMetrics(c *echo.Context) error {
+	var req request.AdminImportJobMetricsReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.AdminImportJobMetrics(c.Request().Context(), &req))
 }
 
 func (r *AnalyticsRoute) deactivateAdminUser(c *echo.Context) error {

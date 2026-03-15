@@ -1054,6 +1054,100 @@ func TestAnalyticsRouteDashboardOverviewIncludesImportJobMetrics(t *testing.T) {
 	require.NotNil(t, overview.ImportJobMetrics.LastCompletedAt)
 }
 
+func TestAnalyticsRouteAdminImportJobMetrics(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "admin-import-job-metrics-login",
+		Subject:  "google-admin-import-job-metrics-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	adminCookie := loginWithGoogleControllerTest(t, echo, "admin-import-job-metrics-login")
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "admin-import-job-metrics-login", "admin-import-job-metrics-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "admin-import-job-metrics-project",
+		RepoHash:    "admin-import-job-metrics-project-hash",
+		DefaultTool: "codex",
+	})
+
+	failedJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID: projectResp.ProjectID,
+	})
+	failedJob = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+failedJob.JobID+"/chunks", request.SessionImportJobChunkReq{
+		Sessions: []request.SessionSummaryReq{
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Create one valid import session for admin metrics.",
+				},
+				Timestamp: time.Now().UTC(),
+			},
+			{
+				Tool:      "",
+				Timestamp: time.Now().UTC(),
+			},
+		},
+	})
+	require.Equal(t, 2, failedJob.ReceivedSessions)
+
+	failedJob = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+failedJob.JobID+"/complete", request.SessionImportJobCompleteReq{})
+	require.Equal(t, "queued", failedJob.Status)
+
+	waitForSessionImportJobStatus(t, echo, deviceToken, failedJob.JobID, func(item *response.SessionImportJobResp) bool {
+		return item != nil && item.Status == "partially_failed" && item.FailedSessions == 1
+	})
+
+	activeJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 3,
+	})
+	require.Equal(t, "receiving_chunks", activeJob.Status)
+
+	adminMetrics := getJSON[response.AdminImportJobMetricsResp](t, echo, "", "/api/v1/admin/import-job-metrics", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+		"limit":      []string{"5"},
+	}, adminCookie)
+	require.Equal(t, cliLoginResp.OrgID, adminMetrics.OrgID)
+	require.Equal(t, projectResp.ProjectID, adminMetrics.ProjectID)
+	require.NotNil(t, adminMetrics.Metrics)
+	require.Equal(t, 2, adminMetrics.Metrics.CreatedJobs)
+	require.Equal(t, 1, adminMetrics.Metrics.ReceivingJobs)
+	require.Equal(t, 1, adminMetrics.Metrics.PartiallyFailedJobs)
+	require.Equal(t, 2, adminMetrics.Metrics.ProcessedSessions)
+	require.Equal(t, 1, adminMetrics.Metrics.UploadedSessions)
+	require.Equal(t, 1, adminMetrics.Metrics.FailedSessions)
+	require.Len(t, adminMetrics.ActiveJobs, 1)
+	require.Equal(t, activeJob.JobID, adminMetrics.ActiveJobs[0].JobID)
+	require.Len(t, adminMetrics.RecentFailures, 1)
+	require.Equal(t, failedJob.JobID, adminMetrics.RecentFailures[0].JobID)
+	require.Equal(t, "partially_failed", adminMetrics.RecentFailures[0].Status)
+}
+
 func TestAnalyticsRouteListSessionImportJobsFiltersStatus(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"sort"
@@ -1015,6 +1016,7 @@ func (s *AnalyticsService) CreateSessionImportJob(ctx context.Context, req *requ
 		if err := s.AnalyticsStore.persistLocked(); err != nil {
 			return nil, err
 		}
+		logSessionImportJobEvent(slog.LevelInfo, "reused", existing)
 		return s.toSessionImportJobRespLocked(existing, true), nil
 	}
 
@@ -1041,6 +1043,7 @@ func (s *AnalyticsService) CreateSessionImportJob(ctx context.Context, req *requ
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
 	}
+	logSessionImportJobEvent(slog.LevelInfo, "created", job)
 	return s.toSessionImportJobRespLocked(job, false), nil
 }
 
@@ -1071,6 +1074,7 @@ func (s *AnalyticsService) AppendSessionImportJobChunk(ctx context.Context, jobI
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
 	}
+	logSessionImportJobEvent(slog.LevelInfo, "chunk_appended", job, "chunk_sessions", len(req.Sessions))
 	_ = project
 	return s.toSessionImportJobRespLocked(job, false), nil
 }
@@ -1107,6 +1111,7 @@ func (s *AnalyticsService) CompleteSessionImportJob(ctx context.Context, jobID s
 		return nil, err
 	}
 	resp := s.toSessionImportJobRespLocked(job, false)
+	logSessionImportJobEvent(slog.LevelInfo, "queued", job)
 	s.AnalyticsStore.mu.Unlock()
 
 	s.enqueueSessionImportJob(job.ID)
@@ -1149,6 +1154,7 @@ func (s *AnalyticsService) CancelSessionImportJob(ctx context.Context, jobID str
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
 	}
+	logSessionImportJobEvent(slog.LevelWarn, "canceled", job, "cancel_source", "collector")
 	return s.toSessionImportJobRespLocked(job, false), nil
 }
 
@@ -1374,6 +1380,35 @@ func (s *AnalyticsService) touchSessionImportJob(job *SessionImportJob, now time
 	job.UpdatedAt = now
 }
 
+func logSessionImportJobEvent(level slog.Level, event string, job *SessionImportJob, attrs ...any) {
+	if job == nil {
+		return
+	}
+	args := []any{
+		"event", strings.TrimSpace(event),
+		"job_id", strings.TrimSpace(job.ID),
+		"org_id", strings.TrimSpace(job.OrgID),
+		"project_id", strings.TrimSpace(job.ProjectID),
+		"agent_id", strings.TrimSpace(job.AgentID),
+		"status", strings.TrimSpace(job.Status),
+		"total_sessions", job.TotalSessions,
+		"received_sessions", job.ReceivedSessions,
+		"processed_sessions", job.ProcessedSessions,
+		"uploaded_sessions", job.UploadedSessions,
+		"updated_sessions", job.UpdatedSessions,
+		"failed_sessions", job.FailedSessions,
+		"failure_count", len(job.Failures),
+	}
+	if sessionID := strings.TrimSpace(job.LastSessionID); sessionID != "" {
+		args = append(args, "last_session_id", sessionID)
+	}
+	if lastError := strings.TrimSpace(job.LastError); lastError != "" {
+		args = append(args, "last_error", lastError)
+	}
+	args = append(args, attrs...)
+	slog.Log(context.Background(), level, "session import job", args...)
+}
+
 func (s *AnalyticsService) cleanupExpiredSessionImportJobsLocked(now time.Time) error {
 	changed := false
 	for id, job := range s.AnalyticsStore.sessionImportJobs {
@@ -1392,10 +1427,12 @@ func (s *AnalyticsService) cleanupExpiredSessionImportJobsLocked(now time.Time) 
 			job.CompletedAt = cloneTime(&now)
 			job.Sessions = nil
 			s.touchSessionImportJob(job, now)
+			logSessionImportJobEvent(slog.LevelWarn, "expired", job, "ttl_hours", int(sessionImportJobActiveTTL/time.Hour))
 			changed = true
 			continue
 		}
 		if job.CompletedAt != nil && now.Sub(job.CompletedAt.UTC()) >= sessionImportJobRetentionTTL {
+			logSessionImportJobEvent(slog.LevelInfo, "deleted", job, "retention_ttl_hours", int(sessionImportJobRetentionTTL/time.Hour))
 			delete(s.AnalyticsStore.sessionImportJobs, id)
 			changed = true
 		}
@@ -1407,10 +1444,15 @@ func (s *AnalyticsService) cleanupExpiredSessionImportJobsLocked(now time.Time) 
 }
 
 func (s *AnalyticsService) buildSessionImportJobMetricsLocked(orgID string) *response.SessionImportJobMetricsResp {
+	return s.buildSessionImportJobMetricsFilteredLocked(orgID, "")
+}
+
+func (s *AnalyticsService) buildSessionImportJobMetricsFilteredLocked(orgID, projectID string) *response.SessionImportJobMetricsResp {
 	orgID = strings.TrimSpace(orgID)
 	if orgID == "" {
 		return nil
 	}
+	projectID = strings.TrimSpace(projectID)
 
 	metrics := &response.SessionImportJobMetricsResp{}
 	var (
@@ -1421,7 +1463,7 @@ func (s *AnalyticsService) buildSessionImportJobMetricsLocked(orgID string) *res
 		lastCompletedAt           *time.Time
 	)
 	for _, job := range s.AnalyticsStore.sessionImportJobs {
-		if job == nil || strings.TrimSpace(job.OrgID) != orgID {
+		if !sessionImportJobMatchesScope(job, orgID, projectID) {
 			continue
 		}
 		metrics.CreatedJobs++
@@ -1473,6 +1515,66 @@ func (s *AnalyticsService) buildSessionImportJobMetricsLocked(orgID string) *res
 	}
 	metrics.LastCompletedAt = lastCompletedAt
 	return metrics
+}
+
+func sessionImportJobMatchesScope(job *SessionImportJob, orgID, projectID string) bool {
+	if job == nil || strings.TrimSpace(job.OrgID) != strings.TrimSpace(orgID) {
+		return false
+	}
+	if projectID != "" && strings.TrimSpace(job.ProjectID) != strings.TrimSpace(projectID) {
+		return false
+	}
+	return true
+}
+
+func sessionImportJobActivityAt(job *SessionImportJob) time.Time {
+	if job == nil {
+		return time.Time{}
+	}
+	if job.CompletedAt != nil && !job.CompletedAt.IsZero() {
+		return job.CompletedAt.UTC()
+	}
+	if !job.UpdatedAt.IsZero() {
+		return job.UpdatedAt.UTC()
+	}
+	if job.StartedAt != nil && !job.StartedAt.IsZero() {
+		return job.StartedAt.UTC()
+	}
+	return job.CreatedAt.UTC()
+}
+
+func (s *AnalyticsService) listAdminSessionImportJobsLocked(orgID, projectID string, limit int, include func(*SessionImportJob) bool) []response.SessionImportJobResp {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	items := make([]*SessionImportJob, 0)
+	for _, job := range s.AnalyticsStore.sessionImportJobs {
+		if !sessionImportJobMatchesScope(job, orgID, projectID) {
+			continue
+		}
+		if include != nil && !include(job) {
+			continue
+		}
+		items = append(items, job)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left := sessionImportJobActivityAt(items[i])
+		right := sessionImportJobActivityAt(items[j])
+		if left.Equal(right) {
+			return strings.TrimSpace(items[i].ID) > strings.TrimSpace(items[j].ID)
+		}
+		return left.After(right)
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	resp := make([]response.SessionImportJobResp, 0, len(items))
+	for _, item := range items {
+		if converted := s.toSessionImportJobRespLocked(item, false); converted != nil {
+			resp = append(resp, *converted)
+		}
+	}
+	return resp
 }
 
 func (s *AnalyticsService) enqueueSessionImportJob(jobID string) {
@@ -1533,6 +1635,7 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 		s.AnalyticsStore.mu.Unlock()
 		return
 	}
+	logSessionImportJobEvent(slog.LevelInfo, "started", job)
 	s.AnalyticsStore.mu.Unlock()
 
 	lastSuccessfulSessionID := ""
@@ -1558,6 +1661,7 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 			completedAt := time.Now().UTC()
 			job.CompletedAt = cloneTime(&completedAt)
 			s.touchSessionImportJob(job, completedAt)
+			logSessionImportJobEvent(slog.LevelError, "failed", job, "reason", "workspace_missing")
 			_ = s.AnalyticsStore.persistLocked()
 			s.AnalyticsStore.mu.Unlock()
 			return
@@ -1571,6 +1675,7 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 				completedAt := time.Now().UTC()
 				job.CompletedAt = cloneTime(&completedAt)
 				s.touchSessionImportJob(job, completedAt)
+				logSessionImportJobEvent(slog.LevelError, "failed", job, "reason", "internal_ingest_error", "http_status", ecode.HttpCode(err), "api_error_code", ecode.Code(err))
 				_ = s.AnalyticsStore.persistLocked()
 				s.AnalyticsStore.mu.Unlock()
 				return
@@ -1584,6 +1689,7 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 				APIErrorCode: ecode.Code(err),
 			})
 			s.touchSessionImportJob(job, time.Now().UTC())
+			logSessionImportJobEvent(slog.LevelWarn, "session_failed", job, "session_id", strings.TrimSpace(req.SessionID), "http_status", ecode.HttpCode(err), "api_error_code", ecode.Code(err))
 			s.AnalyticsStore.mu.Unlock()
 			continue
 		}
@@ -1610,6 +1716,7 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 	if strings.TrimSpace(job.Status) == sessionImportJobStatusCanceled {
 		job.Sessions = nil
 		s.touchSessionImportJob(job, time.Now().UTC())
+		logSessionImportJobEvent(slog.LevelWarn, "canceled", job, "cancel_source", "runtime")
 		_ = s.AnalyticsStore.persistLocked()
 		s.AnalyticsStore.mu.Unlock()
 		return
@@ -1621,6 +1728,7 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 		completedAt := time.Now().UTC()
 		job.CompletedAt = cloneTime(&completedAt)
 		s.touchSessionImportJob(job, completedAt)
+		logSessionImportJobEvent(slog.LevelError, "failed", job, "reason", "workspace_missing")
 		_ = s.AnalyticsStore.persistLocked()
 		s.AnalyticsStore.mu.Unlock()
 		return
@@ -1649,6 +1757,11 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 	}
 	job.Sessions = nil
 	s.touchSessionImportJob(job, completedAt)
+	if job.Status == sessionImportJobStatusPartial {
+		logSessionImportJobEvent(slog.LevelWarn, "completed", job, "result", "partially_failed")
+	} else {
+		logSessionImportJobEvent(slog.LevelInfo, "completed", job, "result", "succeeded")
+	}
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return
@@ -2462,6 +2575,48 @@ func (s *AnalyticsService) ListAdminUsers(ctx context.Context, req *request.Admi
 	})
 
 	return &response.AdminUserListResp{Items: items}, nil
+}
+
+func (s *AnalyticsService) AdminImportJobMetrics(ctx context.Context, req *request.AdminImportJobMetricsReq) (*response.AdminImportJobMetricsResp, error) {
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(now); err != nil {
+		return nil, err
+	}
+
+	identity, _, err := s.requireAdminUserLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID != "" {
+		project, ok := s.AnalyticsStore.projects[projectID]
+		if !ok || project == nil || strings.TrimSpace(project.OrgID) != identity.OrgID {
+			return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown workspace"))
+		}
+	}
+
+	limit := req.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+
+	return &response.AdminImportJobMetricsResp{
+		OrgID:       identity.OrgID,
+		ProjectID:   projectID,
+		GeneratedAt: now,
+		Metrics:     s.buildSessionImportJobMetricsFilteredLocked(identity.OrgID, projectID),
+		ActiveJobs: s.listAdminSessionImportJobsLocked(identity.OrgID, projectID, limit, func(job *SessionImportJob) bool {
+			return isActiveSessionImportJobStatus(strings.TrimSpace(job.Status))
+		}),
+		RecentFailures: s.listAdminSessionImportJobsLocked(identity.OrgID, projectID, limit, func(job *SessionImportJob) bool {
+			status := strings.TrimSpace(job.Status)
+			return status == sessionImportJobStatusFailed || status == sessionImportJobStatusPartial
+		}),
+	}, nil
 }
 
 func (s *AnalyticsService) DeactivateAdminUser(ctx context.Context, req *request.AdminUserDeactivateReq) (*response.AdminUserDeactivateResp, error) {
