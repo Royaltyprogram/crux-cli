@@ -16,6 +16,8 @@ const state = {
   activeTab: "overview",
   activeReportPanel: "actions",
   activeReportID: "",
+  failedImportJobItems: [],
+  importJobItems: [],
   selectedProjectID: "",
   reportIndex: new Map(),
   reportItems: [],
@@ -234,10 +236,19 @@ function renderAgentStatus(overview, reports) {
   const activeReports = Number(overview.active_reports || 0);
   const totalSessions = Number(overview.total_sessions || 0);
   const research = overview && overview.research_status;
+  const importJob = overview && overview.active_import_job;
+  const importState = String((importJob && importJob.status) || "")
+    .trim()
+    .toLowerCase();
   const researchState = String((research && research.state) || "")
     .trim()
     .toLowerCase();
-  if (researchState === "running") {
+  if (importState === "running" || importState === "queued" || importState === "receiving_chunks") {
+    bar.dataset.state = "";
+    text.textContent =
+      sessionImportNarrative(importJob) ||
+      "A backfill import is running on uploaded Codex sessions";
+  } else if (researchState === "running") {
     bar.dataset.state = "report";
     text.textContent =
       reportResearchNarrative(research) ||
@@ -1018,6 +1029,12 @@ function workloadNarrative(overview) {
   const research = reportResearchNarrative(
     overview && overview.research_status,
   );
+  const importProgress = sessionImportNarrative(
+    overview && overview.active_import_job,
+  );
+  const importMetrics = sessionImportMetricsNarrative(
+    overview && overview.import_job_metrics,
+  );
   const input = Number(overview.avg_input_tokens_per_query || 0);
   const output = Number(overview.avg_output_tokens_per_query || 0);
   const tokenRead =
@@ -1026,11 +1043,168 @@ function workloadNarrative(overview) {
         ? " Prompt-side token usage is currently the larger share of each captured query."
         : " Response-side token usage is currently the larger share of each captured query."
       : "";
-  const combined = `${action} ${outcome} ${research}${tokenRead}`.trim();
+  const combined = `${importProgress} ${importMetrics} ${action} ${outcome} ${research}${tokenRead}`.trim();
   return (
     combined ||
     "Crux is collecting enough Codex session traces to produce its first analysis report."
   );
+}
+
+function sessionImportNarrative(job) {
+  const item = job || {};
+  const state = String(item.status || "").trim().toLowerCase();
+  if (!state) {
+    return "";
+  }
+  const processed = Number(item.processed_sessions || 0);
+  const received = Number(item.received_sessions || 0);
+  const total = Number(item.total_sessions || 0);
+  const target = total > 0 ? total : received;
+  if (state === "receiving_chunks") {
+    return `A backfill import is staging ${formatCount(received)} of ${formatCount(target)} sessions before processing starts.`;
+  }
+  if (state === "queued") {
+    return `A backfill import is queued with ${formatCount(received)} staged session${received === 1 ? "" : "s"}.`;
+  }
+  if (state === "running") {
+    return `A backfill import is processing ${formatCount(processed)} of ${formatCount(target)} staged sessions right now.`;
+  }
+  return "";
+}
+
+function sessionImportMetricsNarrative(metrics) {
+  const item = metrics || {};
+  const created = Number(item.created_jobs || 0);
+  if (created <= 0) {
+    return "";
+  }
+  const active =
+    Number(item.receiving_jobs || 0) +
+    Number(item.queued_jobs || 0) +
+    Number(item.running_jobs || 0);
+  const succeeded = Number(item.succeeded_jobs || 0);
+  const degraded =
+    Number(item.partially_failed_jobs || 0) +
+    Number(item.failed_jobs || 0) +
+    Number(item.canceled_jobs || 0);
+  const throughput = Number(item.throughput_per_minute || 0);
+  const failureRate = Number(item.failure_rate || 0);
+  const avgDurationMS = Number(item.avg_duration_ms || 0);
+
+  const parts = [`Import history shows ${formatCount(created)} job${created === 1 ? "" : "s"} created`];
+  if (active > 0) {
+    parts.push(`${formatCount(active)} still active`);
+  }
+  if (succeeded > 0 || degraded > 0) {
+    parts.push(`${formatCount(succeeded)} succeeded`);
+    if (degraded > 0) {
+      parts.push(`${formatCount(degraded)} degraded`);
+    }
+  }
+  if (throughput > 0) {
+    parts.push(`${formatCount(Math.round(throughput))} sessions per minute`);
+  }
+  if (failureRate > 0) {
+    parts.push(`${Math.round(failureRate * 100)}% session failure rate`);
+  }
+  if (avgDurationMS > 0) {
+    parts.push(`${formatLatency(avgDurationMS)} average run time`);
+  }
+  return `${parts.join(", ")}.`;
+}
+
+function importJobTone(status) {
+  const raw = String(status || "").trim().toLowerCase();
+  if (raw === "succeeded") {
+    return "good";
+  }
+  if (raw === "partially_failed" || raw === "queued") {
+    return "warn";
+  }
+  if (raw === "failed" || raw === "canceled") {
+    return "danger";
+  }
+  return "sky";
+}
+
+function importJobProgressSummary(item) {
+  const status = String(item.status || "").trim().toLowerCase();
+  const total = Number(item.total_sessions || 0);
+  const received = Number(item.received_sessions || 0);
+  const processed = Number(item.processed_sessions || 0);
+  const uploaded =
+    Number(item.uploaded_sessions || 0) + Number(item.updated_sessions || 0);
+  const failed = Number(item.failed_sessions || 0);
+  const target = Math.max(total, received);
+
+  if (status === "receiving_chunks") {
+    return `${formatCount(received)} of ${formatCount(target)} sessions staged.`;
+  }
+  if (status === "queued") {
+    return `${formatCount(received)} staged session${received === 1 ? "" : "s"} waiting to run.`;
+  }
+  if (status === "running") {
+    return `${formatCount(processed)} of ${formatCount(target)} sessions processed so far.`;
+  }
+  if (status === "succeeded") {
+    return `${formatCount(uploaded)} of ${formatCount(target || uploaded)} sessions uploaded successfully.`;
+  }
+  if (status === "partially_failed") {
+    return `${formatCount(processed || target)} processed, ${formatCount(uploaded)} uploaded, ${formatCount(failed)} failed.`;
+  }
+  if (status === "failed") {
+    return `${formatCount(processed)} of ${formatCount(target)} sessions processed before the job failed.`;
+  }
+  if (status === "canceled") {
+    return `${formatCount(processed)} of ${formatCount(target)} sessions processed before cancellation.`;
+  }
+  return `${formatCount(processed)} of ${formatCount(target)} sessions processed.`;
+}
+
+function importJobFailureDetails(item) {
+  const failures = toArray(item.failures);
+  const latest = failures.length ? failures[failures.length - 1] : null;
+  if (latest) {
+    const parts = [];
+    if (latest.session_id) {
+      parts.push(latest.session_id);
+    }
+    if (latest.error) {
+      parts.push(latest.error);
+    }
+    if (Number(latest.http_status || 0) > 0) {
+      parts.push(`HTTP ${Number(latest.http_status)}`);
+    }
+    if (Number(latest.api_error_code || 0) > 0) {
+      parts.push(`API ${Number(latest.api_error_code)}`);
+    }
+    if (parts.length) {
+      return parts.join(" - ");
+    }
+  }
+  return String(item.last_error || "").trim();
+}
+
+function importJobFailureLine(item) {
+  const parts = [];
+  if (item && item.session_id) {
+    parts.push(item.session_id);
+  }
+  if (item && item.error) {
+    parts.push(item.error);
+  }
+  if (Number((item && item.http_status) || 0) > 0) {
+    parts.push(`HTTP ${Number(item.http_status)}`);
+  }
+  if (Number((item && item.api_error_code) || 0) > 0) {
+    parts.push(`API ${Number(item.api_error_code)}`);
+  }
+  return parts.join(" - ");
+}
+
+function canCancelImportJob(status) {
+  const raw = String(status || "").trim().toLowerCase();
+  return raw === "receiving_chunks" || raw === "queued" || raw === "running";
 }
 
 function reportResearchNarrative(status) {
@@ -3641,6 +3815,162 @@ function renderSessionSummaries(items) {
     .join("");
 }
 
+function renderImportJobs(overview, items) {
+  state.importJobItems = items.slice();
+
+  const summary =
+    sessionImportMetricsNarrative(overview && overview.import_job_metrics) ||
+    sessionImportNarrative(overview && overview.active_import_job) ||
+    (items.length
+      ? `Showing ${formatCount(items.length)} recent async import job${items.length === 1 ? "" : "s"}.`
+      : "Recent async import jobs and the latest failure summaries for this workspace.");
+  $("importHistorySummary").textContent = summary;
+
+  if (!items.length) {
+    $("importHistoryList").innerHTML = emptyState(
+      "No import jobs yet",
+      "Run `crux collect --reset-sessions` when you want to backfill local Codex sessions.",
+    );
+    return;
+  }
+
+  $("importHistoryList").innerHTML = items
+    .map((item) => {
+      const status = String(item.status || "").trim();
+      const uploaded =
+        Number(item.uploaded_sessions || 0) + Number(item.updated_sessions || 0);
+      const failed = Number(item.failed_sessions || 0);
+      const startedAt = item.started_at || item.created_at;
+      const duration = item.completed_at
+        ? formatDurationBetween(startedAt, item.completed_at)
+        : item.started_at
+          ? formatDurationBetween(item.started_at, new Date())
+          : "";
+      const timelineBits = [`Created ${formatDateTime(item.created_at)}`];
+      if (item.completed_at) {
+        timelineBits.push(`Completed ${formatDateTime(item.completed_at)}`);
+        if (duration && duration !== "Not yet") {
+          timelineBits.push(`Ran ${duration}`);
+        }
+      } else if (item.started_at) {
+        timelineBits.push(`Started ${formatDateTime(item.started_at)}`);
+        if (duration && duration !== "Not yet") {
+          timelineBits.push(`Running for ${duration}`);
+        }
+      }
+
+      const lines = [
+        importJobProgressSummary(item),
+        `Uploaded ${formatCount(uploaded)} · Failed ${formatCount(failed)}`,
+        timelineBits.join(" · "),
+      ];
+      const failure = importJobFailureDetails(item);
+      if (failure) {
+        lines.push(`Latest failure: ${failure}`);
+      }
+      const actionRow = canCancelImportJob(status)
+        ? `
+            <div class="action-row">
+              <button class="secondary-button" type="button" data-action="cancel-import-job" data-job-id="${escapeAttr(item.job_id || "")}">Cancel job</button>
+            </div>
+          `
+        : "";
+
+      return `
+          <div class="item">
+            <div class="item-top">
+              <div class="item-title">
+                ${escapeHTML(item.job_id || "Import job")}
+                <small>${escapeHTML(`Project backfill job · ${formatCount(Math.max(Number(item.total_sessions || 0), Number(item.received_sessions || 0)))} sessions targeted`)}</small>
+              </div>
+              ${pill(titleize(status || "pending"), importJobTone(status))}
+            </div>
+            <div class="step-list">${lines
+              .filter(Boolean)
+              .map((line) => `<div class="step-line">${escapeHTML(line)}</div>`)
+              .join("")}</div>
+            ${actionRow}
+          </div>
+        `;
+    })
+    .join("");
+}
+
+function renderImportJobFailures(items) {
+  state.failedImportJobItems = items.slice();
+
+  const failureJobs = items.length;
+  const failureSessions = items.reduce(
+    (sum, item) => sum + Number(item.failed_sessions || 0),
+    0,
+  );
+  $("importFailureSummary").textContent = failureJobs
+    ? `Showing ${formatCount(failureJobs)} recent degraded import job${failureJobs === 1 ? "" : "s"} covering ${formatCount(failureSessions)} failed session${failureSessions === 1 ? "" : "s"}.`
+    : "No recent failed imports. Recent degraded jobs will show their failed sessions here.";
+
+  if (!items.length) {
+    $("importFailureList").innerHTML = emptyState(
+      "No recent failed imports",
+      "When a backfill import degrades or fails, the failed sessions and API errors will show up here.",
+    );
+    return;
+  }
+
+  $("importFailureList").innerHTML = items
+    .map((item) => {
+      const failures = toArray(item.failures);
+      const preview = failures
+        .slice(0, 3)
+        .map((failure) => importJobFailureLine(failure))
+        .filter(Boolean);
+      const extraFailures = Math.max(failures.length - preview.length, 0);
+      const detailBits = [
+        `${formatCount(Number(item.failed_sessions || failures.length || 0))} failed`,
+      ];
+      const uploaded =
+        Number(item.uploaded_sessions || 0) + Number(item.updated_sessions || 0);
+      if (uploaded > 0) {
+        detailBits.push(`${formatCount(uploaded)} uploaded`);
+      }
+      if (item.completed_at) {
+        detailBits.push(`Completed ${formatDateTime(item.completed_at)}`);
+      } else {
+        detailBits.push(`Created ${formatDateTime(item.created_at)}`);
+      }
+
+      const lines = [
+        importJobProgressSummary(item),
+        ...preview,
+      ];
+      if (!preview.length) {
+        const lastError = importJobFailureDetails(item);
+        if (lastError) {
+          lines.push(lastError);
+        }
+      }
+      if (extraFailures > 0) {
+        lines.push(`+${formatCount(extraFailures)} more failed session${extraFailures === 1 ? "" : "s"}`);
+      }
+
+      return `
+          <div class="item">
+            <div class="item-top">
+              <div class="item-title">
+                ${escapeHTML(item.job_id || "Import job")}
+                <small>${escapeHTML(detailBits.join(" · "))}</small>
+              </div>
+              ${pill(titleize(item.status || "failed"), importJobTone(item.status))}
+            </div>
+            <div class="step-list">${lines
+              .filter(Boolean)
+              .map((line) => `<div class="step-line">${escapeHTML(line)}</div>`)
+              .join("")}</div>
+          </div>
+        `;
+    })
+    .join("");
+}
+
 function renderCLITokens(items) {
   if (!items.length) {
     $("cliTokenList").innerHTML = emptyState(
@@ -3786,6 +4116,40 @@ async function revokeCLIToken(tokenID) {
   }
 }
 
+async function cancelImportJob(jobID) {
+  const selectedJobID = String(jobID || "").trim();
+  if (!selectedJobID) {
+    return;
+  }
+
+  try {
+    await withBusy(async () => {
+      await requestJSON(
+        `/api/v1/session-import-jobs/${encodeURIComponent(selectedJobID)}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+        "Failed to cancel the import job.",
+      );
+      await load({ skipBusy: true });
+      setStatus(`Canceled import job ${selectedJobID}.`);
+    });
+  } catch (error) {
+    if (isUnauthorized(error)) {
+      redirectToLanding("Your session expired. Sign in again.");
+      return;
+    }
+    setStatus(
+      error instanceof Error
+        ? error.message
+        : "Failed to cancel the import job.",
+      true,
+    );
+  }
+}
+
 async function signOut() {
   try {
     await requestJSON(
@@ -3867,6 +4231,8 @@ async function load(options = {}) {
     let insights = {};
     let snapshots = [];
     let audits = [];
+    let failedImports = [];
+    let imports = [];
 
     if (projectID) {
       const [
@@ -3875,6 +4241,8 @@ async function load(options = {}) {
         insightsData,
         snapshotData,
         auditData,
+        failedImportsData,
+        importsData,
       ] = await Promise.all([
         requestJSON(
           `/api/v1/reports?project_id=${encodeURIComponent(projectID)}`,
@@ -3901,6 +4269,16 @@ async function load(options = {}) {
           {},
           "Failed to load workspace activity.",
         ),
+        requestJSON(
+          `/api/v1/session-import-jobs?project_id=${encodeURIComponent(projectID)}&failed_only=true&limit=6`,
+          {},
+          "Failed to load recent failed import jobs.",
+        ),
+        requestJSON(
+          `/api/v1/session-import-jobs?project_id=${encodeURIComponent(projectID)}&limit=6`,
+          {},
+          "Failed to load recent import jobs.",
+        ),
       ]);
 
       reports = toArray(reportsData.items);
@@ -3908,6 +4286,8 @@ async function load(options = {}) {
       insights = insightsData || {};
       snapshots = toArray(snapshotData.items);
       audits = toArray(auditData.items);
+      failedImports = toArray(failedImportsData.items);
+      imports = toArray(importsData.items);
 
       reports.forEach((item) => {
         state.reportIndex.set(item.id, item);
@@ -3943,6 +4323,8 @@ async function load(options = {}) {
     renderToolTrend(insights);
     renderDurationTrend(insights);
     renderCoverageActions(insights);
+    renderImportJobs(overview, imports);
+    renderImportJobFailures(failedImports);
     renderHeavySessions(sessions);
     renderSnapshots(snapshots);
     renderActivityTimeline(audits);
@@ -4028,6 +4410,9 @@ function handleActionClick(event) {
       break;
     case "revoke-cli-token":
       revokeCLIToken(button.dataset.tokenId || "");
+      break;
+    case "cancel-import-job":
+      cancelImportJob(button.dataset.jobId || "");
       break;
     case "switch-tab":
       setActiveTab(button.dataset.tab || "overview");

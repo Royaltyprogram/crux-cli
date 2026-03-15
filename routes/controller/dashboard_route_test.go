@@ -73,6 +73,8 @@ func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `data-action="issue-cli-token"`)
 	require.Contains(t, rec.Body.String(), "Latest trace analysis")
 	require.Contains(t, rec.Body.String(), "Usage Analytics")
+	require.Contains(t, rec.Body.String(), "Backfill jobs and failure drill-down")
+	require.Contains(t, rec.Body.String(), "Recent failed imports")
 	require.Contains(t, rec.Body.String(), "Config snapshots & recent events")
 	require.Contains(t, rec.Body.String(), "Settings")
 	require.Contains(t, rec.Body.String(), `data-action="refresh-dashboard"`)
@@ -108,6 +110,11 @@ func TestDashboardAssetRoutesServeSplitAssets(t *testing.T) {
 			path:        "/assets/dashboard.js",
 			contentType: "javascript",
 			bodySnippet: `window.location.replace("/login")`,
+		},
+		{
+			path:        "/assets/dashboard.js",
+			contentType: "javascript",
+			bodySnippet: `data-action="cancel-import-job"`,
 		},
 		{
 			path:        "/assets/admin.js",

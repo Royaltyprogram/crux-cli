@@ -38,6 +38,13 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.POST("/config-snapshots", r.uploadConfigSnapshot)
 	api.GET("/config-snapshots", r.listConfigSnapshots)
 	api.POST("/session-summaries", r.uploadSessionSummary)
+	api.POST("/session-summaries/batch", r.uploadSessionSummaryBatch)
+	api.POST("/session-import-jobs", r.createSessionImportJob)
+	api.GET("/session-import-jobs", r.listSessionImportJobs)
+	api.POST("/session-import-jobs/:job_id/chunks", r.appendSessionImportJobChunk)
+	api.POST("/session-import-jobs/:job_id/complete", r.completeSessionImportJob)
+	api.POST("/session-import-jobs/:job_id/cancel", r.cancelSessionImportJob)
+	api.GET("/session-import-jobs/:job_id", r.getSessionImportJob)
 	api.GET("/session-summaries", r.listSessionSummaries)
 	api.GET("/projects", r.listProjects)
 	api.GET("/reports", r.listReports)
@@ -172,6 +179,58 @@ func (r *AnalyticsRoute) uploadSessionSummary(c *echo.Context) error {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.UploadSessionSummary(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) uploadSessionSummaryBatch(c *echo.Context) error {
+	var req request.SessionSummaryBatchReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.UploadSessionSummaries(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) createSessionImportJob(c *echo.Context) error {
+	var req request.SessionImportJobCreateReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.CreateSessionImportJob(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) listSessionImportJobs(c *echo.Context) error {
+	var req request.SessionImportJobListReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.ListSessionImportJobs(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) appendSessionImportJobChunk(c *echo.Context) error {
+	var req request.SessionImportJobChunkReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.AppendSessionImportJobChunk(c.Request().Context(), c.Param("job_id"), &req))
+}
+
+func (r *AnalyticsRoute) completeSessionImportJob(c *echo.Context) error {
+	var req request.SessionImportJobCompleteReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.CompleteSessionImportJob(c.Request().Context(), c.Param("job_id"), &req))
+}
+
+func (r *AnalyticsRoute) cancelSessionImportJob(c *echo.Context) error {
+	var req request.SessionImportJobCancelReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.CancelSessionImportJob(c.Request().Context(), c.Param("job_id"), &req))
+}
+
+func (r *AnalyticsRoute) getSessionImportJob(c *echo.Context) error {
+	return common.WrapResp(c)(r.AnalyticsService.GetSessionImportJob(c.Request().Context(), c.Param("job_id")))
 }
 
 func (r *AnalyticsRoute) listSessionSummaries(c *echo.Context) error {

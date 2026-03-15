@@ -145,6 +145,63 @@ func TestNewEchoRateLimitsAPIWhenConfigured(t *testing.T) {
 	secondRec := httptest.NewRecorder()
 	echo.ServeHTTP(secondRec, second)
 	require.Equal(t, http.StatusTooManyRequests, secondRec.Code)
+
+	var payload struct {
+		Code    int    `json:"code"`
+		Message string `json:"msg"`
+	}
+	require.NoError(t, json.Unmarshal(secondRec.Body.Bytes(), &payload))
+	require.Equal(t, 429, payload.Code)
+	require.Equal(t, "Too Many Request", payload.Message)
+}
+
+func TestNewEchoSeparatesBulkImportRateLimiters(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	conf.HTTP.RateLimitPerMinute = 1
+	conf.HTTP.BulkImportRateLimitPerMinute = 2
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	echo, err := NewEcho(conf, slog.Default(), store)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
+	})
+	engine := NewHttpEngine(Options{
+		Router: echo,
+		Conf:   conf,
+		Analytics: controller.NewAnalyticsRoute(controller.Options{
+			AnalyticsService: analyticsSvc,
+		}),
+	})
+	engine.RegisterRoute()
+
+	firstAPIReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/start", nil)
+	firstAPIRec := httptest.NewRecorder()
+	echo.ServeHTTP(firstAPIRec, firstAPIReq)
+	require.Equal(t, http.StatusSeeOther, firstAPIRec.Code)
+
+	secondAPIReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/start", nil)
+	secondAPIRec := httptest.NewRecorder()
+	echo.ServeHTTP(secondAPIRec, secondAPIReq)
+	require.Equal(t, http.StatusTooManyRequests, secondAPIRec.Code)
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/session-import-jobs", nil)
+		rec := httptest.NewRecorder()
+		echo.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusUnauthorized, rec.Code, "bulk request %d should use its own bucket", attempt)
+	}
+
+	thirdBulkReq := httptest.NewRequest(http.MethodPost, "/api/v1/session-import-jobs", nil)
+	thirdBulkRec := httptest.NewRecorder()
+	echo.ServeHTTP(thirdBulkRec, thirdBulkReq)
+	require.Equal(t, http.StatusTooManyRequests, thirdBulkRec.Code)
 }
 
 func TestNewEchoRejectsRequestsOutsideAllowedCIDRs(t *testing.T) {

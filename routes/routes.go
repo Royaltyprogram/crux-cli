@@ -72,31 +72,56 @@ func NewEcho(conf *configs.Config, logger *slog.Logger, store *service.Analytics
 			MaxAge:           int((12 * time.Hour).Seconds()),
 		}))
 	}
+	bulkImportLimitPerMinute := conf.HTTP.BulkImportRateLimitPerMinute
+	if bulkImportLimitPerMinute <= 0 {
+		bulkImportLimitPerMinute = conf.HTTP.RateLimitPerMinute
+	}
 	if conf.HTTP.RateLimitPerMinute > 0 {
-		ratePerSecond := float64(conf.HTTP.RateLimitPerMinute) / 60.0
-		burst := conf.HTTP.RateLimitPerMinute
-		if burst < 1 {
-			burst = 1
-		}
-		middlewareChain = append(middlewareChain, echoMiddleware.RateLimiterWithConfig(echoMiddleware.RateLimiterConfig{
-			Store: echoMiddleware.NewRateLimiterMemoryStoreWithConfig(echoMiddleware.RateLimiterMemoryStoreConfig{
-				Rate:      ratePerSecond,
-				Burst:     burst,
-				ExpiresIn: 5 * time.Minute,
-			}),
-			Skipper: func(c *echo.Context) bool {
-				path := c.Request().URL.Path
-				if path == "/health" || path == "/healthz" || path == "/readyz" {
-					return true
-				}
-				return !strings.HasPrefix(path, "/api/")
-			},
+		middlewareChain = append(middlewareChain, newMemoryRateLimiter(conf.HTTP.RateLimitPerMinute, func(c *echo.Context) bool {
+			path := c.Request().URL.Path
+			if path == "/health" || path == "/healthz" || path == "/readyz" {
+				return true
+			}
+			if !strings.HasPrefix(path, "/api/") {
+				return true
+			}
+			return isBulkImportAPIPath(path)
+		}))
+	}
+	if bulkImportLimitPerMinute > 0 {
+		middlewareChain = append(middlewareChain, newMemoryRateLimiter(bulkImportLimitPerMinute, func(c *echo.Context) bool {
+			path := c.Request().URL.Path
+			return !isBulkImportAPIPath(path)
 		}))
 	}
 	middlewareChain = append(middlewareChain, middleware.RequireAPIToken(conf.App.APIToken, conf.AllowsStaticToken(), store))
 	e.Use(middlewareChain...)
 
 	return e, nil
+}
+
+func newMemoryRateLimiter(limitPerMinute int, skipper func(c *echo.Context) bool) echo.MiddlewareFunc {
+	ratePerSecond := float64(limitPerMinute) / 60.0
+	burst := limitPerMinute
+	if burst < 1 {
+		burst = 1
+	}
+	return echoMiddleware.RateLimiterWithConfig(echoMiddleware.RateLimiterConfig{
+		Store: echoMiddleware.NewRateLimiterMemoryStoreWithConfig(echoMiddleware.RateLimiterMemoryStoreConfig{
+			Rate:      ratePerSecond,
+			Burst:     burst,
+			ExpiresIn: 5 * time.Minute,
+		}),
+		Skipper: skipper,
+	})
+}
+
+func isBulkImportAPIPath(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "/api/v1/session-summaries/batch" {
+		return true
+	}
+	return strings.HasPrefix(path, "/api/v1/session-import-jobs")
 }
 
 type HttpEngine struct {

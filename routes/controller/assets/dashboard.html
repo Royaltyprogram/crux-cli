@@ -193,6 +193,32 @@
             </div>
           </section>
         </div>
+
+        <div class="section">
+          <div class="section-header">
+            <div class="section-kicker">Import history</div>
+            <div class="section-title">Backfill jobs and failure drill-down</div>
+            <div class="section-desc" id="importHistorySummary">Recent async import jobs and the latest failure summaries for this workspace.</div>
+          </div>
+          <div class="insight-grid">
+            <div class="insight-card">
+              <div class="section-header compact">
+                <div class="section-kicker">Recent jobs</div>
+                <div class="section-title">Latest import runs</div>
+                <div class="section-desc">Recent async backfill jobs across queued, running, and terminal states.</div>
+              </div>
+              <div class="list compact-list" id="importHistoryList"></div>
+            </div>
+            <div class="insight-card">
+              <div class="section-header compact">
+                <div class="section-kicker">Failure drill-down</div>
+                <div class="section-title">Recent failed imports</div>
+                <div class="section-desc" id="importFailureSummary">Latest degraded import jobs and the failed sessions inside them.</div>
+              </div>
+              <div class="list compact-list" id="importFailureList"></div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ── Usage Analytics (was Trends) ── -->

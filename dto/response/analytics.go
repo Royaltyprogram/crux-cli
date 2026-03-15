@@ -146,6 +146,79 @@ type SessionIngestResp struct {
 	ResearchStatus  *ReportResearchStatusResp `json:"research_status,omitempty"`
 }
 
+type SessionBatchIngestItemResp struct {
+	SessionID    string     `json:"session_id"`
+	ProjectID    string     `json:"project_id,omitempty"`
+	Status       string     `json:"status"`
+	RecordedAt   *time.Time `json:"recorded_at,omitempty"`
+	Error        string     `json:"error,omitempty"`
+	HTTPStatus   int        `json:"http_status,omitempty"`
+	APIErrorCode int        `json:"api_error_code,omitempty"`
+}
+
+type SessionBatchIngestResp struct {
+	SchemaVersion   string                       `json:"schema_version"`
+	ProjectID       string                       `json:"project_id"`
+	Accepted        int                          `json:"accepted"`
+	Uploaded        int                          `json:"uploaded"`
+	Updated         int                          `json:"updated"`
+	Failed          int                          `json:"failed"`
+	ReportCount     int                          `json:"report_count"`
+	LatestReportIDs []string                     `json:"latest_report_ids"`
+	Items           []SessionBatchIngestItemResp `json:"items"`
+	ResearchStatus  *ReportResearchStatusResp    `json:"research_status,omitempty"`
+}
+
+type SessionImportJobFailureResp struct {
+	SessionID    string `json:"session_id"`
+	Error        string `json:"error"`
+	HTTPStatus   int    `json:"http_status,omitempty"`
+	APIErrorCode int    `json:"api_error_code,omitempty"`
+}
+
+type SessionImportJobResp struct {
+	SchemaVersion     string                        `json:"schema_version"`
+	JobID             string                        `json:"job_id"`
+	ProjectID         string                        `json:"project_id"`
+	Status            string                        `json:"status"`
+	Reused            bool                          `json:"reused,omitempty"`
+	TotalSessions     int                           `json:"total_sessions"`
+	ReceivedSessions  int                           `json:"received_sessions"`
+	ProcessedSessions int                           `json:"processed_sessions"`
+	UploadedSessions  int                           `json:"uploaded_sessions"`
+	UpdatedSessions   int                           `json:"updated_sessions"`
+	FailedSessions    int                           `json:"failed_sessions"`
+	CreatedAt         time.Time                     `json:"created_at"`
+	StartedAt         *time.Time                    `json:"started_at,omitempty"`
+	CompletedAt       *time.Time                    `json:"completed_at,omitempty"`
+	LastError         string                        `json:"last_error,omitempty"`
+	Failures          []SessionImportJobFailureResp `json:"failures,omitempty"`
+	ResearchStatus    *ReportResearchStatusResp     `json:"research_status,omitempty"`
+}
+
+type SessionImportJobListResp struct {
+	Items      []SessionImportJobResp `json:"items"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+}
+
+type SessionImportJobMetricsResp struct {
+	CreatedJobs         int        `json:"created_jobs"`
+	ReceivingJobs       int        `json:"receiving_jobs"`
+	QueuedJobs          int        `json:"queued_jobs"`
+	RunningJobs         int        `json:"running_jobs"`
+	SucceededJobs       int        `json:"succeeded_jobs"`
+	PartiallyFailedJobs int        `json:"partially_failed_jobs"`
+	FailedJobs          int        `json:"failed_jobs"`
+	CanceledJobs        int        `json:"canceled_jobs"`
+	ProcessedSessions   int        `json:"processed_sessions"`
+	UploadedSessions    int        `json:"uploaded_sessions"`
+	FailedSessions      int        `json:"failed_sessions"`
+	FailureRate         float64    `json:"failure_rate"`
+	AvgDurationMS       int        `json:"avg_duration_ms"`
+	ThroughputPerMinute float64    `json:"throughput_per_minute"`
+	LastCompletedAt     *time.Time `json:"last_completed_at,omitempty"`
+}
+
 type SessionSummaryItem struct {
 	ID                     string         `json:"id"`
 	ProjectID              string         `json:"project_id"`
@@ -291,28 +364,30 @@ type ReportResearchStatusResp struct {
 }
 
 type DashboardOverviewResp struct {
-	SchemaVersion             string                    `json:"schema_version"`
-	OrgID                     string                    `json:"org_id"`
-	TotalDevices              int                       `json:"total_devices"`
-	TotalProjects             int                       `json:"total_projects"`
-	TotalSessions             int                       `json:"total_sessions"`
-	ActiveReports             int                       `json:"active_reports"`
-	TotalInputTokens          int                       `json:"total_input_tokens"`
-	TotalOutputTokens         int                       `json:"total_output_tokens"`
-	TotalTokens               int                       `json:"total_tokens"`
-	AvgInputTokensPerQuery    float64                   `json:"avg_input_tokens_per_query"`
-	AvgOutputTokensPerQuery   float64                   `json:"avg_output_tokens_per_query"`
-	AvgTokensPerQuery         float64                   `json:"avg_tokens_per_query"`
-	AvgInputTokensPerSession  float64                   `json:"avg_input_tokens_per_session"`
-	AvgOutputTokensPerSession float64                   `json:"avg_output_tokens_per_session"`
-	AvgTokensPerSession       float64                   `json:"avg_tokens_per_session"`
-	AvgQueriesPerSession      float64                   `json:"avg_queries_per_session"`
-	ActionSummary             string                    `json:"action_summary"`
-	OutcomeSummary            string                    `json:"outcome_summary"`
-	ResearchProvider          string                    `json:"research_provider"`
-	ResearchMode              string                    `json:"research_mode"`
-	LastIngestedAt            *time.Time                `json:"last_ingested_at"`
-	ResearchStatus            *ReportResearchStatusResp `json:"research_status,omitempty"`
+	SchemaVersion             string                       `json:"schema_version"`
+	OrgID                     string                       `json:"org_id"`
+	TotalDevices              int                          `json:"total_devices"`
+	TotalProjects             int                          `json:"total_projects"`
+	TotalSessions             int                          `json:"total_sessions"`
+	ActiveReports             int                          `json:"active_reports"`
+	TotalInputTokens          int                          `json:"total_input_tokens"`
+	TotalOutputTokens         int                          `json:"total_output_tokens"`
+	TotalTokens               int                          `json:"total_tokens"`
+	AvgInputTokensPerQuery    float64                      `json:"avg_input_tokens_per_query"`
+	AvgOutputTokensPerQuery   float64                      `json:"avg_output_tokens_per_query"`
+	AvgTokensPerQuery         float64                      `json:"avg_tokens_per_query"`
+	AvgInputTokensPerSession  float64                      `json:"avg_input_tokens_per_session"`
+	AvgOutputTokensPerSession float64                      `json:"avg_output_tokens_per_session"`
+	AvgTokensPerSession       float64                      `json:"avg_tokens_per_session"`
+	AvgQueriesPerSession      float64                      `json:"avg_queries_per_session"`
+	ActionSummary             string                       `json:"action_summary"`
+	OutcomeSummary            string                       `json:"outcome_summary"`
+	ResearchProvider          string                       `json:"research_provider"`
+	ResearchMode              string                       `json:"research_mode"`
+	LastIngestedAt            *time.Time                   `json:"last_ingested_at"`
+	ResearchStatus            *ReportResearchStatusResp    `json:"research_status,omitempty"`
+	ActiveImportJob           *SessionImportJobResp        `json:"active_import_job,omitempty"`
+	ImportJobMetrics          *SessionImportJobMetricsResp `json:"import_job_metrics,omitempty"`
 }
 
 type DashboardProjectInsightDayResp struct {

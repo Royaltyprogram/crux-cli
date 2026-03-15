@@ -92,9 +92,36 @@ type SessionSummaryReq struct {
 	Timestamp              time.Time      `json:"timestamp"`
 }
 
+type SessionSummaryBatchReq struct {
+	ProjectID string              `json:"project_id" validate:"required"`
+	Sessions  []SessionSummaryReq `json:"sessions" validate:"required,min=1,max=25"`
+}
+
+type SessionImportJobCreateReq struct {
+	ProjectID     string `json:"project_id" validate:"required"`
+	TotalSessions int    `json:"total_sessions"`
+}
+
+type SessionImportJobChunkReq struct {
+	Sessions []SessionSummaryReq `json:"sessions" validate:"required,min=1,max=25"`
+}
+
+type SessionImportJobCompleteReq struct{}
+
+type SessionImportJobCancelReq struct{}
+
 type SessionSummaryListReq struct {
 	ProjectID string `query:"project_id"`
 	Limit     int    `query:"limit"`
+}
+
+type SessionImportJobListReq struct {
+	ProjectID  string `query:"project_id"`
+	AgentID    string `query:"agent_id"`
+	Status     string `query:"status"`
+	FailedOnly bool   `query:"failed_only"`
+	Cursor     string `query:"cursor"`
+	Limit      int    `query:"limit"`
 }
 
 type ReportListReq struct {

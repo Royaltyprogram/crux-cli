@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -21,10 +22,27 @@ type AnalyticsService struct {
 	reportRefreshMu   sync.Mutex
 	reportRefreshLive map[string]bool
 	reportRefreshNext map[string]*reportRefreshJob
+	sessionImportMu   sync.Mutex
+	sessionImportLive map[string]bool
 }
 
 const sharedWorkspaceName = "Shared workspace"
 const defaultReportMinSessions = 10
+
+const (
+	sessionImportJobStatusReceiving = "receiving_chunks"
+	sessionImportJobStatusQueued    = "queued"
+	sessionImportJobStatusRunning   = "running"
+	sessionImportJobStatusSucceeded = "succeeded"
+	sessionImportJobStatusPartial   = "partially_failed"
+	sessionImportJobStatusFailed    = "failed"
+	sessionImportJobStatusCanceled  = "canceled"
+)
+
+const (
+	sessionImportJobActiveTTL    = 24 * time.Hour
+	sessionImportJobRetentionTTL = 7 * 24 * time.Hour
+)
 
 func NewAnalyticsService(opt Options) *AnalyticsService {
 	reportMinSessions := opt.ReportMinSessions
@@ -37,6 +55,7 @@ func NewAnalyticsService(opt Options) *AnalyticsService {
 		reportMinSessions: reportMinSessions,
 		reportRefreshLive: make(map[string]bool),
 		reportRefreshNext: make(map[string]*reportRefreshJob),
+		sessionImportLive: make(map[string]bool),
 	}
 }
 
@@ -847,31 +866,931 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 	}
 
 	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
 
 	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
+		return nil, err
+	}
+	req.ProjectID = project.ID
+	previousSessionCount := len(s.AnalyticsStore.sessionSummaries[project.ID])
+
+	resp, _, err := s.ingestSessionSummaryLocked(project, req)
+	if err != nil {
+		return nil, err
+	}
+
+	reports, refreshJob := s.prepareReportRefreshLocked(project, resp.SessionID, previousSessionCount)
+	resp.ReportCount = len(reports)
+	resp.LatestReportIDs = reportIDs(reports)
+	resp.ResearchStatus = cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[project.ID])
+
+	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+		ProjectID: req.ProjectID,
+		Type:      "session.ingested",
+		Message:   "session summary uploaded from local collector",
+		Result:    "success",
+		Reason:    "collector uploaded a session summary",
+	})
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	s.enqueueReportRefresh(refreshJob)
+	return resp, nil
+}
+
+func (s *AnalyticsService) UploadSessionSummaries(ctx context.Context, req *request.SessionSummaryBatchReq) (*response.SessionBatchIngestResp, error) {
+	if _, err := s.requireDeviceAccessIdentity(ctx); err != nil {
+		return nil, err
+	}
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
+		return nil, err
+	}
+	req.ProjectID = project.ID
+
+	resp := &response.SessionBatchIngestResp{
+		SchemaVersion: reportAPISchemaVersion,
+		ProjectID:     project.ID,
+		Accepted:      len(req.Sessions),
+		Items:         make([]response.SessionBatchIngestItemResp, 0, len(req.Sessions)),
+	}
+
+	previousSessionCount := len(s.AnalyticsStore.sessionSummaries[project.ID])
+	lastSuccessfulSessionID := ""
+	successCount := 0
+	for _, itemReq := range req.Sessions {
+		itemReq.ProjectID = project.ID
+		itemResp, updated, err := s.ingestSessionSummaryLocked(project, &itemReq)
+		if err != nil {
+			if ecode.HttpCode(err) >= http.StatusInternalServerError {
+				return nil, err
+			}
+			resp.Failed++
+			resp.Items = append(resp.Items, newSessionBatchFailureItem(itemReq.SessionID, err))
+			continue
+		}
+
+		lastSuccessfulSessionID = itemResp.SessionID
+		successCount++
+		if updated {
+			resp.Updated++
+		} else {
+			resp.Uploaded++
+		}
+
+		recordedAt := itemResp.RecordedAt
+		status := "uploaded"
+		if updated {
+			status = "updated"
+		}
+		resp.Items = append(resp.Items, response.SessionBatchIngestItemResp{
+			SessionID:  itemResp.SessionID,
+			ProjectID:  itemResp.ProjectID,
+			Status:     status,
+			RecordedAt: &recordedAt,
+		})
+	}
+
+	reports := s.currentReportsLocked(project.ID)
+	var refreshJob *reportRefreshJob
+	if successCount > 0 {
+		reports, refreshJob = s.prepareReportRefreshLocked(project, lastSuccessfulSessionID, previousSessionCount)
+		s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+			ProjectID: req.ProjectID,
+			Type:      "session.batch_ingested",
+			Message:   fmt.Sprintf("%d session summaries uploaded from local collector", successCount),
+			Result:    "success",
+			Reason:    "collector uploaded session summaries in batch",
+		})
+		if err := s.AnalyticsStore.persistLocked(); err != nil {
+			return nil, err
+		}
+	}
+
+	resp.ReportCount = len(reports)
+	resp.LatestReportIDs = reportIDs(reports)
+	resp.ResearchStatus = cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[project.ID])
+
+	s.enqueueReportRefresh(refreshJob)
+	return resp, nil
+}
+
+func (s *AnalyticsService) CreateSessionImportJob(ctx context.Context, req *request.SessionImportJobCreateReq) (*response.SessionImportJobResp, error) {
+	identity, err := s.requireDeviceAccessIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		return nil, err
+	}
+
+	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
+		return nil, err
+	}
+	totalSessions := maxInt(req.TotalSessions, 0)
+	if existing := s.findActiveSessionImportJobLocked(project.ID, identity.AgentID); existing != nil {
+		s.touchSessionImportJob(existing, time.Now().UTC())
+		if totalSessions > existing.TotalSessions {
+			existing.TotalSessions = totalSessions
+		}
+		if err := s.AnalyticsStore.persistLocked(); err != nil {
+			return nil, err
+		}
+		return s.toSessionImportJobRespLocked(existing, true), nil
+	}
+
+	now := time.Now().UTC()
+	job := &SessionImportJob{
+		ID:            s.AnalyticsStore.nextID("import"),
+		ProjectID:     project.ID,
+		OrgID:         project.OrgID,
+		AgentID:       identity.AgentID,
+		Status:        sessionImportJobStatusReceiving,
+		TotalSessions: totalSessions,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Failures:      make([]SessionImportJobFailure, 0),
+	}
+	s.AnalyticsStore.sessionImportJobs[job.ID] = job
+	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+		ProjectID: project.ID,
+		Type:      "session_import_job.created",
+		Message:   "session import job created by local collector",
+		Result:    "success",
+		Reason:    "collector started an async session import job",
+	})
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+	return s.toSessionImportJobRespLocked(job, false), nil
+}
+
+func (s *AnalyticsService) AppendSessionImportJobChunk(ctx context.Context, jobID string, req *request.SessionImportJobChunkReq) (*response.SessionImportJobResp, error) {
+	if _, err := s.requireDeviceAccessIdentity(ctx); err != nil {
+		return nil, err
+	}
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		return nil, err
+	}
+
+	job, project, err := s.resolveSessionImportJobLocked(ctx, jobID, true)
+	if err != nil {
+		return nil, err
+	}
+	if job.Status != sessionImportJobStatusReceiving {
+		return nil, ecode.Forbidden(1012, "session import job is not accepting chunks")
+	}
+
+	for _, item := range req.Sessions {
+		prepared := s.sessionImportJobSessionFromRequest(item)
+		s.upsertSessionImportJobSession(job, prepared)
+	}
+	s.touchSessionImportJob(job, time.Now().UTC())
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+	_ = project
+	return s.toSessionImportJobRespLocked(job, false), nil
+}
+
+func (s *AnalyticsService) CompleteSessionImportJob(ctx context.Context, jobID string, _ *request.SessionImportJobCompleteReq) (*response.SessionImportJobResp, error) {
+	if _, err := s.requireDeviceAccessIdentity(ctx); err != nil {
+		return nil, err
+	}
+
+	s.AnalyticsStore.mu.Lock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		s.AnalyticsStore.mu.Unlock()
+		return nil, err
+	}
+	job, project, err := s.resolveSessionImportJobLocked(ctx, jobID, true)
 	if err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return nil, err
 	}
-	if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
+	if job.Status != sessionImportJobStatusReceiving {
+		resp := s.toSessionImportJobRespLocked(job, false)
+		s.AnalyticsStore.mu.Unlock()
+		return resp, nil
+	}
+	if job.ReceivedSessions == 0 {
+		s.AnalyticsStore.mu.Unlock()
+		return nil, ecode.NewInvalidParamsErr("session import job has no uploaded sessions")
+	}
+
+	job.Status = sessionImportJobStatusQueued
+	s.touchSessionImportJob(job, time.Now().UTC())
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return nil, err
 	}
+	resp := s.toSessionImportJobRespLocked(job, false)
+	s.AnalyticsStore.mu.Unlock()
+
+	s.enqueueSessionImportJob(job.ID)
+	s.appendSessionImportAuditAsync(project.OrgID, project.ID, "session_import_job.queued", "session import job queued", "collector finished uploading async import chunks")
+	return resp, nil
+}
+
+func (s *AnalyticsService) CancelSessionImportJob(ctx context.Context, jobID string, _ *request.SessionImportJobCancelReq) (*response.SessionImportJobResp, error) {
+	if _, err := s.requireDeviceAccessIdentity(ctx); err != nil {
+		return nil, err
+	}
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		return nil, err
+	}
+
+	job, project, err := s.resolveSessionImportJobLocked(ctx, jobID, true)
+	if err != nil {
+		return nil, err
+	}
+	if !isActiveSessionImportJobStatus(job.Status) {
+		return s.toSessionImportJobRespLocked(job, false), nil
+	}
+
+	now := time.Now().UTC()
+	job.Status = sessionImportJobStatusCanceled
+	job.LastError = "session import job canceled"
+	job.CompletedAt = cloneTime(&now)
+	job.Sessions = nil
+	s.touchSessionImportJob(job, now)
+	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+		ProjectID: project.ID,
+		Type:      "session_import_job.canceled",
+		Message:   "session import job canceled",
+		Result:    "success",
+		Reason:    "collector canceled the async session import job",
+	})
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+	return s.toSessionImportJobRespLocked(job, false), nil
+}
+
+func (s *AnalyticsService) GetSessionImportJob(ctx context.Context, jobID string) (*response.SessionImportJobResp, error) {
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		return nil, err
+	}
+
+	jobID = strings.TrimSpace(jobID)
+	job, ok := s.AnalyticsStore.sessionImportJobs[jobID]
+	if !ok || job == nil {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown session_import_job"))
+	}
+	project, ok := s.AnalyticsStore.projects[job.ProjectID]
+	if !ok || project == nil {
+		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown workspace"))
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
+	return s.toSessionImportJobRespLocked(job, false), nil
+}
+
+func (s *AnalyticsService) ListSessionImportJobs(ctx context.Context, req *request.SessionImportJobListReq) (*response.SessionImportJobListResp, error) {
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		return nil, err
+	}
+
+	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
 	req.ProjectID = project.ID
+
+	statusFilter := strings.TrimSpace(req.Status)
+	agentFilter := strings.TrimSpace(req.AgentID)
+	cursor := strings.TrimSpace(req.Cursor)
+	limit := req.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	items := make([]*SessionImportJob, 0)
+	for _, job := range s.AnalyticsStore.sessionImportJobs {
+		if job == nil || strings.TrimSpace(job.ProjectID) != project.ID {
+			continue
+		}
+		if statusFilter != "" && strings.TrimSpace(job.Status) != statusFilter {
+			continue
+		}
+		if agentFilter != "" && strings.TrimSpace(job.AgentID) != agentFilter {
+			continue
+		}
+		if req.FailedOnly && !isFailedSessionImportJob(job) {
+			continue
+		}
+		items = append(items, job)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	if cursor != "" {
+		cursorIdx := -1
+		for idx, item := range items {
+			if strings.TrimSpace(item.ID) == cursor {
+				cursorIdx = idx
+				break
+			}
+		}
+		if cursorIdx < 0 {
+			return nil, ecode.NewInvalidParamsErr("unknown session_import_job cursor")
+		}
+		items = items[cursorIdx+1:]
+	}
+
+	nextCursor := ""
+	if len(items) > limit {
+		nextCursor = strings.TrimSpace(items[limit-1].ID)
+		items = items[:limit]
+	}
+
+	respItems := make([]response.SessionImportJobResp, 0, len(items))
+	for _, item := range items {
+		if converted := s.toSessionImportJobRespLocked(item, false); converted != nil {
+			respItems = append(respItems, *converted)
+		}
+	}
+	return &response.SessionImportJobListResp{
+		Items:      respItems,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+func (s *AnalyticsService) findActiveSessionImportJobLocked(projectID, agentID string) *SessionImportJob {
+	projectID = strings.TrimSpace(projectID)
+	agentID = strings.TrimSpace(agentID)
+	for _, job := range s.AnalyticsStore.sessionImportJobs {
+		if job == nil {
+			continue
+		}
+		if strings.TrimSpace(job.ProjectID) != projectID {
+			continue
+		}
+		if agentID != "" && strings.TrimSpace(job.AgentID) != agentID {
+			continue
+		}
+		switch strings.TrimSpace(job.Status) {
+		case sessionImportJobStatusReceiving, sessionImportJobStatusQueued, sessionImportJobStatusRunning:
+			return job
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsService) findNewestActiveSessionImportJobForProjectLocked(projectID string) *SessionImportJob {
+	projectID = strings.TrimSpace(projectID)
+	var latest *SessionImportJob
+	for _, job := range s.AnalyticsStore.sessionImportJobs {
+		if job == nil || strings.TrimSpace(job.ProjectID) != projectID {
+			continue
+		}
+		if !isActiveSessionImportJobStatus(job.Status) {
+			continue
+		}
+		if isSessionImportJobNewer(job, latest) {
+			latest = job
+		}
+	}
+	return latest
+}
+
+func isActiveSessionImportJobStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case sessionImportJobStatusReceiving, sessionImportJobStatusQueued, sessionImportJobStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSessionImportJobNewer(candidate, current *SessionImportJob) bool {
+	if candidate == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	if candidate.CreatedAt.Equal(current.CreatedAt) {
+		return candidate.ID > current.ID
+	}
+	return candidate.CreatedAt.After(current.CreatedAt)
+}
+
+func isFailedSessionImportJob(job *SessionImportJob) bool {
+	if job == nil {
+		return false
+	}
+	switch strings.TrimSpace(job.Status) {
+	case sessionImportJobStatusFailed, sessionImportJobStatusPartial:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *AnalyticsService) upsertSessionImportJobSession(job *SessionImportJob, item SessionImportJobSession) {
+	if job == nil {
+		return
+	}
+	sessionID := strings.TrimSpace(item.SessionID)
+	if sessionID != "" {
+		for idx := range job.Sessions {
+			if strings.TrimSpace(job.Sessions[idx].SessionID) == sessionID {
+				job.Sessions[idx] = item
+				job.ReceivedSessions = len(job.Sessions)
+				s.touchSessionImportJob(job, time.Now().UTC())
+				return
+			}
+		}
+	}
+	job.Sessions = append(job.Sessions, item)
+	job.ReceivedSessions = len(job.Sessions)
+	s.touchSessionImportJob(job, time.Now().UTC())
+}
+
+func (s *AnalyticsService) resolveSessionImportJobLocked(ctx context.Context, jobID string, requireAgentBinding bool) (*SessionImportJob, *Project, error) {
+	jobID = strings.TrimSpace(jobID)
+	job, ok := s.AnalyticsStore.sessionImportJobs[jobID]
+	if !ok || job == nil {
+		return nil, nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown session_import_job"))
+	}
+	project, ok := s.AnalyticsStore.projects[job.ProjectID]
+	if !ok || project == nil {
+		return nil, nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown workspace"))
+	}
+	if requireAgentBinding {
+		if err := s.authorizeProjectAgentBinding(ctx, project); err != nil {
+			return nil, nil, err
+		}
+	} else if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, nil, err
+	}
+	return job, project, nil
+}
+
+func (s *AnalyticsService) touchSessionImportJob(job *SessionImportJob, now time.Time) {
+	if job == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	job.UpdatedAt = now
+}
+
+func (s *AnalyticsService) cleanupExpiredSessionImportJobsLocked(now time.Time) error {
+	changed := false
+	for id, job := range s.AnalyticsStore.sessionImportJobs {
+		if job == nil {
+			delete(s.AnalyticsStore.sessionImportJobs, id)
+			changed = true
+			continue
+		}
+		lastActivity := job.UpdatedAt
+		if lastActivity.IsZero() {
+			lastActivity = job.CreatedAt
+		}
+		if isActiveSessionImportJobStatus(job.Status) && now.Sub(lastActivity) >= sessionImportJobActiveTTL {
+			job.Status = sessionImportJobStatusCanceled
+			job.LastError = "session import job expired before completion"
+			job.CompletedAt = cloneTime(&now)
+			job.Sessions = nil
+			s.touchSessionImportJob(job, now)
+			changed = true
+			continue
+		}
+		if job.CompletedAt != nil && now.Sub(job.CompletedAt.UTC()) >= sessionImportJobRetentionTTL {
+			delete(s.AnalyticsStore.sessionImportJobs, id)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.AnalyticsStore.persistLocked()
+}
+
+func (s *AnalyticsService) buildSessionImportJobMetricsLocked(orgID string) *response.SessionImportJobMetricsResp {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return nil
+	}
+
+	metrics := &response.SessionImportJobMetricsResp{}
+	var (
+		durationSamples           int
+		durationTotalMS           int
+		throughputDurationMinutes float64
+		throughputProcessed       int
+		lastCompletedAt           *time.Time
+	)
+	for _, job := range s.AnalyticsStore.sessionImportJobs {
+		if job == nil || strings.TrimSpace(job.OrgID) != orgID {
+			continue
+		}
+		metrics.CreatedJobs++
+		metrics.ProcessedSessions += job.ProcessedSessions
+		metrics.UploadedSessions += job.UploadedSessions + job.UpdatedSessions
+		metrics.FailedSessions += job.FailedSessions
+
+		switch strings.TrimSpace(job.Status) {
+		case sessionImportJobStatusReceiving:
+			metrics.ReceivingJobs++
+		case sessionImportJobStatusQueued:
+			metrics.QueuedJobs++
+		case sessionImportJobStatusRunning:
+			metrics.RunningJobs++
+		case sessionImportJobStatusSucceeded:
+			metrics.SucceededJobs++
+		case sessionImportJobStatusPartial:
+			metrics.PartiallyFailedJobs++
+		case sessionImportJobStatusFailed:
+			metrics.FailedJobs++
+		case sessionImportJobStatusCanceled:
+			metrics.CanceledJobs++
+		}
+
+		if job.StartedAt != nil && job.CompletedAt != nil && !job.CompletedAt.Before(*job.StartedAt) {
+			duration := job.CompletedAt.Sub(job.StartedAt.UTC())
+			durationMS := int(duration / time.Millisecond)
+			if durationMS > 0 {
+				durationSamples++
+				durationTotalMS += durationMS
+				throughputDurationMinutes += duration.Minutes()
+				throughputProcessed += job.ProcessedSessions
+			}
+		}
+		if job.CompletedAt != nil && (lastCompletedAt == nil || job.CompletedAt.After(*lastCompletedAt)) {
+			completedAt := job.CompletedAt.UTC()
+			lastCompletedAt = &completedAt
+		}
+	}
+	if metrics.CreatedJobs == 0 {
+		return nil
+	}
+	if metrics.ProcessedSessions > 0 {
+		metrics.FailureRate = safeDiv(float64(metrics.FailedSessions), float64(metrics.ProcessedSessions))
+	}
+	if durationSamples > 0 {
+		metrics.AvgDurationMS = durationTotalMS / durationSamples
+		metrics.ThroughputPerMinute = safeDiv(float64(throughputProcessed), throughputDurationMinutes)
+	}
+	metrics.LastCompletedAt = lastCompletedAt
+	return metrics
+}
+
+func (s *AnalyticsService) enqueueSessionImportJob(jobID string) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return
+	}
+
+	s.sessionImportMu.Lock()
+	if s.sessionImportLive[jobID] {
+		s.sessionImportMu.Unlock()
+		return
+	}
+	s.sessionImportLive[jobID] = true
+	s.sessionImportMu.Unlock()
+
+	go func(id string) {
+		defer func() {
+			s.sessionImportMu.Lock()
+			delete(s.sessionImportLive, id)
+			s.sessionImportMu.Unlock()
+		}()
+		s.runSessionImportJob(id)
+	}(jobID)
+}
+
+func (s *AnalyticsService) runSessionImportJob(jobID string) {
+	s.AnalyticsStore.mu.Lock()
+	job, ok := s.AnalyticsStore.sessionImportJobs[jobID]
+	if !ok || job == nil {
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+	if job.Status != sessionImportJobStatusQueued && job.Status != sessionImportJobStatusRunning {
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+	project, ok := s.AnalyticsStore.projects[job.ProjectID]
+	if !ok || project == nil {
+		job.Status = sessionImportJobStatusFailed
+		job.LastError = "workspace no longer exists"
+		completedAt := time.Now().UTC()
+		job.CompletedAt = cloneTime(&completedAt)
+		s.touchSessionImportJob(job, completedAt)
+		_ = s.AnalyticsStore.persistLocked()
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+
+	startedAt := time.Now().UTC()
+	job.Status = sessionImportJobStatusRunning
+	job.StartedAt = cloneTime(&startedAt)
+	s.touchSessionImportJob(job, startedAt)
+	sessions := append([]SessionImportJobSession(nil), job.Sessions...)
+	projectID := project.ID
+	previousSessionCount := len(s.AnalyticsStore.sessionSummaries[project.ID])
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+	s.AnalyticsStore.mu.Unlock()
+
+	lastSuccessfulSessionID := ""
+	successCount := 0
+	for _, item := range sessions {
+		s.AnalyticsStore.mu.Lock()
+		job, ok := s.AnalyticsStore.sessionImportJobs[jobID]
+		if !ok || job == nil {
+			s.AnalyticsStore.mu.Unlock()
+			return
+		}
+		if strings.TrimSpace(job.Status) == sessionImportJobStatusCanceled {
+			job.Sessions = nil
+			s.touchSessionImportJob(job, time.Now().UTC())
+			_ = s.AnalyticsStore.persistLocked()
+			s.AnalyticsStore.mu.Unlock()
+			return
+		}
+		project, ok := s.AnalyticsStore.projects[projectID]
+		if !ok || project == nil {
+			job.Status = sessionImportJobStatusFailed
+			job.LastError = "workspace no longer exists"
+			completedAt := time.Now().UTC()
+			job.CompletedAt = cloneTime(&completedAt)
+			s.touchSessionImportJob(job, completedAt)
+			_ = s.AnalyticsStore.persistLocked()
+			s.AnalyticsStore.mu.Unlock()
+			return
+		}
+		req := s.sessionImportJobSessionToRequest(project.ID, item)
+		resp, updated, err := s.ingestSessionSummaryLocked(project, &req)
+		if err != nil {
+			if ecode.HttpCode(err) >= http.StatusInternalServerError {
+				job.Status = sessionImportJobStatusFailed
+				job.LastError = ecode.FromError(err).Message
+				completedAt := time.Now().UTC()
+				job.CompletedAt = cloneTime(&completedAt)
+				s.touchSessionImportJob(job, completedAt)
+				_ = s.AnalyticsStore.persistLocked()
+				s.AnalyticsStore.mu.Unlock()
+				return
+			}
+			job.FailedSessions++
+			job.ProcessedSessions++
+			job.Failures = append(job.Failures, SessionImportJobFailure{
+				SessionID:    strings.TrimSpace(req.SessionID),
+				Error:        ecode.FromError(err).Message,
+				HTTPStatus:   ecode.HttpCode(err),
+				APIErrorCode: ecode.Code(err),
+			})
+			s.touchSessionImportJob(job, time.Now().UTC())
+			s.AnalyticsStore.mu.Unlock()
+			continue
+		}
+
+		lastSuccessfulSessionID = resp.SessionID
+		successCount++
+		job.ProcessedSessions++
+		job.LastSessionID = resp.SessionID
+		if updated {
+			job.UpdatedSessions++
+		} else {
+			job.UploadedSessions++
+		}
+		s.touchSessionImportJob(job, time.Now().UTC())
+		s.AnalyticsStore.mu.Unlock()
+	}
+
+	s.AnalyticsStore.mu.Lock()
+	job, ok = s.AnalyticsStore.sessionImportJobs[jobID]
+	if !ok || job == nil {
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+	if strings.TrimSpace(job.Status) == sessionImportJobStatusCanceled {
+		job.Sessions = nil
+		s.touchSessionImportJob(job, time.Now().UTC())
+		_ = s.AnalyticsStore.persistLocked()
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+	project, ok = s.AnalyticsStore.projects[projectID]
+	if !ok || project == nil {
+		job.Status = sessionImportJobStatusFailed
+		job.LastError = "workspace no longer exists"
+		completedAt := time.Now().UTC()
+		job.CompletedAt = cloneTime(&completedAt)
+		s.touchSessionImportJob(job, completedAt)
+		_ = s.AnalyticsStore.persistLocked()
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+
+	reports := s.currentReportsLocked(project.ID)
+	var refreshJob *reportRefreshJob
+	if successCount > 0 {
+		reports, refreshJob = s.prepareReportRefreshLocked(project, lastSuccessfulSessionID, previousSessionCount)
+		s.appendAuditLocked(context.Background(), project.OrgID, auditEventInput{
+			ProjectID: project.ID,
+			Type:      "session_import_job.completed",
+			Message:   fmt.Sprintf("session import job processed %d session summaries", successCount),
+			Result:    "success",
+			Reason:    "collector uploaded session summaries through async import job",
+		})
+	}
+
+	completedAt := time.Now().UTC()
+	job.CompletedAt = cloneTime(&completedAt)
+	job.LastError = ""
+	if job.FailedSessions > 0 {
+		job.Status = sessionImportJobStatusPartial
+	} else {
+		job.Status = sessionImportJobStatusSucceeded
+	}
+	job.Sessions = nil
+	s.touchSessionImportJob(job, completedAt)
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		s.AnalyticsStore.mu.Unlock()
+		return
+	}
+	s.AnalyticsStore.mu.Unlock()
+
+	_ = reports
+	s.enqueueReportRefresh(refreshJob)
+}
+
+func (s *AnalyticsService) appendSessionImportAuditAsync(orgID, projectID, eventType, message, reason string) {
+	orgID = strings.TrimSpace(orgID)
+	projectID = strings.TrimSpace(projectID)
+	if orgID == "" {
+		return
+	}
+	go func() {
+		s.AnalyticsStore.mu.Lock()
+		defer s.AnalyticsStore.mu.Unlock()
+		s.appendAuditLocked(context.Background(), orgID, auditEventInput{
+			ProjectID: projectID,
+			Type:      eventType,
+			Message:   message,
+			Result:    "success",
+			Reason:    reason,
+		})
+		_ = s.AnalyticsStore.persistLocked()
+	}()
+}
+
+func (s *AnalyticsService) sessionImportJobSessionFromRequest(req request.SessionSummaryReq) SessionImportJobSession {
+	return SessionImportJobSession{
+		SessionID:              strings.TrimSpace(req.SessionID),
+		Tool:                   strings.TrimSpace(req.Tool),
+		TokenIn:                req.TokenIn,
+		TokenOut:               req.TokenOut,
+		CachedInputTokens:      req.CachedInputTokens,
+		ReasoningOutputTokens:  req.ReasoningOutputTokens,
+		FunctionCallCount:      req.FunctionCallCount,
+		ToolErrorCount:         req.ToolErrorCount,
+		SessionDurationMS:      req.SessionDurationMS,
+		ToolWallTimeMS:         req.ToolWallTimeMS,
+		ToolCalls:              cloneIntMap(req.ToolCalls),
+		ToolErrors:             cloneIntMap(req.ToolErrors),
+		ToolWallTimesMS:        cloneIntMap(req.ToolWallTimesMS),
+		RawQueries:             cloneStringSlice(req.RawQueries),
+		Models:                 cloneStringSlice(req.Models),
+		ModelProvider:          strings.TrimSpace(req.ModelProvider),
+		FirstResponseLatencyMS: req.FirstResponseLatencyMS,
+		AssistantResponses:     cloneStringSlice(req.AssistantResponses),
+		ReasoningSummaries:     cloneStringSlice(req.ReasoningSummaries),
+		Timestamp:              req.Timestamp,
+	}
+}
+
+func (s *AnalyticsService) sessionImportJobSessionToRequest(projectID string, item SessionImportJobSession) request.SessionSummaryReq {
+	return request.SessionSummaryReq{
+		ProjectID:              projectID,
+		SessionID:              strings.TrimSpace(item.SessionID),
+		Tool:                   strings.TrimSpace(item.Tool),
+		TokenIn:                item.TokenIn,
+		TokenOut:               item.TokenOut,
+		CachedInputTokens:      item.CachedInputTokens,
+		ReasoningOutputTokens:  item.ReasoningOutputTokens,
+		FunctionCallCount:      item.FunctionCallCount,
+		ToolErrorCount:         item.ToolErrorCount,
+		SessionDurationMS:      item.SessionDurationMS,
+		ToolWallTimeMS:         item.ToolWallTimeMS,
+		ToolCalls:              cloneIntMap(item.ToolCalls),
+		ToolErrors:             cloneIntMap(item.ToolErrors),
+		ToolWallTimesMS:        cloneIntMap(item.ToolWallTimesMS),
+		RawQueries:             cloneStringSlice(item.RawQueries),
+		Models:                 cloneStringSlice(item.Models),
+		ModelProvider:          strings.TrimSpace(item.ModelProvider),
+		FirstResponseLatencyMS: item.FirstResponseLatencyMS,
+		AssistantResponses:     cloneStringSlice(item.AssistantResponses),
+		ReasoningSummaries:     cloneStringSlice(item.ReasoningSummaries),
+		Timestamp:              item.Timestamp,
+	}
+}
+
+func (s *AnalyticsService) toSessionImportJobRespLocked(job *SessionImportJob, reused bool) *response.SessionImportJobResp {
+	if job == nil {
+		return nil
+	}
+	failures := make([]response.SessionImportJobFailureResp, 0, len(job.Failures))
+	for _, item := range job.Failures {
+		failures = append(failures, response.SessionImportJobFailureResp{
+			SessionID:    strings.TrimSpace(item.SessionID),
+			Error:        strings.TrimSpace(item.Error),
+			HTTPStatus:   item.HTTPStatus,
+			APIErrorCode: item.APIErrorCode,
+		})
+	}
+	return &response.SessionImportJobResp{
+		SchemaVersion:     reportAPISchemaVersion,
+		JobID:             job.ID,
+		ProjectID:         job.ProjectID,
+		Status:            strings.TrimSpace(job.Status),
+		Reused:            reused,
+		TotalSessions:     job.TotalSessions,
+		ReceivedSessions:  job.ReceivedSessions,
+		ProcessedSessions: job.ProcessedSessions,
+		UploadedSessions:  job.UploadedSessions,
+		UpdatedSessions:   job.UpdatedSessions,
+		FailedSessions:    job.FailedSessions,
+		CreatedAt:         job.CreatedAt,
+		StartedAt:         cloneTime(job.StartedAt),
+		CompletedAt:       cloneTime(job.CompletedAt),
+		LastError:         strings.TrimSpace(job.LastError),
+		Failures:          failures,
+		ResearchStatus:    cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[job.ProjectID]),
+	}
+}
+
+func (s *AnalyticsService) ingestSessionSummaryLocked(project *Project, req *request.SessionSummaryReq) (*response.SessionIngestResp, bool, error) {
+	if project == nil {
+		return nil, false, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("unknown project"))
+	}
+
+	tool := strings.TrimSpace(req.Tool)
+	if tool == "" {
+		return nil, false, ecode.NewInvalidParamsErr("tool is required")
+	}
 
 	recordedAt := req.Timestamp.UTC()
 	if recordedAt.IsZero() {
 		recordedAt = time.Now().UTC()
 	}
-	sessionID := req.SessionID
+	sessionID := strings.TrimSpace(req.SessionID)
 	if sessionID == "" {
 		sessionID = s.AnalyticsStore.nextID("session")
 	}
 
+	req.ProjectID = project.ID
+	req.SessionID = sessionID
+	req.Tool = tool
+
 	summary := &SessionSummary{
 		ID:                     sessionID,
-		ProjectID:              req.ProjectID,
-		Tool:                   req.Tool,
+		ProjectID:              project.ID,
+		Tool:                   tool,
 		TokenIn:                maxInt(req.TokenIn, 0),
 		TokenOut:               maxInt(req.TokenOut, 0),
 		CachedInputTokens:      maxInt(req.CachedInputTokens, 0),
@@ -893,52 +1812,55 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 	}
 
 	existingIndex := -1
-	for i, item := range s.AnalyticsStore.sessionSummaries[req.ProjectID] {
+	for i, item := range s.AnalyticsStore.sessionSummaries[project.ID] {
 		if item.ID == sessionID {
 			existingIndex = i
 			break
 		}
 	}
-	if existingIndex >= 0 {
-		s.AnalyticsStore.sessionSummaries[req.ProjectID][existingIndex] = summary
+	updated := existingIndex >= 0
+	if updated {
+		s.AnalyticsStore.sessionSummaries[project.ID][existingIndex] = summary
 	} else {
-		s.AnalyticsStore.sessionSummaries[req.ProjectID] = append(s.AnalyticsStore.sessionSummaries[req.ProjectID], summary)
+		s.AnalyticsStore.sessionSummaries[project.ID] = append(s.AnalyticsStore.sessionSummaries[project.ID], summary)
 	}
 	if project.LastIngestedAt == nil || recordedAt.After(*project.LastIngestedAt) {
 		project.LastIngestedAt = &recordedAt
 	}
 
-	reports, refreshJob := s.prepareReportRefreshLocked(project, sessionID)
+	return &response.SessionIngestResp{
+		SchemaVersion: reportAPISchemaVersion,
+		SessionID:     sessionID,
+		ProjectID:     project.ID,
+		RecordedAt:    recordedAt,
+	}, updated, nil
+}
+
+func newSessionBatchFailureItem(sessionID string, err error) response.SessionBatchIngestItemResp {
+	item := response.SessionBatchIngestItemResp{
+		SessionID: strings.TrimSpace(sessionID),
+		Status:    "failed",
+	}
+	if err == nil {
+		return item
+	}
+
+	ec := ecode.FromError(err)
+	item.Error = ec.Message
+	item.HTTPStatus = ec.HttpCode
+	item.APIErrorCode = ec.Code
+	return item
+}
+
+func reportIDs(reports []*Report) []string {
 	ids := make([]string, 0, len(reports))
 	for _, item := range reports {
+		if item == nil {
+			continue
+		}
 		ids = append(ids, item.ID)
 	}
-
-	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
-		ProjectID: req.ProjectID,
-		Type:      "session.ingested",
-		Message:   "session summary uploaded from local collector",
-		Result:    "success",
-		Reason:    "collector uploaded a session summary",
-	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		s.AnalyticsStore.mu.Unlock()
-		return nil, err
-	}
-
-	resp := &response.SessionIngestResp{
-		SchemaVersion:   reportAPISchemaVersion,
-		SessionID:       sessionID,
-		ProjectID:       req.ProjectID,
-		ReportCount:     len(ids),
-		LatestReportIDs: cloneStringSlice(ids),
-		RecordedAt:      recordedAt,
-		ResearchStatus:  cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[project.ID]),
-	}
-	s.AnalyticsStore.mu.Unlock()
-
-	s.enqueueReportRefresh(refreshJob)
-	return resp, nil
+	return ids
 }
 
 func (s *AnalyticsService) ListSessionSummaries(ctx context.Context, req *request.SessionSummaryListReq) (*response.SessionSummaryListResp, error) {
@@ -1034,8 +1956,11 @@ func (s *AnalyticsService) ListReports(ctx context.Context, req *request.ReportL
 }
 
 func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.DashboardOverviewReq) (*response.DashboardOverviewResp, error) {
-	s.AnalyticsStore.mu.RLock()
-	defer s.AnalyticsStore.mu.RUnlock()
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+	if err := s.cleanupExpiredSessionImportJobsLocked(time.Now().UTC()); err != nil {
+		return nil, err
+	}
 
 	if _, ok := s.AnalyticsStore.organizations[req.OrgID]; !ok {
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
@@ -1060,6 +1985,7 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		totalActiveReports int
 		lastIngestedAt     *time.Time
 		researchStatus     *ReportResearchStatus
+		activeImportJob    *SessionImportJob
 	)
 
 	for _, projectID := range projectIDs {
@@ -1083,6 +2009,9 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		}
 		if candidate := s.AnalyticsStore.reportResearch[projectID]; isReportResearchStatusNewer(candidate, researchStatus) {
 			researchStatus = candidate
+		}
+		if candidate := s.findNewestActiveSessionImportJobForProjectLocked(projectID); isSessionImportJobNewer(candidate, activeImportJob) {
+			activeImportJob = candidate
 		}
 	}
 
@@ -1109,6 +2038,8 @@ func (s *AnalyticsService) DashboardOverview(ctx context.Context, req *request.D
 		ResearchMode:              s.researchAgent.Mode,
 		LastIngestedAt:            lastIngestedAt,
 		ResearchStatus:            cloneReportResearchStatusResp(researchStatus),
+		ActiveImportJob:           s.toSessionImportJobRespLocked(activeImportJob, false),
+		ImportJobMetrics:          s.buildSessionImportJobMetricsLocked(req.OrgID),
 	}, nil
 }
 
@@ -1625,7 +2556,7 @@ func (s *AnalyticsService) currentReportsLocked(projectID string) []*Report {
 	return items
 }
 
-func (s *AnalyticsService) prepareReportRefreshLocked(project *Project, triggerSessionID string) ([]*Report, *reportRefreshJob) {
+func (s *AnalyticsService) prepareReportRefreshLocked(project *Project, triggerSessionID string, previousSessionCount int) ([]*Report, *reportRefreshJob) {
 	sessions := s.AnalyticsStore.sessionSummaries[project.ID]
 	rawQueries := collectRawQueries(sessions)
 	currentReports := s.currentReportsLocked(project.ID)
@@ -1652,7 +2583,7 @@ func (s *AnalyticsService) prepareReportRefreshLocked(project *Project, triggerS
 		s.setReportResearchStatusLocked(project.ID, status)
 		return currentReports, nil
 	}
-	if !shouldRefreshReportsForSessionCount(sessionCount, s.reportMinSessions) {
+	if !shouldRefreshReportsForSessionRange(previousSessionCount, sessionCount, s.reportMinSessions) {
 		if currentStatus != nil && strings.EqualFold(strings.TrimSpace(currentStatus.State), "running") {
 			return currentReports, nil
 		}
@@ -1697,6 +2628,13 @@ func shouldRefreshReportsForSessionCount(sessionCount, batchSize int) bool {
 		return false
 	}
 	return sessionCount >= batchSize && sessionCount%batchSize == 0
+}
+
+func shouldRefreshReportsForSessionRange(previousSessionCount, sessionCount, batchSize int) bool {
+	if sessionCount <= 0 || batchSize <= 0 || sessionCount <= previousSessionCount {
+		return false
+	}
+	return nextReportRefreshSessionCount(previousSessionCount, batchSize) <= sessionCount
 }
 
 func nextReportRefreshSessionCount(sessionCount, batchSize int) int {

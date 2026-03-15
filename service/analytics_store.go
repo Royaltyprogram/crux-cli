@@ -30,33 +30,35 @@ type AnalyticsStore struct {
 	lastSeenDirty  bool
 	lastSeenFlush  bool
 
-	organizations    map[string]*Organization
-	users            map[string]*User
-	accessTokens     map[string]*AccessToken
-	agents           map[string]*Agent
-	projects         map[string]*Project
-	configSnapshots  map[string][]*ConfigSnapshot
-	sessionSummaries map[string][]*SessionSummary
-	reports          map[string]*Report
-	projectReports   map[string][]string
-	reportResearch   map[string]*ReportResearchStatus
-	audits           []*AuditEvent
+	organizations     map[string]*Organization
+	users             map[string]*User
+	accessTokens      map[string]*AccessToken
+	agents            map[string]*Agent
+	projects          map[string]*Project
+	configSnapshots   map[string][]*ConfigSnapshot
+	sessionSummaries  map[string][]*SessionSummary
+	reports           map[string]*Report
+	projectReports    map[string][]string
+	reportResearch    map[string]*ReportResearchStatus
+	sessionImportJobs map[string]*SessionImportJob
+	audits            []*AuditEvent
 }
 
 type analyticsStoreState struct {
-	SchemaVersion    string                           `json:"schema_version"`
-	Seq              uint64                           `json:"seq"`
-	Organizations    map[string]*Organization         `json:"organizations"`
-	Users            map[string]*User                 `json:"users"`
-	AccessTokens     map[string]*AccessToken          `json:"access_tokens"`
-	Agents           map[string]*Agent                `json:"agents"`
-	Projects         map[string]*Project              `json:"projects"`
-	ConfigSnapshots  map[string][]*ConfigSnapshot     `json:"config_snapshots"`
-	SessionSummaries map[string][]*SessionSummary     `json:"session_summaries"`
-	Reports          map[string]*Report               `json:"reports"`
-	ProjectReports   map[string][]string              `json:"project_reports"`
-	ReportResearch   map[string]*ReportResearchStatus `json:"report_research"`
-	Audits           []*AuditEvent                    `json:"audits"`
+	SchemaVersion     string                           `json:"schema_version"`
+	Seq               uint64                           `json:"seq"`
+	Organizations     map[string]*Organization         `json:"organizations"`
+	Users             map[string]*User                 `json:"users"`
+	AccessTokens      map[string]*AccessToken          `json:"access_tokens"`
+	Agents            map[string]*Agent                `json:"agents"`
+	Projects          map[string]*Project              `json:"projects"`
+	ConfigSnapshots   map[string][]*ConfigSnapshot     `json:"config_snapshots"`
+	SessionSummaries  map[string][]*SessionSummary     `json:"session_summaries"`
+	Reports           map[string]*Report               `json:"reports"`
+	ProjectReports    map[string][]string              `json:"project_reports"`
+	ReportResearch    map[string]*ReportResearchStatus `json:"report_research"`
+	SessionImportJobs map[string]*SessionImportJob     `json:"session_import_jobs"`
+	Audits            []*AuditEvent                    `json:"audits"`
 }
 
 type Organization struct {
@@ -191,6 +193,58 @@ type ReportResearchStatus struct {
 	LastDurationMS   int
 }
 
+type SessionImportJobSession struct {
+	SessionID              string
+	Tool                   string
+	TokenIn                int
+	TokenOut               int
+	CachedInputTokens      int
+	ReasoningOutputTokens  int
+	FunctionCallCount      int
+	ToolErrorCount         int
+	SessionDurationMS      int
+	ToolWallTimeMS         int
+	ToolCalls              map[string]int
+	ToolErrors             map[string]int
+	ToolWallTimesMS        map[string]int
+	RawQueries             []string
+	Models                 []string
+	ModelProvider          string
+	FirstResponseLatencyMS int
+	AssistantResponses     []string
+	ReasoningSummaries     []string
+	Timestamp              time.Time
+}
+
+type SessionImportJobFailure struct {
+	SessionID    string
+	Error        string
+	HTTPStatus   int
+	APIErrorCode int
+}
+
+type SessionImportJob struct {
+	ID                string
+	ProjectID         string
+	OrgID             string
+	AgentID           string
+	Status            string
+	TotalSessions     int
+	ReceivedSessions  int
+	ProcessedSessions int
+	UploadedSessions  int
+	UpdatedSessions   int
+	FailedSessions    int
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	StartedAt         *time.Time
+	CompletedAt       *time.Time
+	LastError         string
+	LastSessionID     string
+	Sessions          []SessionImportJobSession
+	Failures          []SessionImportJobFailure
+}
+
 type AuditEvent struct {
 	ID           string
 	OrgID        string
@@ -224,22 +278,23 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 	}
 
 	store := &AnalyticsStore{
-		db:               db,
-		dbDialect:        dialect,
-		filePath:         conf.App.StorePath,
-		allowDemoUser:    conf.AllowsDemoUser(),
-		bootstrapUsers:   append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
-		organizations:    make(map[string]*Organization),
-		users:            make(map[string]*User),
-		accessTokens:     make(map[string]*AccessToken),
-		agents:           make(map[string]*Agent),
-		projects:         make(map[string]*Project),
-		configSnapshots:  make(map[string][]*ConfigSnapshot),
-		sessionSummaries: make(map[string][]*SessionSummary),
-		reports:          make(map[string]*Report),
-		projectReports:   make(map[string][]string),
-		reportResearch:   make(map[string]*ReportResearchStatus),
-		audits:           make([]*AuditEvent, 0, 32),
+		db:                db,
+		dbDialect:         dialect,
+		filePath:          conf.App.StorePath,
+		allowDemoUser:     conf.AllowsDemoUser(),
+		bootstrapUsers:    append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
+		organizations:     make(map[string]*Organization),
+		users:             make(map[string]*User),
+		accessTokens:      make(map[string]*AccessToken),
+		agents:            make(map[string]*Agent),
+		projects:          make(map[string]*Project),
+		configSnapshots:   make(map[string][]*ConfigSnapshot),
+		sessionSummaries:  make(map[string][]*SessionSummary),
+		reports:           make(map[string]*Report),
+		projectReports:    make(map[string][]string),
+		reportResearch:    make(map[string]*ReportResearchStatus),
+		sessionImportJobs: make(map[string]*SessionImportJob),
+		audits:            make([]*AuditEvent, 0, 32),
 	}
 	if err := store.initDB(); err != nil {
 		_ = db.Close()
@@ -557,6 +612,11 @@ func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 			return nil, err
 		}
 	}
+	for _, id := range sortedKeys(s.sessionImportJobs) {
+		if err := appendRecord("session_import_job", "", id, normalizeSessionImportJob(s.sessionImportJobs[id])); err != nil {
+			return nil, err
+		}
+	}
 	for _, audit := range s.audits {
 		if audit != nil {
 			if err := appendRecord("audit", "", audit.ID, audit); err != nil {
@@ -697,6 +757,12 @@ func (s *AnalyticsStore) applyLoadedRecord(recordType, scopeID, recordID string,
 			return err
 		}
 		s.reportResearch[recordID] = normalizeReportResearchStatus(&item)
+	case "session_import_job":
+		var item SessionImportJob
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return err
+		}
+		s.sessionImportJobs[recordID] = normalizeSessionImportJob(&item)
 	case "audit":
 		var item AuditEvent
 		if err := json.Unmarshal(payload, &item); err != nil {
@@ -743,24 +809,26 @@ func (s *AnalyticsStore) resetInMemoryState() {
 	s.reports = make(map[string]*Report)
 	s.projectReports = make(map[string][]string)
 	s.reportResearch = make(map[string]*ReportResearchStatus)
+	s.sessionImportJobs = make(map[string]*SessionImportJob)
 	s.audits = make([]*AuditEvent, 0, 32)
 }
 
 func (s *AnalyticsStore) snapshotStateLocked() analyticsStoreState {
 	return analyticsStoreState{
-		SchemaVersion:    analyticsStoreSchemaVersion,
-		Seq:              s.seq,
-		Organizations:    s.organizations,
-		Users:            s.users,
-		AccessTokens:     s.accessTokens,
-		Agents:           s.agents,
-		Projects:         s.projects,
-		ConfigSnapshots:  s.configSnapshots,
-		SessionSummaries: s.sessionSummaries,
-		Reports:          s.reports,
-		ProjectReports:   s.projectReports,
-		ReportResearch:   normalizeReportResearchMap(s.reportResearch),
-		Audits:           s.audits,
+		SchemaVersion:     analyticsStoreSchemaVersion,
+		Seq:               s.seq,
+		Organizations:     s.organizations,
+		Users:             s.users,
+		AccessTokens:      s.accessTokens,
+		Agents:            s.agents,
+		Projects:          s.projects,
+		ConfigSnapshots:   s.configSnapshots,
+		SessionSummaries:  s.sessionSummaries,
+		Reports:           s.reports,
+		ProjectReports:    s.projectReports,
+		ReportResearch:    normalizeReportResearchMap(s.reportResearch),
+		SessionImportJobs: normalizeSessionImportJobMap(s.sessionImportJobs),
+		Audits:            s.audits,
 	}
 }
 
@@ -776,6 +844,7 @@ func (s *AnalyticsStore) replaceStateLocked(state analyticsStoreState) error {
 	s.reports = ensureMap(state.Reports)
 	s.projectReports = ensureStringSliceMap(state.ProjectReports)
 	s.reportResearch = ensureMap(normalizeReportResearchMap(state.ReportResearch))
+	s.sessionImportJobs = ensureMap(normalizeSessionImportJobMap(state.SessionImportJobs))
 	if state.Audits == nil {
 		s.audits = make([]*AuditEvent, 0, 32)
 	} else {
@@ -800,6 +869,62 @@ func normalizeReportResearchStatus(status *ReportResearchStatus) *ReportResearch
 		return nil
 	}
 	cloned := *status
+	return &cloned
+}
+
+func normalizeSessionImportJobMap(input map[string]*SessionImportJob) map[string]*SessionImportJob {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]*SessionImportJob, len(input))
+	for key, value := range input {
+		out[key] = normalizeSessionImportJob(value)
+	}
+	return out
+}
+
+func normalizeSessionImportJob(job *SessionImportJob) *SessionImportJob {
+	if job == nil {
+		return nil
+	}
+	cloned := *job
+	cloned.UpdatedAt = job.UpdatedAt
+	cloned.StartedAt = cloneTime(job.StartedAt)
+	cloned.CompletedAt = cloneTime(job.CompletedAt)
+	if len(job.Sessions) > 0 {
+		cloned.Sessions = make([]SessionImportJobSession, 0, len(job.Sessions))
+		for _, item := range job.Sessions {
+			cloned.Sessions = append(cloned.Sessions, SessionImportJobSession{
+				SessionID:              item.SessionID,
+				Tool:                   item.Tool,
+				TokenIn:                item.TokenIn,
+				TokenOut:               item.TokenOut,
+				CachedInputTokens:      item.CachedInputTokens,
+				ReasoningOutputTokens:  item.ReasoningOutputTokens,
+				FunctionCallCount:      item.FunctionCallCount,
+				ToolErrorCount:         item.ToolErrorCount,
+				SessionDurationMS:      item.SessionDurationMS,
+				ToolWallTimeMS:         item.ToolWallTimeMS,
+				ToolCalls:              cloneIntMap(item.ToolCalls),
+				ToolErrors:             cloneIntMap(item.ToolErrors),
+				ToolWallTimesMS:        cloneIntMap(item.ToolWallTimesMS),
+				RawQueries:             cloneStringSlice(item.RawQueries),
+				Models:                 cloneStringSlice(item.Models),
+				ModelProvider:          item.ModelProvider,
+				FirstResponseLatencyMS: item.FirstResponseLatencyMS,
+				AssistantResponses:     cloneStringSlice(item.AssistantResponses),
+				ReasoningSummaries:     cloneStringSlice(item.ReasoningSummaries),
+				Timestamp:              item.Timestamp,
+			})
+		}
+	} else {
+		cloned.Sessions = nil
+	}
+	if len(job.Failures) > 0 {
+		cloned.Failures = append([]SessionImportJobFailure(nil), job.Failures...)
+	} else {
+		cloned.Failures = nil
+	}
 	return &cloned
 }
 

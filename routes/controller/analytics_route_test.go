@@ -111,6 +111,28 @@ func waitForDashboardResearchStatus(
 	return overview.ResearchStatus
 }
 
+func waitForSessionImportJobStatus(
+	t *testing.T,
+	echo *echo.Echo,
+	token, jobID string,
+	matcher func(*response.SessionImportJobResp) bool,
+) *response.SessionImportJobResp {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job := getJSON[response.SessionImportJobResp](t, echo, token, "/api/v1/session-import-jobs/"+jobID, nil)
+		if matcher(&job) {
+			return &job
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	job := getJSON[response.SessionImportJobResp](t, echo, token, "/api/v1/session-import-jobs/"+jobID, nil)
+	require.True(t, matcher(&job), "unexpected job status: %#v", job)
+	return &job
+}
+
 func TestAnalyticsRouteLifecycle(t *testing.T) {
 	conf := newRouteResearchConfig(t)
 	conf.App.APIToken = "route-token"
@@ -320,6 +342,86 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.NotEmpty(t, auditResp.Items)
 }
 
+func TestAnalyticsRouteBatchSessionIngestSupportsPartialFailures(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "batch-partial-login",
+		Subject:  "google-batch-partial-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "batch-partial-login", "batch-partial-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "batch-partial-project",
+		RepoHash:    "batch-partial-project-hash",
+		DefaultTool: "codex",
+	})
+
+	batchResp := postJSON[response.SessionBatchIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries/batch", request.SessionSummaryBatchReq{
+		ProjectID: projectResp.ProjectID,
+		Sessions: []request.SessionSummaryReq{
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Upload the valid batch session first.",
+				},
+				Timestamp: time.Now().UTC(),
+			},
+			{
+				RawQueries: []string{
+					"This item is missing the required tool field.",
+				},
+				Timestamp: time.Now().UTC().Add(time.Minute),
+			},
+		},
+	})
+
+	require.Equal(t, "report-api.v1", batchResp.SchemaVersion)
+	require.Equal(t, projectResp.ProjectID, batchResp.ProjectID)
+	require.Equal(t, 2, batchResp.Accepted)
+	require.Equal(t, 1, batchResp.Uploaded)
+	require.Equal(t, 0, batchResp.Updated)
+	require.Equal(t, 1, batchResp.Failed)
+	require.Len(t, batchResp.Items, 2)
+	require.Equal(t, "uploaded", batchResp.Items[0].Status)
+	require.NotNil(t, batchResp.Items[0].RecordedAt)
+	require.Equal(t, "failed", batchResp.Items[1].Status)
+	require.Equal(t, http.StatusBadRequest, batchResp.Items[1].HTTPStatus)
+	require.Equal(t, 1000, batchResp.Items[1].APIErrorCode)
+	require.Contains(t, batchResp.Items[1].Error, "tool is required")
+
+	sessionList := getJSON[response.SessionSummaryListResp](t, echo, deviceToken, "/api/v1/session-summaries", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+		"limit":      []string{"5"},
+	})
+	require.Len(t, sessionList.Items, 1)
+}
+
 func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	conf := newRouteResearchConfig(t)
 	conf.App.APIToken = "route-token"
@@ -452,6 +554,561 @@ func TestAnalyticsRouteRefreshesReportsEveryBatchOfSessions(t *testing.T) {
 	})
 	require.Len(t, reportsAfterTwenty.Items, 1)
 	require.NotEqual(t, firstReportID, reportsAfterTwenty.Items[0].ID)
+}
+
+func TestAnalyticsRouteBatchSessionIngestRefreshesWhenCrossingThreshold(t *testing.T) {
+	conf := newRouteResearchConfig(t)
+	conf.App.APIToken = "route-token"
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "batch-threshold-login",
+		Subject:  "google-batch-threshold-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "batch-threshold-login", "batch-threshold-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "batch-threshold-project",
+		RepoHash:    "batch-threshold-project-hash",
+		DefaultTool: "codex",
+	})
+
+	baseTime := time.Now().UTC().Round(time.Second)
+	for i := 1; i <= 9; i++ {
+		resp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+			ProjectID: projectResp.ProjectID,
+			Tool:      "codex",
+			RawQueries: []string{
+				"Accumulate sessions until the batch crosses the refresh threshold.",
+			},
+			Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
+		})
+		require.NotNil(t, resp.ResearchStatus)
+		require.Equal(t, "waiting_for_min_sessions", resp.ResearchStatus.State)
+	}
+
+	batchResp := postJSON[response.SessionBatchIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries/batch", request.SessionSummaryBatchReq{
+		ProjectID: projectResp.ProjectID,
+		Sessions: []request.SessionSummaryReq{
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Cross the first report threshold in a single batch upload.",
+				},
+				Timestamp: baseTime.Add(10 * time.Minute),
+			},
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Keep the refresh running even though the batch ends above the threshold.",
+				},
+				Timestamp: baseTime.Add(11 * time.Minute),
+			},
+		},
+	})
+
+	require.Equal(t, 2, batchResp.Uploaded)
+	require.Zero(t, batchResp.Failed)
+	require.Len(t, batchResp.Items, 2)
+	require.NotNil(t, batchResp.ResearchStatus)
+	require.Equal(t, "running", batchResp.ResearchStatus.State)
+	require.Equal(t, 11, batchResp.ResearchStatus.SessionCount)
+
+	status := waitForDashboardResearchStatus(t, echo, deviceToken, cliLoginResp.OrgID, func(item *response.ReportResearchStatusResp) bool {
+		return item != nil && item.State == "succeeded" && item.SessionCount == 11
+	})
+	require.Equal(t, 1, status.ReportCount)
+}
+
+func TestAnalyticsRouteSessionImportJobRefreshesWhenCrossingThreshold(t *testing.T) {
+	conf := newRouteResearchConfig(t)
+	conf.App.APIToken = "route-token"
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "import-job-login",
+		Subject:  "google-import-job-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "import-job-login", "import-job-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "import-job-project",
+		RepoHash:    "import-job-project-hash",
+		DefaultTool: "codex",
+	})
+
+	baseTime := time.Now().UTC().Round(time.Second)
+	for i := 1; i <= 9; i++ {
+		resp := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+			ProjectID: projectResp.ProjectID,
+			Tool:      "codex",
+			RawQueries: []string{
+				"Collect enough sessions so the async import job crosses the first report threshold.",
+			},
+			Timestamp: baseTime.Add(time.Duration(i) * time.Minute),
+		})
+		require.Equal(t, "waiting_for_min_sessions", resp.ResearchStatus.State)
+	}
+
+	job := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID: projectResp.ProjectID,
+	})
+	require.Equal(t, "receiving_chunks", job.Status)
+
+	job = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/chunks", request.SessionImportJobChunkReq{
+		Sessions: []request.SessionSummaryReq{
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Cross the refresh threshold through the async import job.",
+				},
+				Timestamp: baseTime.Add(10 * time.Minute),
+			},
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Keep processing inside the same async import job after the threshold.",
+				},
+				Timestamp: baseTime.Add(11 * time.Minute),
+			},
+		},
+	})
+	require.Equal(t, 2, job.ReceivedSessions)
+
+	job = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/complete", request.SessionImportJobCompleteReq{})
+	require.Equal(t, "queued", job.Status)
+
+	completed := waitForSessionImportJobStatus(t, echo, deviceToken, job.JobID, func(item *response.SessionImportJobResp) bool {
+		return item != nil && item.Status == "succeeded" && item.ProcessedSessions == 2
+	})
+	require.Equal(t, 2, completed.UploadedSessions)
+	require.Equal(t, 0, completed.FailedSessions)
+	require.NotNil(t, completed.StartedAt)
+	require.NotNil(t, completed.CompletedAt)
+
+	status := waitForDashboardResearchStatus(t, echo, deviceToken, cliLoginResp.OrgID, func(item *response.ReportResearchStatusResp) bool {
+		return item != nil && item.State == "succeeded" && item.SessionCount == 11
+	})
+	require.Equal(t, 1, status.ReportCount)
+}
+
+func TestAnalyticsRouteSessionImportJobTracksPartialFailures(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "import-job-partial-login",
+		Subject:  "google-import-job-partial-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "import-job-partial-login", "import-job-partial-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "import-job-partial-project",
+		RepoHash:    "import-job-partial-project-hash",
+		DefaultTool: "codex",
+	})
+
+	job := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID: projectResp.ProjectID,
+	})
+	job = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/chunks", request.SessionImportJobChunkReq{
+		Sessions: []request.SessionSummaryReq{
+			{
+				Tool: "codex",
+				RawQueries: []string{
+					"Store the valid session through the async import job.",
+				},
+				Timestamp: time.Now().UTC(),
+			},
+			{
+				RawQueries: []string{
+					"This async import item is missing the required tool.",
+				},
+				Timestamp: time.Now().UTC().Add(time.Minute),
+			},
+		},
+	})
+	require.Equal(t, 2, job.ReceivedSessions)
+
+	job = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/complete", request.SessionImportJobCompleteReq{})
+	require.Equal(t, "queued", job.Status)
+
+	completed := waitForSessionImportJobStatus(t, echo, deviceToken, job.JobID, func(item *response.SessionImportJobResp) bool {
+		return item != nil && item.Status == "partially_failed"
+	})
+	require.Equal(t, 1, completed.UploadedSessions)
+	require.Equal(t, 1, completed.FailedSessions)
+	require.Len(t, completed.Failures, 1)
+	require.Equal(t, 1000, completed.Failures[0].APIErrorCode)
+	require.Equal(t, http.StatusBadRequest, completed.Failures[0].HTTPStatus)
+	require.Contains(t, completed.Failures[0].Error, "tool is required")
+
+	sessionList := getJSON[response.SessionSummaryListResp](t, echo, deviceToken, "/api/v1/session-summaries", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+		"limit":      []string{"5"},
+	})
+	require.Len(t, sessionList.Items, 1)
+}
+
+func TestAnalyticsRouteSessionImportJobCreateReusesActiveJob(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "import-job-reuse-login",
+		Subject:  "google-import-job-reuse-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "import-job-reuse-login", "import-job-reuse-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "import-job-reuse-project",
+		RepoHash:    "import-job-reuse-project-hash",
+		DefaultTool: "codex",
+	})
+
+	firstJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 2,
+	})
+	require.False(t, firstJob.Reused)
+	require.Equal(t, 2, firstJob.TotalSessions)
+
+	staged := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+firstJob.JobID+"/chunks", request.SessionImportJobChunkReq{
+		Sessions: []request.SessionSummaryReq{{
+			Tool: "codex",
+			RawQueries: []string{
+				"Stage the first session so the reused create call can see existing progress.",
+			},
+			Timestamp: time.Now().UTC(),
+		}},
+	})
+	require.Equal(t, 1, staged.ReceivedSessions)
+
+	reusedJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 3,
+	})
+	require.True(t, reusedJob.Reused)
+	require.Equal(t, firstJob.JobID, reusedJob.JobID)
+	require.Equal(t, 1, reusedJob.ReceivedSessions)
+	require.Equal(t, 3, reusedJob.TotalSessions)
+
+	overview := getJSON[response.DashboardOverviewResp](t, echo, deviceToken, "/api/v1/dashboard/overview", url.Values{
+		"org_id": []string{cliLoginResp.OrgID},
+	})
+	require.NotNil(t, overview.ActiveImportJob)
+	require.Equal(t, firstJob.JobID, overview.ActiveImportJob.JobID)
+	require.Equal(t, "receiving_chunks", overview.ActiveImportJob.Status)
+	require.Equal(t, 1, overview.ActiveImportJob.ReceivedSessions)
+}
+
+func TestAnalyticsRouteSessionImportJobCancel(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "import-job-cancel-login",
+		Subject:  "google-import-job-cancel-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "import-job-cancel-login", "import-job-cancel-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "import-job-cancel-project",
+		RepoHash:    "import-job-cancel-project-hash",
+		DefaultTool: "codex",
+	})
+
+	job := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 2,
+	})
+	require.Equal(t, "receiving_chunks", job.Status)
+
+	job = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/chunks", request.SessionImportJobChunkReq{
+		Sessions: []request.SessionSummaryReq{{
+			Tool: "codex",
+			RawQueries: []string{
+				"Stage a session before canceling the import job.",
+			},
+			Timestamp: time.Now().UTC(),
+		}},
+	})
+	require.Equal(t, 1, job.ReceivedSessions)
+
+	canceled := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/cancel", request.SessionImportJobCancelReq{})
+	require.Equal(t, "canceled", canceled.Status)
+	require.NotNil(t, canceled.CompletedAt)
+	require.Contains(t, canceled.LastError, "canceled")
+
+	fetched := getJSON[response.SessionImportJobResp](t, echo, deviceToken, "/api/v1/session-import-jobs/"+job.JobID, nil)
+	require.Equal(t, "canceled", fetched.Status)
+	require.Equal(t, 1, fetched.ReceivedSessions)
+
+	replacement := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID: projectResp.ProjectID,
+	})
+	require.NotEqual(t, job.JobID, replacement.JobID)
+	require.False(t, replacement.Reused)
+}
+
+func TestAnalyticsRouteDashboardOverviewIncludesImportJobMetrics(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "import-job-metrics-login",
+		Subject:  "google-import-job-metrics-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "import-job-metrics-login", "import-job-metrics-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "import-job-metrics-project",
+		RepoHash:    "import-job-metrics-project-hash",
+		DefaultTool: "codex",
+	})
+
+	completedJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID: projectResp.ProjectID,
+	})
+	completedJob = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+completedJob.JobID+"/chunks", request.SessionImportJobChunkReq{
+		Sessions: []request.SessionSummaryReq{{
+			Tool: "codex",
+			RawQueries: []string{
+				"Populate dashboard import metrics with a completed import job.",
+			},
+			Timestamp: time.Now().UTC(),
+		}},
+	})
+	require.Equal(t, 1, completedJob.ReceivedSessions)
+
+	completedJob = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+completedJob.JobID+"/complete", request.SessionImportJobCompleteReq{})
+	require.Equal(t, "queued", completedJob.Status)
+
+	waitForSessionImportJobStatus(t, echo, deviceToken, completedJob.JobID, func(item *response.SessionImportJobResp) bool {
+		return item != nil && item.Status == "succeeded" && item.ProcessedSessions == 1
+	})
+
+	activeJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 2,
+	})
+	require.Equal(t, "receiving_chunks", activeJob.Status)
+
+	overview := getJSON[response.DashboardOverviewResp](t, echo, deviceToken, "/api/v1/dashboard/overview", url.Values{
+		"org_id": []string{cliLoginResp.OrgID},
+	})
+	require.NotNil(t, overview.ActiveImportJob)
+	require.Equal(t, activeJob.JobID, overview.ActiveImportJob.JobID)
+	require.Equal(t, "receiving_chunks", overview.ActiveImportJob.Status)
+	require.NotNil(t, overview.ImportJobMetrics)
+	require.Equal(t, 2, overview.ImportJobMetrics.CreatedJobs)
+	require.Equal(t, 1, overview.ImportJobMetrics.ReceivingJobs)
+	require.Equal(t, 1, overview.ImportJobMetrics.SucceededJobs)
+	require.Equal(t, 1, overview.ImportJobMetrics.ProcessedSessions)
+	require.Equal(t, 1, overview.ImportJobMetrics.UploadedSessions)
+	require.Zero(t, overview.ImportJobMetrics.FailedSessions)
+	require.NotNil(t, overview.ImportJobMetrics.LastCompletedAt)
+}
+
+func TestAnalyticsRouteListSessionImportJobsFiltersStatus(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "import-job-list-login",
+		Subject:  "google-import-job-list-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "import-job-list-login", "import-job-list-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "import-job-list-project",
+		RepoHash:    "import-job-list-project-hash",
+		DefaultTool: "codex",
+	})
+
+	job := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 4,
+	})
+	require.Equal(t, "receiving_chunks", job.Status)
+
+	listResp := getJSON[response.SessionImportJobListResp](t, echo, deviceToken, "/api/v1/session-import-jobs", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+		"status":     []string{"receiving_chunks"},
+		"limit":      []string{"5"},
+	})
+	require.Len(t, listResp.Items, 1)
+	require.Equal(t, job.JobID, listResp.Items[0].JobID)
+	require.Equal(t, "receiving_chunks", listResp.Items[0].Status)
+	require.Equal(t, 4, listResp.Items[0].TotalSessions)
 }
 
 func newRouteResearchConfig(t *testing.T) *configs.Config {
