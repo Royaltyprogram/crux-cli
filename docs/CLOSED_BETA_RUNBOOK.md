@@ -94,7 +94,7 @@ Run the closed beta smoke with a seeded beta user:
 
 `make closed-beta-smoke` expects `BETA_SMOKE_CLI_TOKEN`, which you issue from the dashboard after signing in with Google.
 
-`make closed-beta-prod-smoke` uses a local OAuth stub and stays fully automated. It seeds a beta user, starts the server in `APP_MODE=prod`, completes a synthetic Google sign-in, issues a CLI token, and runs the CLI smoke flow without a browser.
+`make closed-beta-prod-smoke` uses a local OAuth stub plus an ephemeral MySQL container and stays fully automated. It seeds a beta user, starts the server in `APP_MODE=prod`, completes a synthetic Google sign-in, issues a CLI token, and runs the CLI smoke flow without a browser.
 
 Run the real `APP_MODE=prod` smoke locally:
 
@@ -191,15 +191,17 @@ Build the container:
 docker build -t crux-beta .
 ```
 
-Run with SQLite-backed beta state:
+Run with MySQL-backed beta state:
 
 ```bash
 docker run --rm -p 8082:8082 \
-  -v "$PWD/.runtime-data:/app/data" \
   -e JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
   -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
+  -e DB_DIALECT=mysql \
+  -e DB_DSN_FILE=/run/secrets/crux-db-dsn \
   -v "$PWD/secrets/crux-jwt-secret:/run/secrets/crux-jwt-secret:ro" \
   -v "$PWD/secrets/crux-beta-users.json:/run/secrets/crux-beta-users.json:ro" \
+  -v "$PWD/secrets/crux-db-dsn:/run/secrets/crux-db-dsn:ro" \
   crux-beta
 ```
 

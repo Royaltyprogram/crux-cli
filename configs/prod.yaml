@@ -6,8 +6,8 @@ App:
   APIToken: ""
 
 DB:
-  Dialect: sqlite3
-  DSN: data/crux.db?_fk=1
+  Dialect: mysql
+  DSN: user:passwd@tcp(127.0.0.1:3306)/database?charset=utf8mb4&parseTime=True&loc=UTC
   MaxIdle: 2
   MaxActive: 4
   MaxLifetime: 300

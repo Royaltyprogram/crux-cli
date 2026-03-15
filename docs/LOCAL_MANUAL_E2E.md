@@ -48,20 +48,20 @@ Required contents:
 
 ```bash
 source myenv/bin/activate
-APP_MODE=prod \
+APP_MODE=local \
 JWT_SECRET_FILE=secrets/crux-jwt-secret \
 AUTH_GOOGLE_CLIENT_ID_FILE=secrets/crux-google-client-id \
 AUTH_GOOGLE_CLIENT_SECRET_FILE=secrets/crux-google-client-secret \
 AUTH_BOOTSTRAP_USERS_FILE=secrets/crux-beta-users.json \
 OPENAI_API_KEY_FILE=secrets/crux-openai-api-key \
-DB_DSN='data/crux.db?_fk=1' \
+DB_DSN='data/crux-local.db?_fk=1' \
 DB_DIALECT=sqlite3 \
 go run .
 ```
 
 Keep this shell open.
 
-If you only want an automated server smoke instead of a manual browser flow, run `make closed-beta-prod-smoke` from another shell. That path uses a local OAuth stub rather than your real Google app.
+If you only want an automated server smoke against the real `APP_MODE=prod` path instead of a manual browser flow, run `make closed-beta-prod-smoke` from another shell. That path uses a local OAuth stub plus an ephemeral MySQL container.
 
 For quick local dashboard development without real Google credentials, you can also run:
 

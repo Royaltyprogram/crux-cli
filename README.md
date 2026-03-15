@@ -137,13 +137,13 @@ For repeatable closed beta verification in CI:
 make ci-beta
 ```
 
-To exercise the real `APP_MODE=prod` path locally with file-based secrets and a temp SQLite database:
+To exercise the real `APP_MODE=prod` path locally with file-based secrets, a local OAuth stub, and an ephemeral MySQL container:
 
 ```bash
 make closed-beta-prod-smoke
 ```
 
-`make closed-beta-prod-smoke` now bootstraps a local OAuth stub automatically, so it does not require real Google credentials or a manual browser login.
+`make closed-beta-prod-smoke` now bootstraps a local OAuth stub and an ephemeral MySQL container automatically, so it does not require real Google credentials, a browser login, or a pre-provisioned database.
 
 To force that smoke test to use the ignored local secret files in `secrets/` and verify live OpenAI-backed feedback report generation:
 
@@ -227,8 +227,8 @@ crux setup
 The container now defaults to:
 
 - `APP_MODE=prod`
-- SQLite state at `/app/data/crux.db`
-- legacy JSON import path at `data/crux-store.json` only if you are migrating old state
+- legacy JSON import path at `/app/data/crux-store.json`
+- no runtime DB DSN; provide `DB_DSN` or `DB_DSN_FILE` for MySQL before starting the container
 - stdout request/application logs
 
 Build and run it with a seeded beta account:
@@ -279,7 +279,7 @@ go run .
 
 Use `HTTP_ADMIN_ALLOWED_CIDRS` if you want `/admin` and `/api/v1/admin/*` to be stricter than the rest of the app. If `HTTP_TRUSTED_PROXY_CIDRS` is empty, Crux only trusts the direct socket remote address and ignores forwarded IP headers.
 
-`APP_MODE=prod` now fails fast during startup if critical closed beta settings are unsafe or incomplete, including a missing `JWT_SECRET`, invalid CIDR values, demo-user enablement, static token bypass enablement, or malformed bootstrap users.
+`APP_MODE=prod` now fails fast during startup if critical closed beta settings are unsafe or incomplete, including a missing `JWT_SECRET`, a SQLite runtime database, invalid CIDR values, demo-user enablement, static token bypass enablement, or malformed bootstrap users.
 
 `GET /healthz` and `GET /readyz` now also return embedded server build metadata so you can verify the exact beta revision after deploy.
 
