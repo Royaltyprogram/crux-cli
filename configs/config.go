@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -58,16 +59,25 @@ type Auth struct {
 	AllowDemoUser      bool            `koanf:"AllowDemoUser"`
 	StaticTokenEnabled bool            `koanf:"StaticTokenEnabled"`
 	BootstrapUsers     []BootstrapUser `koanf:"BootstrapUsers"`
+	Google             GoogleAuth      `koanf:"Google"`
 }
 
 type BootstrapUser struct {
-	ID       string `json:"id" koanf:"ID"`
-	OrgID    string `json:"org_id" koanf:"OrgID"`
-	OrgName  string `json:"org_name" koanf:"OrgName"`
-	Email    string `json:"email" koanf:"Email"`
-	Name     string `json:"name" koanf:"Name"`
-	Role     string `json:"role" koanf:"Role"`
-	Password string `json:"password" koanf:"Password"`
+	ID      string `json:"id" koanf:"ID"`
+	OrgID   string `json:"org_id" koanf:"OrgID"`
+	OrgName string `json:"org_name" koanf:"OrgName"`
+	Email   string `json:"email" koanf:"Email"`
+	Name    string `json:"name" koanf:"Name"`
+	Role    string `json:"role" koanf:"Role"`
+}
+
+type GoogleAuth struct {
+	ClientID       string   `koanf:"ClientID"`
+	ClientSecret   string   `koanf:"ClientSecret"`
+	AllowedDomains []string `koanf:"AllowedDomains"`
+	AuthURL        string   `koanf:"AuthURL"`
+	TokenURL       string   `koanf:"TokenURL"`
+	UserInfoURL    string   `koanf:"UserInfoURL"`
 }
 
 type HTTP struct {
@@ -171,6 +181,7 @@ func (c *Config) Validate() error {
 	issues = append(issues, validateCIDRList("HTTP.AdminAllowedCIDRs", c.HTTP.AdminAllowedCIDRs)...)
 	issues = append(issues, validateCIDRList("HTTP.TrustedProxyCIDRs", c.HTTP.TrustedProxyCIDRs)...)
 	issues = append(issues, validateBootstrapUsers(c.Auth.BootstrapUsers)...)
+	issues = append(issues, validateGoogleAuth(c.Auth.Google)...)
 
 	if c.Auth.StaticTokenEnabled && strings.TrimSpace(c.App.APIToken) == "" {
 		issues = append(issues, "App.APIToken is required when Auth.StaticTokenEnabled is true")
@@ -270,6 +281,38 @@ func applyEnvOverrides(cfg *Config) error {
 			return fmt.Errorf("invalid AUTH_BOOTSTRAP_USERS_FILE: %w", err)
 		}
 		cfg.Auth.BootstrapUsers = users
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_CLIENT_ID"); ok {
+		cfg.Auth.Google.ClientID = value
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_CLIENT_ID_FILE"); ok {
+		secret, err := readSecretFile(value)
+		if err != nil {
+			return fmt.Errorf("invalid AUTH_GOOGLE_CLIENT_ID_FILE: %w", err)
+		}
+		cfg.Auth.Google.ClientID = secret
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_CLIENT_SECRET"); ok {
+		cfg.Auth.Google.ClientSecret = value
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_CLIENT_SECRET_FILE"); ok {
+		secret, err := readSecretFile(value)
+		if err != nil {
+			return fmt.Errorf("invalid AUTH_GOOGLE_CLIENT_SECRET_FILE: %w", err)
+		}
+		cfg.Auth.Google.ClientSecret = secret
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_ALLOWED_DOMAINS"); ok {
+		cfg.Auth.Google.AllowedDomains = splitCSV(value)
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_AUTH_URL"); ok {
+		cfg.Auth.Google.AuthURL = value
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_TOKEN_URL"); ok {
+		cfg.Auth.Google.TokenURL = value
+	}
+	if value, ok := lookupEnv("AUTH_GOOGLE_USERINFO_URL"); ok {
+		cfg.Auth.Google.UserInfoURL = value
 	}
 	if value, ok := lookupEnv("HTTP_ALLOWED_ORIGINS"); ok {
 		cfg.HTTP.AllowedOrigins = splitCSV(value)
@@ -385,8 +428,6 @@ func validateBootstrapUsers(users []BootstrapUser) []string {
 		orgName := strings.TrimSpace(user.OrgName)
 		email := strings.TrimSpace(user.Email)
 		name := strings.TrimSpace(user.Name)
-		password := strings.TrimSpace(user.Password)
-
 		if id == "" {
 			issues = append(issues, prefix+".ID is required")
 		}
@@ -404,9 +445,6 @@ func validateBootstrapUsers(users []BootstrapUser) []string {
 		}
 		if role := normalizeBootstrapUserRole(user.Role); role == "" {
 			issues = append(issues, prefix+".Role must be one of: admin, member")
-		}
-		if password == "" {
-			issues = append(issues, prefix+".Password is required")
 		}
 
 		if id != "" {
@@ -436,4 +474,53 @@ func normalizeBootstrapUserRole(value string) string {
 	default:
 		return ""
 	}
+}
+
+func validateGoogleAuth(auth GoogleAuth) []string {
+	issues := make([]string, 0)
+
+	clientID := strings.TrimSpace(auth.ClientID)
+	clientSecret := strings.TrimSpace(auth.ClientSecret)
+	anyConfigured := clientID != "" || clientSecret != "" ||
+		strings.TrimSpace(auth.AuthURL) != "" || strings.TrimSpace(auth.TokenURL) != "" ||
+		strings.TrimSpace(auth.UserInfoURL) != "" || len(auth.AllowedDomains) > 0
+	if !anyConfigured {
+		return issues
+	}
+
+	if clientID == "" {
+		issues = append(issues, "Auth.Google.ClientID is required when Google auth is configured")
+	}
+	if clientSecret == "" {
+		issues = append(issues, "Auth.Google.ClientSecret is required when Google auth is configured")
+	}
+	for _, item := range []struct {
+		label string
+		value string
+	}{
+		{label: "Auth.Google.AuthURL", value: auth.AuthURL},
+		{label: "Auth.Google.TokenURL", value: auth.TokenURL},
+		{label: "Auth.Google.UserInfoURL", value: auth.UserInfoURL},
+	} {
+		raw := strings.TrimSpace(item.value)
+		if raw == "" {
+			continue
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil || !parsed.IsAbs() || strings.TrimSpace(parsed.Host) == "" {
+			issues = append(issues, item.label+" must be an absolute URL")
+		}
+	}
+	for i, domain := range auth.AllowedDomains {
+		domain = strings.TrimSpace(domain)
+		if domain == "" {
+			issues = append(issues, fmt.Sprintf("Auth.Google.AllowedDomains[%d] must not be empty", i))
+			continue
+		}
+		if strings.Contains(domain, "@") || strings.Contains(domain, "/") {
+			issues = append(issues, fmt.Sprintf("Auth.Google.AllowedDomains[%d] must be a bare domain", i))
+		}
+	}
+
+	return issues
 }

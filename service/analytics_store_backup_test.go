@@ -15,13 +15,12 @@ func TestAnalyticsStoreExportImportRoundTrip(t *testing.T) {
 	sourceConf.App.Mode = "prod"
 	sourceConf.App.StorePath = filepath.Join(t.TempDir(), "source-store.json")
 	sourceConf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:       "beta-user-1",
-		OrgID:    "beta-org",
-		OrgName:  "Beta Org",
-		Email:    "beta1@example.com",
-		Name:     "Beta Operator",
-		Role:     "member",
-		Password: "beta-secret",
+		ID:      "beta-user-1",
+		OrgID:   "beta-org",
+		OrgName: "Beta Org",
+		Email:   "beta1@example.com",
+		Name:    "Beta Operator",
+		Role:    "member",
 	}}
 
 	sourceStore, err := NewAnalyticsStore(sourceConf)

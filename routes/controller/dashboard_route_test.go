@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Royaltyprogram/aiops/configs"
-	"github.com/Royaltyprogram/aiops/dto/request"
 	"github.com/Royaltyprogram/aiops/routes"
 	"github.com/Royaltyprogram/aiops/routes/controller"
 	"github.com/Royaltyprogram/aiops/service"
@@ -35,10 +34,10 @@ func TestLandingRouteServesLandingPage(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "actually understood")
-	require.Contains(t, rec.Body.String(), "Sign in to dashboard")
-	require.Contains(t, rec.Body.String(), `id="loginForm"`)
+	require.Contains(t, rec.Body.String(), "Continue with Google")
+	require.Contains(t, rec.Body.String(), `id="googleLoginButton"`)
 	require.Contains(t, rec.Body.String(), "Stop guessing what your Codex agent did wrong")
-	require.Contains(t, rec.Body.String(), "Closed Beta")
+	require.Contains(t, rec.Body.String(), "Google Sign-In")
 	require.NotContains(t, rec.Body.String(), "demo@example.com")
 }
 
@@ -71,7 +70,7 @@ func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "Issued CLI tokens")
 	require.Contains(t, rec.Body.String(), "Create CLI token")
 	require.Contains(t, rec.Body.String(), "curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/aiops/main/scripts/install.sh | sh")
-	require.Contains(t, rec.Body.String(), "crux login --server")
+	require.Contains(t, rec.Body.String(), "crux setup")
 	require.Contains(t, rec.Body.String(), `data-action="issue-cli-token"`)
 	require.Contains(t, rec.Body.String(), "Latest trace analysis")
 	require.Contains(t, rec.Body.String(), "Usage Analytics")
@@ -163,6 +162,14 @@ func TestAdminRouteRedirectsWithoutWebSession(t *testing.T) {
 func TestAdminRouteServesPageForAdminSession(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "demo-login",
+		Subject:  "google-demo-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -183,11 +190,7 @@ func TestAdminRouteServesPageForAdminSession(t *testing.T) {
 		AnalyticsService: analyticsSvc,
 	}).RegisterRoute(echo.Group(""))
 
-	loginRec := postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "demo@example.com",
-		Password: "demo1234",
-	})
-	sessionCookie := requireCookie(t, loginRec, service.WebSessionCookieName)
+	sessionCookie := loginWithGoogleControllerTest(t, echo, "demo-login")
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.AddCookie(sessionCookie)
@@ -204,14 +207,21 @@ func TestAdminRouteRedirectsNonAdminToDashboard(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
 	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:       "member-1",
-		OrgID:    "member-org",
-		OrgName:  "Member Org",
+		ID:      "member-1",
+		OrgID:   "member-org",
+		OrgName: "Member Org",
+		Email:   "member@example.com",
+		Name:    "Member User",
+		Role:    "member",
+	}}
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "member-login",
+		Subject:  "google-member-subject",
 		Email:    "member@example.com",
 		Name:     "Member User",
-		Role:     "member",
-		Password: "member-pass",
-	}}
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -232,11 +242,7 @@ func TestAdminRouteRedirectsNonAdminToDashboard(t *testing.T) {
 		AnalyticsService: analyticsSvc,
 	}).RegisterRoute(echo.Group(""))
 
-	loginRec := postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "member@example.com",
-		Password: "member-pass",
-	})
-	sessionCookie := requireCookie(t, loginRec, service.WebSessionCookieName)
+	sessionCookie := loginWithGoogleControllerTest(t, echo, "member-login")
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	req.AddCookie(sessionCookie)

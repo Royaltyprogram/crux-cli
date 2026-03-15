@@ -874,7 +874,7 @@ func loadState() (state, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return state{}, fmt.Errorf("%w; run `crux setup --server <url>` first", errStateNotFound)
+			return state{}, fmt.Errorf("%w; run `crux setup` first", errStateNotFound)
 		}
 		return state{}, err
 	}
@@ -901,7 +901,7 @@ func loadWorkspaceState() (state, error) {
 		return state{}, err
 	}
 	if st.workspaceID() == "" {
-		return state{}, fmt.Errorf("%w; run `crux setup --server <url>` or `crux connect` first", errWorkspaceNotConnected)
+		return state{}, fmt.Errorf("%w; run `crux setup` or `crux connect` first", errWorkspaceNotConnected)
 	}
 	return st, nil
 }

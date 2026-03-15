@@ -225,33 +225,21 @@ type AuditListResp struct {
 }
 
 type AdminUserResp struct {
-	ID                string     `json:"id"`
-	OrgID             string     `json:"org_id"`
-	Email             string     `json:"email"`
-	Name              string     `json:"name"`
-	Source            string     `json:"source"`
-	Role              string     `json:"role"`
-	Status            string     `json:"status"`
-	CreatedAt         time.Time  `json:"created_at"`
-	PasswordChangedAt *time.Time `json:"password_changed_at"`
-	LastLoginAt       *time.Time `json:"last_login_at"`
-	DisabledAt        *time.Time `json:"disabled_at"`
-	DeletedAt         *time.Time `json:"deleted_at"`
+	ID          string     `json:"id"`
+	OrgID       string     `json:"org_id"`
+	Email       string     `json:"email"`
+	Name        string     `json:"name"`
+	Source      string     `json:"source"`
+	Role        string     `json:"role"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+	DisabledAt  *time.Time `json:"disabled_at"`
+	DeletedAt   *time.Time `json:"deleted_at"`
 }
 
 type AdminUserListResp struct {
 	Items []AdminUserResp `json:"items"`
-}
-
-type AdminUserCreateResp struct {
-	Status string        `json:"status"`
-	User   AdminUserResp `json:"user"`
-}
-
-type AdminUserPasswordResetResp struct {
-	Status            string    `json:"status"`
-	UserID            string    `json:"user_id"`
-	PasswordChangedAt time.Time `json:"password_changed_at"`
 }
 
 type AdminUserDeactivateResp struct {

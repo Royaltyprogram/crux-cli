@@ -4,22 +4,19 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8082}"
-EMAIL="${BETA_SMOKE_EMAIL:-}"
-PASSWORD="${BETA_SMOKE_PASSWORD:-}"
+CLI_TOKEN="${BETA_SMOKE_CLI_TOKEN:-}"
 CLI_BIN="${CLI_BIN:-$ROOT_DIR/output/crux}"
 EXPECT_RESEARCH_MODE="${EXPECT_RESEARCH_MODE:-}"
-COOKIE_JAR="$(mktemp)"
 CRUX_HOME_DIR="$(mktemp -d)"
 WORKSPACE_DIR="$(mktemp -d)"
 
 cleanup() {
-  rm -f "$COOKIE_JAR"
   rm -rf "$CRUX_HOME_DIR" "$WORKSPACE_DIR"
 }
 trap cleanup EXIT
 
-if [[ -z "$EMAIL" || -z "$PASSWORD" ]]; then
-  echo "BETA_SMOKE_EMAIL and BETA_SMOKE_PASSWORD must be set." >&2
+if [[ -z "$CLI_TOKEN" ]]; then
+  echo "BETA_SMOKE_CLI_TOKEN must be set to a dashboard-issued CLI token." >&2
   exit 1
 fi
 
@@ -29,45 +26,6 @@ fi
 
 curl -fsS "$BASE_URL/healthz" >/dev/null
 curl -fsS "$BASE_URL/readyz" >/dev/null
-
-login_payload="$(python3 - <<'PY' "$EMAIL" "$PASSWORD"
-import json
-import sys
-print(json.dumps({"email": sys.argv[1], "password": sys.argv[2]}))
-PY
-)"
-
-login_response="$(curl -fsS -c "$COOKIE_JAR" \
-  -H 'Content-Type: application/json' \
-  -d "$login_payload" \
-  "$BASE_URL/api/v1/auth/login")"
-
-python3 - <<'PY' "$login_response"
-import json
-import sys
-env = json.loads(sys.argv[1])
-if env.get("code") != 0:
-    raise SystemExit(f"dashboard login failed: {env}")
-PY
-
-token_response="$(curl -fsS -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-  -H 'Content-Type: application/json' \
-  -d '{"label":"Closed beta smoke"}' \
-  "$BASE_URL/api/v1/auth/cli-tokens")"
-
-CLI_TOKEN="$(python3 - <<'PY' "$token_response"
-import json
-import sys
-env = json.loads(sys.argv[1])
-if env.get("code") != 0:
-    raise SystemExit(f"cli token issue failed: {env}")
-data = env.get("data") or {}
-token = data.get("token", "")
-if not token:
-    raise SystemExit(f"cli token missing: {env}")
-print(token)
-PY
-)"
 
 export CRUX_HOME="$CRUX_HOME_DIR"
 

@@ -27,6 +27,7 @@ crux version
 crux setup
 crux reports
 crux audit
+crux collect --reset-sessions
 ```
 
 `crux setup` prompts for the issued CLI token if you omit `--token`, connects the current repo to the shared workspace, uploads an initial snapshot plus local Codex session history on first setup, and enrolls background collection automatically on supported installed macOS environments.

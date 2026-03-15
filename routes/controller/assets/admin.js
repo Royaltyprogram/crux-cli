@@ -174,6 +174,8 @@ function roleTone(role) {
 
 function sourceTone(source) {
   switch (String(source || "").toLowerCase()) {
+    case "google":
+      return "good";
     case "demo":
       return "warn";
     case "bootstrap":
@@ -201,7 +203,7 @@ function renderUsers(items) {
   if (!items.length) {
     $("userList").innerHTML = emptyState(
       "No users matched the current filters",
-      "Create a managed user or broaden the filters to see more accounts.",
+      "Broaden the filters or ask the user to sign in with Google first.",
     );
     return;
   }
@@ -214,7 +216,6 @@ function renderUsers(items) {
     const actions = [];
 
     if (!isDeleted) {
-      actions.push(`<button class="secondary-button" type="button" data-action="reset-password" data-user-id="${escapeHTML(item.id)}">Reset password</button>`);
       if (!isDisabled) {
         actions.push(`<button class="secondary-button" type="button" data-action="deactivate-user" data-user-id="${escapeHTML(item.id)}">Deactivate</button>`);
       }
@@ -237,8 +238,8 @@ function renderUsers(items) {
         <div class="step-list">
           <div class="step-line">${escapeHTML(`User ID ${item.id}`)}</div>
           <div class="step-line">${escapeHTML(`Created ${formatDateTime(item.created_at)}`)}</div>
-          <div class="step-line">${escapeHTML(`Password changed ${formatDateTime(item.password_changed_at)}`)}</div>
           <div class="step-line">${escapeHTML(`Last login ${formatDateTime(item.last_login_at)}`)}</div>
+          <div class="step-line">${escapeHTML(`Source ${item.source || "unknown"}`)}</div>
         </div>
         ${actions.length ? `<div class="action-row">${actions.join("")}</div>` : ""}
       </div>
@@ -318,72 +319,6 @@ async function bootstrapSession() {
   } catch (error) {
     redirectToLanding("Sign in again to open the admin page.");
     return false;
-  }
-}
-
-async function createUser(event) {
-  event.preventDefault();
-
-  try {
-    await withBusy(async () => {
-      const payload = {
-        name: $("createName").value.trim(),
-        email: $("createEmail").value.trim(),
-        role: $("createRole").value,
-        password: $("createPassword").value,
-      };
-      setStatus("Creating user...");
-      const data = await requestJSON(
-        "/api/v1/admin/users",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-        "Failed to create the user.",
-      );
-
-      $("createUserForm").reset();
-      $("searchInput").value = data.user && data.user.email ? data.user.email : "";
-      setStatus(`Created ${data.user && data.user.email ? data.user.email : "the user"}.`);
-      await loadUsers();
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) {
-      redirectToLanding("Your admin session expired. Sign in again.");
-      return;
-    }
-    setStatus(error instanceof Error ? error.message : "Failed to create the user.", true);
-  }
-}
-
-async function resetPassword(userID) {
-  const nextPassword = window.prompt("Enter a new password for this user.");
-  if (!nextPassword) {
-    return;
-  }
-
-  try {
-    await withBusy(async () => {
-      setStatus("Resetting password...");
-      await requestJSON(
-        "/api/v1/admin/users/reset-password",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userID, password: nextPassword }),
-        },
-        "Failed to reset the password.",
-      );
-      setStatus("Password reset complete. Existing sessions were revoked.");
-      await loadUsers();
-    });
-  } catch (error) {
-    if (isUnauthorized(error)) {
-      redirectToLanding("Your admin session expired. Sign in again.");
-      return;
-    }
-    setStatus(error instanceof Error ? error.message : "Failed to reset the password.", true);
   }
 }
 
@@ -470,7 +405,6 @@ function bindActions() {
     event.preventDefault();
     loadUsers();
   });
-  $("createUserForm").addEventListener("submit", createUser);
   $("refreshBtn").addEventListener("click", () => loadUsers("Refreshing users..."));
   $("signOutBtn").addEventListener("click", signOut);
   $("userList").addEventListener("click", (event) => {
@@ -483,9 +417,6 @@ function bindActions() {
       return;
     }
     switch (target.dataset.action) {
-      case "reset-password":
-        resetPassword(userID);
-        break;
       case "deactivate-user":
         deactivateUser(userID);
         break;

@@ -30,6 +30,14 @@ func TestRequireAPITokenProtectsAnalyticsAPI(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.APIToken = "secret-token"
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthRoutesTest(t, conf, googleAuthRouteTestUser{
+		Code:     "demo-login",
+		Subject:  "google-demo-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -95,27 +103,7 @@ func TestRequireAPITokenProtectsAnalyticsAPI(t *testing.T) {
 	require.NoError(t, json.Unmarshal(env.Data, &data))
 	require.Equal(t, "registered", data.Status)
 
-	loginPayload, err := json.Marshal(request.LoginReq{
-		Email:    "demo@example.com",
-		Password: "demo1234",
-	})
-	require.NoError(t, err)
-
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginPayload))
-	loginReq = loginReq.WithContext(context.Background())
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	echo.ServeHTTP(loginRec, loginReq)
-	require.Equal(t, http.StatusOK, loginRec.Code)
-
-	var sessionCookie *http.Cookie
-	for _, cookie := range loginRec.Result().Cookies() {
-		if cookie.Name == service.WebSessionCookieName {
-			sessionCookie = cookie
-			break
-		}
-	}
-	require.NotNil(t, sessionCookie)
+	sessionCookie := loginWithGoogleRoutesTest(t, echo, "demo-login")
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	meReq = meReq.WithContext(context.Background())
@@ -131,14 +119,21 @@ func TestRequireAPITokenDisablesStaticTokenByDefaultInProd(t *testing.T) {
 	conf.App.APIToken = "secret-token"
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
 	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:       "beta-user",
-		OrgID:    "beta-org",
-		OrgName:  "Beta Org",
+		ID:      "beta-user",
+		OrgID:   "beta-org",
+		OrgName: "Beta Org",
+		Email:   "beta@example.com",
+		Name:    "Beta User",
+		Role:    "member",
+	}}
+	closeGoogle := configureGoogleAuthRoutesTest(t, conf, googleAuthRouteTestUser{
+		Code:     "beta-login",
+		Subject:  "google-beta-subject",
 		Email:    "beta@example.com",
 		Name:     "Beta User",
-		Role:     "member",
-		Password: "beta-pass",
-	}}
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -176,16 +171,6 @@ func TestRequireAPITokenDisablesStaticTokenByDefaultInProd(t *testing.T) {
 	echo.ServeHTTP(apiRec, apiReq)
 	require.Equal(t, http.StatusUnauthorized, apiRec.Code)
 
-	loginPayload, err := json.Marshal(request.LoginReq{
-		Email:    "beta@example.com",
-		Password: "beta-pass",
-	})
-	require.NoError(t, err)
-
-	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginPayload))
-	loginReq = loginReq.WithContext(context.Background())
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	echo.ServeHTTP(loginRec, loginReq)
-	require.Equal(t, http.StatusOK, loginRec.Code)
+	sessionCookie := loginWithGoogleRoutesTest(t, echo, "beta-login")
+	require.NotNil(t, sessionCookie)
 }

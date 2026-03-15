@@ -389,18 +389,6 @@
       text-transform: uppercase; color: var(--support);
       padding: 4px 10px; border-radius: 6px; background: var(--support-light);
     }
-    .field-grid { display: grid; gap: 14px; }
-    .field { display: grid; gap: 6px; }
-    .field-label { font-size: 13px; font-weight: 600; color: var(--ink); }
-    input[type="email"], input[type="password"] {
-      width: 100%; padding: 12px 14px; border-radius: 12px;
-      border: 1px solid var(--line-strong); background: #fff;
-      font: inherit; font-size: 15px; color: var(--ink);
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    input::placeholder { color: rgba(90, 105, 115, 0.55); }
-    input:focus { outline: none; border-color: var(--support); box-shadow: 0 0 0 3px rgba(30, 104, 112, 0.12); }
-
     .form-actions { display: grid; gap: 10px; }
     .login-btn {
       width: 100%; padding: 14px 16px; border: none; border-radius: 14px;
@@ -469,7 +457,7 @@
       <ul class="nav-links">
         <li><a href="#how-it-works" class="nav-link-text">How It Works</a></li>
         <li><a href="#configures" class="nav-link-text">What It Analyzes</a></li>
-        <li><a href="#login" class="nav-cta">Sign In</a></li>
+        <li><a href="#login" class="nav-cta">Continue</a></li>
       </ul>
     </div>
   </nav>
@@ -478,7 +466,7 @@
   <section class="hero wrap">
     <div class="hero-badge">
       <span class="hero-badge-dot"></span>
-      Closed Beta
+      Google Sign-In
     </div>
     <h1>See what your Codex agent <em>actually understood</em>.</h1>
     <p class="hero-sub">
@@ -715,7 +703,7 @@
   <section class="login-section wrap" id="login">
     <div class="login-copy">
       <h2>Stop guessing what your Codex agent did wrong</h2>
-      <p>Sign in and connect your Codex CLI. Crux will read session traces and explain exactly where intent and execution diverged.</p>
+      <p>Continue with Google, then connect your Codex CLI. Crux will read session traces and explain exactly where intent and execution diverged.</p>
       <ul class="login-features">
         <li>See what you asked vs. what the model actually understood</li>
         <li>Find the exact point where the model went off track</li>
@@ -723,28 +711,18 @@
       </ul>
     </div>
 
-    <form id="loginForm" class="login-panel">
+    <div class="login-panel" id="loginPanel">
       <div class="login-panel-header">
-        <span class="login-panel-title">Sign in</span>
-        <span class="login-panel-badge">Beta</span>
-      </div>
-      <div class="field-grid">
-        <label class="field">
-          <span class="field-label">Email</span>
-          <input id="email" type="email" autocomplete="username" placeholder="you@company.com">
-        </label>
-        <label class="field">
-          <span class="field-label">Password</span>
-          <input id="password" type="password" autocomplete="current-password" placeholder="Enter your beta password">
-        </label>
+        <span class="login-panel-title">Continue with Google</span>
+        <span class="login-panel-badge">OAuth</span>
       </div>
       <div class="form-actions">
-        <button id="loginButton" class="login-btn" type="submit">Sign in to dashboard</button>
+        <a id="googleLoginButton" class="login-btn" href="/api/v1/auth/google/start">Continue with Google</a>
       </div>
       <div class="status" id="status" data-tone="info" aria-live="polite">
-        Enter your beta credentials.
+        Use your Google account to create or access your workspace.
       </div>
-    </form>
+    </div>
   </section>
 
   <footer class="footer">
@@ -758,34 +736,7 @@
   </footer>
 
   <script>
-    const STORAGE_KEYS = {
-      sessionUser: "crux_session_user",
-      sessionOrg: "crux_session_org",
-      lastEmail: "crux_last_email",
-      activeTab: "crux_dashboard_tab"
-    };
-
     const $ = (id) => document.getElementById(id);
-
-    function readStorage(key, fallback = "") {
-      try {
-        const value = window.localStorage.getItem(key);
-        return value == null ? fallback : value;
-      } catch (error) {
-        return fallback;
-      }
-    }
-
-    function writeStorage(key, value) {
-      try {
-        if (value == null || value === "") {
-          window.localStorage.removeItem(key);
-          return;
-        }
-        window.localStorage.setItem(key, value);
-      } catch (error) {
-      }
-    }
 
     function setStatus(text, isError = false) {
       const status = $("status");
@@ -793,81 +744,28 @@
       status.dataset.tone = isError ? "error" : "info";
     }
 
-    async function requestJSON(url, options = {}, fallbackMessage = "Request failed.") {
-      const response = await fetch(url, Object.assign({ credentials: "same-origin" }, options));
-      const rawBody = await response.text();
-
-      let envelope = null;
-      if (rawBody) {
-        try {
-          envelope = JSON.parse(rawBody);
-        } catch (error) {
-          const unreadable = new Error(response.ok ? "The server returned an unreadable response." : fallbackMessage);
-          unreadable.status = response.status;
-          throw unreadable;
-        }
-      }
-
-      if (!response.ok || !envelope || envelope.code !== 0) {
-        const failure = new Error((envelope && (envelope.msg || envelope.message)) || fallbackMessage);
-        failure.status = response.status;
-        throw failure;
-      }
-
-      return envelope.data || {};
-    }
-
-    function restoreInputs() {
-      $("email").value = readStorage(STORAGE_KEYS.lastEmail, "");
+    function restoreNotice() {
       try {
-        const notice = window.sessionStorage.getItem("crux_redirect_notice");
-        if (notice) {
-          setStatus(notice, false);
-          window.sessionStorage.removeItem("crux_redirect_notice");
+        const params = new URLSearchParams(window.location.search);
+        const authError = params.get("auth_error");
+        const authNotice = params.get("auth_notice");
+        if (authError) {
+          setStatus(authError, true);
+        } else if (authNotice) {
+          setStatus(authNotice, false);
+        }
+        if (authError || authNotice) {
+          params.delete("auth_error");
+          params.delete("auth_notice");
+          const nextQuery = params.toString();
+          const nextURL = nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname;
+          window.history.replaceState({}, "", nextURL);
         }
       } catch (error) {
       }
     }
 
-    async function handleLogin(event) {
-      event.preventDefault();
-
-      const email = $("email").value.trim();
-      const password = $("password").value;
-      if (!email || !password) {
-        setStatus("Email and password are required.", true);
-        return;
-      }
-
-      const button = $("loginButton");
-      button.disabled = true;
-      button.textContent = "Signing in...";
-      setStatus("Signing in...");
-
-      try {
-        const data = await requestJSON("/api/v1/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password })
-        }, "Login failed.");
-
-        writeStorage(STORAGE_KEYS.sessionUser, JSON.stringify(data.user || {}));
-        writeStorage(STORAGE_KEYS.sessionOrg, JSON.stringify(data.organization || {}));
-        writeStorage(STORAGE_KEYS.lastEmail, email);
-        writeStorage(STORAGE_KEYS.activeTab, "focus");
-
-        setStatus("Signed in. Opening the dashboard...");
-        window.location.assign("/dashboard");
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "Login failed.", true);
-      } finally {
-        button.disabled = false;
-        button.textContent = "Sign in to dashboard";
-      }
-    }
-
-    $("loginForm").addEventListener("submit", handleLogin);
-    restoreInputs();
+    restoreNotice();
   </script>
 </body>
 

@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
 const TAB_IDS = ["overview", "trends", "sessions", "cli"];
 const REPORT_PANEL_IDS = ["actions", "history"];
 const WIZARD_STEPS = 4;
+const DEFAULT_SERVER_ORIGIN = "https://cruxai.ai";
 
 const state = {
   busy: false,
@@ -115,11 +116,23 @@ function setWizardStep(step) {
   });
 }
 
+function normalizeOrigin(value) {
+  return String(value == null ? "" : value).trim().replace(/\/+$/, "");
+}
+
+function buildSetupCommand(origin = window.location.origin || "") {
+  const normalizedOrigin = normalizeOrigin(origin);
+  if (!normalizedOrigin || normalizedOrigin === DEFAULT_SERVER_ORIGIN) {
+    return "crux setup";
+  }
+  return `crux setup --server ${normalizedOrigin}`;
+}
+
 function updateWizardCommands() {
-  const origin = window.location.origin || "http://127.0.0.1:8082";
-  const wizLogin = $("wizLoginCmd");
-  if (wizLogin) {
-    wizLogin.textContent = `crux setup --server ${origin}`;
+  const setupCommand = buildSetupCommand();
+  const wizSetup = $("wizSetupCmd");
+  if (wizSetup) {
+    wizSetup.textContent = setupCommand;
   }
 }
 
@@ -245,7 +258,7 @@ function renderAgentStatus(overview, reports) {
   } else if (totalSessions === 0) {
     bar.dataset.state = "";
     text.textContent =
-      "Waiting for sessions \u2014 connect a workspace to start observing";
+      "Waiting for sessions \u2014 run `crux setup` to register the repo and upload local Codex sessions";
   } else {
     bar.dataset.state = "";
     text.textContent = `Observing \u2014 analyzed ${totalSessions} session${totalSessions > 1 ? "s" : ""}, researching usage patterns`;
@@ -3691,6 +3704,7 @@ async function withBusy(task) {
 async function issueCLIToken() {
   try {
     await withBusy(async () => {
+      const setupCommand = buildSetupCommand();
       const data = await requestJSON(
         "/api/v1/auth/cli-tokens",
         {
@@ -3705,8 +3719,8 @@ async function issueCLIToken() {
 
       $("issuedCliToken").textContent = data.token || "Token was issued.";
       $("cliTokenMeta").textContent = data.expires_at
-        ? `CLI token issued for ${data.label || "CLI setup"} and expires ${formatDateTime(data.expires_at)}. Paste it into \`crux setup --server ${window.location.origin || "http://127.0.0.1:8082"}\` on the machine you want to connect.`
-        : `CLI token issued. Paste it into \`crux setup --server ${window.location.origin || "http://127.0.0.1:8082"}\` on the machine you want to connect.`;
+        ? `CLI token issued for ${data.label || "CLI setup"} and expires ${formatDateTime(data.expires_at)}. Paste it into \`${setupCommand}\` on the machine you want to connect.`
+        : `CLI token issued. Paste it into \`${setupCommand}\` on the machine you want to connect.`;
 
       const wizOutput = $("wizTokenOutput");
       if (wizOutput) {
@@ -3720,7 +3734,7 @@ async function issueCLIToken() {
       );
       renderCLITokens(toArray(tokens.items));
       setStatus(
-        `CLI token issued. Paste it into \`crux setup --server ${window.location.origin || "http://127.0.0.1:8082"}\` on the device you want to connect.`,
+        `CLI token issued. Paste it into \`${setupCommand}\` on the device you want to connect.`,
       );
     });
   } catch (error) {

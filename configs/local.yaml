@@ -35,6 +35,10 @@ Auth:
   AllowDemoUser: true
   StaticTokenEnabled: true
   BootstrapUsers: []
+  Google:
+    ClientID: ""
+    ClientSecret: ""
+    AllowedDomains: []
 
 HTTP:
   AllowedOrigins:

@@ -6,6 +6,9 @@ CRUX_LDFLAGS = -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Version=$(VERSI
 run:
 	APP_MODE=local go run main.go wire_gen.go
 
+run-local-google-stub:
+	./scripts/run_local_google_stub.sh
+
 run-cli:
 	go run ./cmd/crux --help
 

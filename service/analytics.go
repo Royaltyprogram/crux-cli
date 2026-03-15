@@ -59,50 +59,6 @@ type auditEventInput struct {
 	Reason       string
 }
 
-func (s *AnalyticsService) Login(ctx context.Context, req *request.LoginReq) (*response.LoginResp, error) {
-	_ = ctx
-
-	now := time.Now().UTC()
-
-	s.AnalyticsStore.mu.Lock()
-	defer s.AnalyticsStore.mu.Unlock()
-
-	user := s.AnalyticsStore.findUserByEmailLocked(req.Email)
-	if !verifyPassword(user, req.Password) {
-		return nil, ecode.Unauthorized(1002, "invalid email or password")
-	}
-
-	org, ok := s.AnalyticsStore.organizations[user.OrgID]
-	if !ok {
-		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown org_id"))
-	}
-
-	tokenValue, tokenRecord, err := s.AnalyticsStore.issueAccessTokenLocked(TokenKindWebSession, user.OrgID, user.ID, "dashboard session", defaultSessionTokenTTL, now)
-	if err != nil {
-		return nil, err
-	}
-
-	user.LastLoginAt = &now
-	s.appendAuditLocked(ctx, user.OrgID, auditEventInput{
-		Type:        "auth.login",
-		Message:     "dashboard session created",
-		ActorUserID: user.ID,
-		ActorRole:   normalizeUserRole(user.Role),
-		Result:      "success",
-		Reason:      "user authenticated with email and password",
-	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		return nil, err
-	}
-
-	return &response.LoginResp{
-		SessionToken:     tokenValue,
-		SessionExpiresAt: tokenRecord.ExpiresAt,
-		User:             toSessionUser(user),
-		Organization:     toSessionOrganization(org),
-	}, nil
-}
-
 func (s *AnalyticsService) CurrentSession(ctx context.Context) (*response.AuthSessionResp, error) {
 	identity, err := s.requireUserIdentity(ctx, TokenKindWebSession, TokenKindCLI)
 	if err != nil {
@@ -1399,101 +1355,6 @@ func (s *AnalyticsService) ListAdminUsers(ctx context.Context, req *request.Admi
 	return &response.AdminUserListResp{Items: items}, nil
 }
 
-func (s *AnalyticsService) CreateAdminUser(ctx context.Context, req *request.AdminUserCreateReq) (*response.AdminUserCreateResp, error) {
-	now := time.Now().UTC()
-
-	s.AnalyticsStore.mu.Lock()
-	defer s.AnalyticsStore.mu.Unlock()
-
-	identity, _, err := s.requireAdminUserLocked(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	email := normalizeEmail(req.Email)
-	name := strings.TrimSpace(req.Name)
-	if email == "" {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("email is required"))
-	}
-	if name == "" {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("name is required"))
-	}
-	if existing := s.AnalyticsStore.findUserByEmailLocked(email); existing != nil {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("email already exists"))
-	}
-	role, ok := parseUserRole(req.Role)
-	if !ok {
-		return nil, ecode.InvalidParams.WithCause(ecode.NewInvalidParamsErr("invalid role"))
-	}
-	salt, hash := hashPassword(req.Password, "")
-	user := &User{
-		ID:                s.AnalyticsStore.nextID("user"),
-		OrgID:             identity.OrgID,
-		Email:             email,
-		Name:              name,
-		Source:            userSourceManaged,
-		Role:              role,
-		Status:            userStatusActive,
-		PasswordSalt:      salt,
-		PasswordHash:      hash,
-		CreatedAt:         now,
-		PasswordChangedAt: cloneTime(&now),
-	}
-	s.AnalyticsStore.users[user.ID] = user
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
-		Type:         "admin.user_created",
-		Message:      "admin created a managed user",
-		TargetUserID: user.ID,
-		Result:       "success",
-		Reason:       "managed user created from the admin console",
-	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		return nil, err
-	}
-
-	return &response.AdminUserCreateResp{
-		Status: "created",
-		User:   toAdminUserResp(user),
-	}, nil
-}
-
-func (s *AnalyticsService) ResetAdminUserPassword(ctx context.Context, req *request.AdminUserPasswordResetReq) (*response.AdminUserPasswordResetResp, error) {
-	now := time.Now().UTC()
-
-	s.AnalyticsStore.mu.Lock()
-	defer s.AnalyticsStore.mu.Unlock()
-
-	identity, _, err := s.requireAdminUserLocked(ctx)
-	if err != nil {
-		return nil, err
-	}
-	user, err := s.findAdminManagedUserLocked(identity.OrgID, req.UserID)
-	if err != nil {
-		return nil, err
-	}
-	salt, hash := hashPassword(req.Password, "")
-	user.PasswordSalt = salt
-	user.PasswordHash = hash
-	user.PasswordChangedAt = cloneTime(&now)
-	s.AnalyticsStore.revokeUserTokensLocked(user.ID, now)
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
-		Type:         "admin.user_password_reset",
-		Message:      "admin reset a user password",
-		TargetUserID: user.ID,
-		Result:       "success",
-		Reason:       "managed user password reset and sessions revoked",
-	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
-		return nil, err
-	}
-
-	return &response.AdminUserPasswordResetResp{
-		Status:            "password_reset",
-		UserID:            user.ID,
-		PasswordChangedAt: now,
-	}, nil
-}
-
 func (s *AnalyticsService) DeactivateAdminUser(ctx context.Context, req *request.AdminUserDeactivateReq) (*response.AdminUserDeactivateResp, error) {
 	now := time.Now().UTC()
 
@@ -1504,7 +1365,7 @@ func (s *AnalyticsService) DeactivateAdminUser(ctx context.Context, req *request
 	if err != nil {
 		return nil, err
 	}
-	user, err := s.findAdminManagedUserLocked(identity.OrgID, req.UserID)
+	user, err := s.findAdminUserLocked(identity.OrgID, req.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -1519,7 +1380,7 @@ func (s *AnalyticsService) DeactivateAdminUser(ctx context.Context, req *request
 		Message:      "admin deactivated a user",
 		TargetUserID: user.ID,
 		Result:       "success",
-		Reason:       "managed user disabled and sessions revoked",
+		Reason:       "organization user disabled and sessions revoked",
 	})
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
@@ -1542,7 +1403,7 @@ func (s *AnalyticsService) DeleteAdminUser(ctx context.Context, req *request.Adm
 	if err != nil {
 		return nil, err
 	}
-	user, err := s.findAdminManagedUserLocked(identity.OrgID, req.UserID)
+	user, err := s.findAdminUserLocked(identity.OrgID, req.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -1560,7 +1421,7 @@ func (s *AnalyticsService) DeleteAdminUser(ctx context.Context, req *request.Adm
 		Message:      "admin deleted a user",
 		TargetUserID: user.ID,
 		Result:       "success",
-		Reason:       "managed user soft-deleted and sessions revoked",
+		Reason:       "organization user soft-deleted and sessions revoked",
 	})
 	if err := s.AnalyticsStore.persistLocked(); err != nil {
 		return nil, err
@@ -1948,7 +1809,7 @@ func (s *AnalyticsService) appendAuditLocked(ctx context.Context, orgID string, 
 	})
 }
 
-func (s *AnalyticsService) findAdminManagedUserLocked(orgID, userID string) (*User, error) {
+func (s *AnalyticsService) findAdminUserLocked(orgID, userID string) (*User, error) {
 	userID = strings.TrimSpace(userID)
 	user, ok := s.AnalyticsStore.users[userID]
 	if !ok || user == nil || user.OrgID != orgID {
@@ -2008,18 +1869,17 @@ func toAdminUserResp(user *User) response.AdminUserResp {
 		return response.AdminUserResp{}
 	}
 	return response.AdminUserResp{
-		ID:                user.ID,
-		OrgID:             user.OrgID,
-		Email:             user.Email,
-		Name:              user.Name,
-		Source:            user.Source,
-		Role:              normalizeUserRole(user.Role),
-		Status:            normalizeUserStatus(user.Status),
-		CreatedAt:         user.CreatedAt,
-		PasswordChangedAt: cloneTime(user.PasswordChangedAt),
-		LastLoginAt:       cloneTime(user.LastLoginAt),
-		DisabledAt:        cloneTime(user.DisabledAt),
-		DeletedAt:         cloneTime(user.DeletedAt),
+		ID:          user.ID,
+		OrgID:       user.OrgID,
+		Email:       user.Email,
+		Name:        user.Name,
+		Source:      user.Source,
+		Role:        normalizeUserRole(user.Role),
+		Status:      normalizeUserStatus(user.Status),
+		CreatedAt:   user.CreatedAt,
+		LastLoginAt: cloneTime(user.LastLoginAt),
+		DisabledAt:  cloneTime(user.DisabledAt),
+		DeletedAt:   cloneTime(user.DeletedAt),
 	}
 }
 

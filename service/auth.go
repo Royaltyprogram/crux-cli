@@ -25,11 +25,10 @@ const (
 	defaultDemoUserID   = "demo-user"
 	defaultDemoUserName = "Demo Operator"
 	defaultDemoEmail    = "demo@example.com"
-	defaultDemoPassword = "demo1234"
 
 	userSourceDemo      = "demo"
 	userSourceBootstrap = "bootstrap"
-	userSourceManaged   = "managed"
+	userSourceGoogle    = "google"
 
 	userRoleAdmin  = "admin"
 	userRoleMember = "member"
@@ -37,6 +36,8 @@ const (
 	userStatusActive   = "active"
 	userStatusDisabled = "disabled"
 	userStatusDeleted  = "deleted"
+
+	authProviderGoogle = "google"
 )
 
 type AccessToken struct {
@@ -78,6 +79,9 @@ func (s *AnalyticsStore) ensureBootstrapData() error {
 
 	now := time.Now().UTC()
 	modified := false
+	if s.revokeLegacyWebSessionsLocked(now) {
+		modified = true
+	}
 	if s.allowDemoUser {
 		modified = s.ensureDemoUserLocked(now)
 	} else if s.removeDemoUserLocked() {
@@ -114,18 +118,15 @@ func (s *AnalyticsStore) ensureDemoUserLocked(now time.Time) bool {
 
 	user := s.users[defaultDemoUserID]
 	if user == nil {
-		salt, hash := hashPassword(defaultDemoPassword, "")
 		s.users[defaultDemoUserID] = &User{
-			ID:           defaultDemoUserID,
-			OrgID:        defaultDemoOrgID,
-			Email:        defaultDemoEmail,
-			Name:         defaultDemoUserName,
-			Source:       userSourceDemo,
-			Role:         userRoleAdmin,
-			Status:       userStatusActive,
-			PasswordSalt: salt,
-			PasswordHash: hash,
-			CreatedAt:    now,
+			ID:        defaultDemoUserID,
+			OrgID:     defaultDemoOrgID,
+			Email:     defaultDemoEmail,
+			Name:      defaultDemoUserName,
+			Source:    userSourceDemo,
+			Role:      userRoleAdmin,
+			Status:    userStatusActive,
+			CreatedAt: now,
 		}
 		return true
 	}
@@ -158,13 +159,6 @@ func (s *AnalyticsStore) ensureDemoUserLocked(now time.Time) bool {
 	}
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = now
-		modified = true
-	}
-	if user.PasswordSalt == "" || user.PasswordHash == "" {
-		salt, hash := hashPassword(defaultDemoPassword, "")
-		user.PasswordSalt = salt
-		user.PasswordHash = hash
-		user.PasswordChangedAt = cloneTime(&now)
 		modified = true
 	}
 
@@ -216,12 +210,11 @@ func (s *AnalyticsStore) ensureConfiguredUsersLocked(now time.Time) bool {
 
 	for _, item := range s.bootstrapUsers {
 		email := normalizeEmail(item.Email)
-		password := strings.TrimSpace(item.Password)
 		role := normalizeUserRole(item.Role)
 		if role == "" {
 			role = userRoleMember
 		}
-		if email == "" || password == "" {
+		if email == "" {
 			continue
 		}
 
@@ -258,19 +251,15 @@ func (s *AnalyticsStore) ensureConfiguredUsersLocked(now time.Time) bool {
 			user = s.findUserByEmailLocked(email)
 		}
 		if user == nil {
-			salt, hash := hashPassword(password, "")
 			s.users[userID] = &User{
-				ID:                userID,
-				OrgID:             orgID,
-				Email:             email,
-				Name:              firstNonEmpty(strings.TrimSpace(item.Name), userID),
-				Source:            userSourceBootstrap,
-				Role:              role,
-				Status:            userStatusActive,
-				PasswordSalt:      salt,
-				PasswordHash:      hash,
-				CreatedAt:         now,
-				PasswordChangedAt: cloneTime(&now),
+				ID:        userID,
+				OrgID:     orgID,
+				Email:     email,
+				Name:      firstNonEmpty(strings.TrimSpace(item.Name), userID),
+				Source:    userSourceBootstrap,
+				Role:      role,
+				Status:    userStatusActive,
+				CreatedAt: now,
 			}
 			modified = true
 			continue
@@ -314,14 +303,6 @@ func (s *AnalyticsStore) ensureConfiguredUsersLocked(now time.Time) bool {
 		}
 		if user.CreatedAt.IsZero() {
 			user.CreatedAt = now
-			modified = true
-		}
-		salt, hash := hashPassword(password, user.PasswordSalt)
-		if user.PasswordSalt != salt || user.PasswordHash != hash {
-			user.PasswordSalt = salt
-			user.PasswordHash = hash
-			user.PasswordChangedAt = cloneTime(&now)
-			accessChanged = true
 			modified = true
 		}
 		if accessChanged && s.revokeUserTokensLocked(user.ID, now) {
@@ -370,6 +351,26 @@ func (s *AnalyticsStore) revokeUserTokensLocked(userID string, now time.Time) bo
 	return modified
 }
 
+func (s *AnalyticsStore) revokeLegacyWebSessionsLocked(now time.Time) bool {
+	modified := false
+	for _, token := range s.accessTokens {
+		if token == nil || token.Kind != TokenKindWebSession || token.RevokedAt != nil {
+			continue
+		}
+		user, ok := s.users[token.UserID]
+		if !ok || user == nil {
+			continue
+		}
+		if normalizeAuthProvider(user.AuthProvider) == authProviderGoogle {
+			continue
+		}
+		revokedAt := now
+		token.RevokedAt = &revokedAt
+		modified = true
+	}
+	return modified
+}
+
 func (s *AnalyticsStore) findUserByEmailLocked(email string) *User {
 	normalized := normalizeEmail(email)
 	if normalized == "" {
@@ -378,6 +379,25 @@ func (s *AnalyticsStore) findUserByEmailLocked(email string) *User {
 
 	for _, user := range s.users {
 		if normalizeEmail(user.Email) == normalized {
+			return user
+		}
+	}
+
+	return nil
+}
+
+func (s *AnalyticsStore) findUserByAuthSubjectLocked(provider, subject string) *User {
+	normalizedProvider := normalizeAuthProvider(provider)
+	normalizedSubject := strings.TrimSpace(subject)
+	if normalizedProvider == "" || normalizedSubject == "" {
+		return nil
+	}
+
+	for _, user := range s.users {
+		if normalizeAuthProvider(user.AuthProvider) != normalizedProvider {
+			continue
+		}
+		if strings.TrimSpace(user.AuthSubject) == normalizedSubject {
 			return user
 		}
 	}
@@ -468,20 +488,8 @@ func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-func hashPassword(password, salt string) (string, string) {
-	if salt == "" {
-		salt = randomHex(16)
-	}
-	return salt, hashSecret(salt + "\n" + password)
-}
-
-func verifyPassword(user *User, password string) bool {
-	if !userCanAuthenticate(user) || user.PasswordSalt == "" || user.PasswordHash == "" {
-		return false
-	}
-
-	_, hash := hashPassword(password, user.PasswordSalt)
-	return subtle.ConstantTimeCompare([]byte(hash), []byte(user.PasswordHash)) == 1
+func normalizeAuthProvider(provider string) string {
+	return strings.ToLower(strings.TrimSpace(provider))
 }
 
 func userCanAuthenticate(user *User) bool {

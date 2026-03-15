@@ -2,11 +2,6 @@ package request
 
 import "time"
 
-type LoginReq struct {
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required"`
-}
-
 type IssueCLITokenReq struct {
 	Label string `json:"label"`
 }
@@ -128,18 +123,6 @@ type AdminUserListReq struct {
 	Role           string `query:"role"`
 	Status         string `query:"status"`
 	IncludeDeleted bool   `query:"include_deleted"`
-}
-
-type AdminUserCreateReq struct {
-	Email    string `json:"email" validate:"required,email"`
-	Name     string `json:"name" validate:"required"`
-	Role     string `json:"role"`
-	Password string `json:"password" validate:"required"`
-}
-
-type AdminUserPasswordResetReq struct {
-	UserID   string `json:"user_id" validate:"required"`
-	Password string `json:"password" validate:"required"`
 }
 
 type AdminUserDeactivateReq struct {

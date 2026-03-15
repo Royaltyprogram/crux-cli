@@ -29,6 +29,14 @@ type envelope struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+type googleAuthTestUser struct {
+	Code     string
+	Subject  string
+	Email    string
+	Name     string
+	Verified bool
+}
+
 func isBenignRouteConnError(err error) bool {
 	if err == nil {
 		return false
@@ -444,9 +452,17 @@ func newRouteResearchConfig(t *testing.T) *configs.Config {
 	}
 }
 
-func TestAnalyticsRouteLoginAndCLITokenFlow(t *testing.T) {
+func TestAnalyticsRouteGoogleLoginAndCLITokenFlow(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "demo-login",
+		Subject:  "google-demo-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -465,18 +481,10 @@ func TestAnalyticsRouteLoginAndCLITokenFlow(t *testing.T) {
 	})
 	route.RegisterRoute(echo.Group(""))
 
-	loginRec := postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "demo@example.com",
-		Password: "demo1234",
-	})
-	loginResp := decodeOK[response.LoginResp](t, loginRec)
-	require.Empty(t, loginResp.SessionToken)
-	require.Equal(t, "demo@example.com", loginResp.User.Email)
-	require.Equal(t, "admin", loginResp.User.Role)
-	require.Equal(t, "active", loginResp.User.Status)
-	sessionCookie := requireCookie(t, loginRec, service.WebSessionCookieName)
+	sessionCookie := loginWithGoogleControllerTest(t, echo, "demo-login")
 
 	sessionResp := getJSON[response.AuthSessionResp](t, echo, "", "/api/v1/auth/me", nil, sessionCookie)
+	require.Equal(t, "demo@example.com", sessionResp.User.Email)
 	require.Equal(t, "demo-org", sessionResp.Organization.ID)
 	require.Equal(t, "demo-user", sessionResp.User.ID)
 	require.Equal(t, "admin", sessionResp.User.Role)
@@ -532,9 +540,43 @@ func TestAnalyticsRouteLoginAndCLITokenFlow(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestAnalyticsRouteRegisterAgentRejectsSpoofedUserID(t *testing.T) {
+func TestAnalyticsRouteGoogleSignupFlow(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+
+	googleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			require.Equal(t, http.MethodPost, r.Method)
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, "google-client-id", r.Form.Get("client_id"))
+			require.Equal(t, "google-client-secret", r.Form.Get("client_secret"))
+			require.Equal(t, "test-google-code", r.Form.Get("code"))
+			require.Equal(t, "authorization_code", r.Form.Get("grant_type"))
+			require.Equal(t, "http://example.com/api/v1/auth/google/callback", r.Form.Get("redirect_uri"))
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`{"access_token":"google-access-token","token_type":"Bearer"}`))
+			if !isBenignRouteConnError(err) {
+				require.NoError(t, err)
+			}
+		case "/userinfo":
+			require.Equal(t, "Bearer google-access-token", r.Header.Get("Authorization"))
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`{"sub":"google-sub-1","email":"owner@example.com","email_verified":true,"name":"Owner Example"}`))
+			if !isBenignRouteConnError(err) {
+				require.NoError(t, err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(googleServer.Close)
+
+	conf.Auth.Google.ClientID = "google-client-id"
+	conf.Auth.Google.ClientSecret = "google-client-secret"
+	conf.Auth.Google.AuthURL = googleServer.URL + "/auth"
+	conf.Auth.Google.TokenURL = googleServer.URL + "/token"
+	conf.Auth.Google.UserInfoURL = googleServer.URL + "/userinfo"
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -553,11 +595,83 @@ func TestAnalyticsRouteRegisterAgentRejectsSpoofedUserID(t *testing.T) {
 	})
 	route.RegisterRoute(echo.Group(""))
 
-	loginRec := postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
+	startReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/start", nil)
+	startReq = startReq.WithContext(context.Background())
+	startReq.Header.Set("User-Agent", "route-test-client")
+	startRec := httptest.NewRecorder()
+	echo.ServeHTTP(startRec, startReq)
+	require.Equal(t, http.StatusSeeOther, startRec.Code)
+
+	startLocation := startRec.Header().Get("Location")
+	require.NotEmpty(t, startLocation)
+	startURL, err := url.Parse(startLocation)
+	require.NoError(t, err)
+	require.Equal(t, googleServer.URL+"/auth", startURL.Scheme+"://"+startURL.Host+startURL.Path)
+	require.Equal(t, "google-client-id", startURL.Query().Get("client_id"))
+	require.Equal(t, "http://example.com/api/v1/auth/google/callback", startURL.Query().Get("redirect_uri"))
+	require.Equal(t, "code", startURL.Query().Get("response_type"))
+	require.Contains(t, startURL.Query().Get("scope"), "openid")
+	require.Contains(t, startURL.Query().Get("scope"), "email")
+	require.Contains(t, startURL.Query().Get("scope"), "profile")
+
+	stateCookie := requireCookie(t, startRec, service.GoogleOAuthStateCookieName)
+	callbackURL := startURL.Query().Get("redirect_uri") + "?code=test-google-code&state=" + url.QueryEscape(startURL.Query().Get("state"))
+	callbackReq := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	callbackReq = callbackReq.WithContext(context.Background())
+	callbackReq.Header.Set("User-Agent", "route-test-client")
+	callbackReq.AddCookie(stateCookie)
+	callbackRec := httptest.NewRecorder()
+	echo.ServeHTTP(callbackRec, callbackReq)
+	require.Equal(t, http.StatusSeeOther, callbackRec.Code)
+	require.Equal(t, "/dashboard", callbackRec.Header().Get("Location"))
+
+	sessionCookie := requireCookie(t, callbackRec, service.WebSessionCookieName)
+	require.NotEmpty(t, sessionCookie.Value)
+	expiredStateCookie := requireCookie(t, callbackRec, service.GoogleOAuthStateCookieName)
+	require.Equal(t, -1, expiredStateCookie.MaxAge)
+
+	sessionResp := getJSON[response.AuthSessionResp](t, echo, "", "/api/v1/auth/me", nil, sessionCookie)
+	require.Equal(t, "owner@example.com", sessionResp.User.Email)
+	require.Equal(t, "Owner Example", sessionResp.User.Name)
+	require.Equal(t, "admin", sessionResp.User.Role)
+	require.Equal(t, "active", sessionResp.User.Status)
+	require.NotEmpty(t, sessionResp.User.ID)
+	require.NotEqual(t, "demo-user", sessionResp.User.ID)
+	require.NotEmpty(t, sessionResp.Organization.ID)
+	require.NotEqual(t, "demo-org", sessionResp.Organization.ID)
+	require.Contains(t, sessionResp.Organization.Name, "Workspace")
+}
+
+func TestAnalyticsRouteRegisterAgentRejectsSpoofedUserID(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "demo-login",
+		Subject:  "google-demo-subject",
 		Email:    "demo@example.com",
-		Password: "demo1234",
+		Name:     "Demo Operator",
+		Verified: true,
 	})
-	sessionCookie := requireCookie(t, loginRec, service.WebSessionCookieName)
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 1,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	sessionCookie := loginWithGoogleControllerTest(t, echo, "demo-login")
 
 	rec := postJSONExpectCode(t, echo, "", http.MethodPost, "/api/v1/agents/register", request.RegisterAgentReq{
 		OrgID:      "demo-org",
@@ -572,6 +686,34 @@ func TestAnalyticsRouteRegisterAgentRejectsSpoofedUserID(t *testing.T) {
 func TestAnalyticsRouteAdminUserLifecycle(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	conf.Auth.AllowDemoUser = true
+	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
+		ID:      "member-1",
+		OrgID:   "demo-org",
+		OrgName: "Demo Org",
+		Email:   "member@example.com",
+		Name:    "Member User",
+		Role:    "member",
+	}}
+	closeGoogle := configureGoogleAuthControllerTest(
+		t,
+		conf,
+		googleAuthTestUser{
+			Code:     "demo-login",
+			Subject:  "google-demo-subject",
+			Email:    "demo@example.com",
+			Name:     "Demo Operator",
+			Verified: true,
+		},
+		googleAuthTestUser{
+			Code:     "member-login",
+			Subject:  "google-member-subject",
+			Email:    "member@example.com",
+			Name:     "Member User",
+			Verified: true,
+		},
+	)
+	defer closeGoogle()
 
 	store, err := service.NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -590,62 +732,25 @@ func TestAnalyticsRouteAdminUserLifecycle(t *testing.T) {
 	})
 	route.RegisterRoute(echo.Group(""))
 
-	loginRec := postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "demo@example.com",
-		Password: "demo1234",
-	})
-	adminCookie := requireCookie(t, loginRec, service.WebSessionCookieName)
-
-	createResp := postJSON[response.AdminUserCreateResp](t, echo, "", http.MethodPost, "/api/v1/admin/users", request.AdminUserCreateReq{
-		Email:    "member@example.com",
-		Name:     "Member User",
-		Role:     "member",
-		Password: "member-pass-1",
-	}, adminCookie)
-	require.Equal(t, "created", createResp.Status)
-	require.Equal(t, "member", createResp.User.Role)
-	require.Equal(t, "active", createResp.User.Status)
+	adminCookie := loginWithGoogleControllerTest(t, echo, "demo-login")
 
 	adminList := getJSON[response.AdminUserListResp](t, echo, "", "/api/v1/admin/users", url.Values{
 		"search": []string{"member@example.com"},
 	}, adminCookie)
 	require.Len(t, adminList.Items, 1)
-	require.Equal(t, createResp.User.ID, adminList.Items[0].ID)
+	require.Equal(t, "member", adminList.Items[0].Role)
+	require.Equal(t, "active", adminList.Items[0].Status)
+	memberUserID := adminList.Items[0].ID
 
-	memberLoginRec := postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "member@example.com",
-		Password: "member-pass-1",
-	})
-	memberCookie := requireCookie(t, memberLoginRec, service.WebSessionCookieName)
+	memberCookie := loginWithGoogleControllerTest(t, echo, "member-login")
 
 	memberAdminRec := getJSONExpectCode(t, echo, "", "/api/v1/admin/users", nil, http.StatusForbidden, memberCookie)
 	var forbidden envelope
 	require.NoError(t, json.Unmarshal(memberAdminRec.Body.Bytes(), &forbidden))
 	require.NotEqual(t, 0, forbidden.Code)
 
-	resetResp := postJSON[response.AdminUserPasswordResetResp](t, echo, "", http.MethodPost, "/api/v1/admin/users/reset-password", request.AdminUserPasswordResetReq{
-		UserID:   createResp.User.ID,
-		Password: "member-pass-2",
-	}, adminCookie)
-	require.Equal(t, "password_reset", resetResp.Status)
-
-	memberSessionAfterReset := getJSONExpectCode(t, echo, "", "/api/v1/auth/me", nil, http.StatusUnauthorized, memberCookie)
-	require.Equal(t, http.StatusUnauthorized, memberSessionAfterReset.Code)
-
-	oldPasswordRec := postJSONExpectCode(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "member@example.com",
-		Password: "member-pass-1",
-	}, http.StatusUnauthorized)
-	require.Equal(t, http.StatusUnauthorized, oldPasswordRec.Code)
-
-	memberLoginRec = postJSONRecorder(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "member@example.com",
-		Password: "member-pass-2",
-	})
-	memberCookie = requireCookie(t, memberLoginRec, service.WebSessionCookieName)
-
 	deactivateResp := postJSON[response.AdminUserDeactivateResp](t, echo, "", http.MethodPost, "/api/v1/admin/users/deactivate", request.AdminUserDeactivateReq{
-		UserID: createResp.User.ID,
+		UserID: memberUserID,
 	}, adminCookie)
 	require.Equal(t, "deactivated", deactivateResp.Status)
 
@@ -656,10 +761,10 @@ func TestAnalyticsRouteAdminUserLifecycle(t *testing.T) {
 		"status": []string{"disabled"},
 	}, adminCookie)
 	require.Len(t, deactivatedList.Items, 1)
-	require.Equal(t, createResp.User.ID, deactivatedList.Items[0].ID)
+	require.Equal(t, memberUserID, deactivatedList.Items[0].ID)
 
 	deleteResp := postJSON[response.AdminUserDeleteResp](t, echo, "", http.MethodPost, "/api/v1/admin/users/delete", request.AdminUserDeleteReq{
-		UserID: createResp.User.ID,
+		UserID: memberUserID,
 	}, adminCookie)
 	require.Equal(t, "deleted", deleteResp.Status)
 
@@ -675,28 +780,27 @@ func TestAnalyticsRouteAdminUserLifecycle(t *testing.T) {
 	}, adminCookie)
 	require.Len(t, deletedList.Items, 1)
 	require.Equal(t, "deleted", deletedList.Items[0].Status)
+	require.Equal(t, memberUserID, deletedList.Items[0].ID)
 
-	deletedLoginRec := postJSONExpectCode(t, echo, "", http.MethodPost, "/api/v1/auth/login", request.LoginReq{
-		Email:    "member@example.com",
-		Password: "member-pass-2",
-	}, http.StatusUnauthorized)
-	require.Equal(t, http.StatusUnauthorized, deletedLoginRec.Code)
+	deletedLoginRec := loginWithGoogleControllerTestExpectRedirect(t, echo, "member-login")
+	require.Equal(t, http.StatusSeeOther, deletedLoginRec.Code)
+	require.Contains(t, deletedLoginRec.Header().Get("Location"), "auth_error=user+account+cannot+sign+in")
 
 	auditResp := getJSON[response.AuditListResp](t, echo, "", "/api/v1/audits", url.Values{
 		"org_id":         []string{"demo-org"},
 		"type":           []string{"admin.user_deleted"},
-		"target_user_id": []string{createResp.User.ID},
+		"target_user_id": []string{memberUserID},
 		"limit":          []string{"1"},
 	}, adminCookie)
 	require.Len(t, auditResp.Items, 1)
 	require.Equal(t, "admin.user_deleted", auditResp.Items[0].Type)
 	require.Equal(t, "demo-user", auditResp.Items[0].ActorUserID)
 	require.Equal(t, "admin", auditResp.Items[0].ActorRole)
-	require.Equal(t, createResp.User.ID, auditResp.Items[0].TargetUserID)
+	require.Equal(t, memberUserID, auditResp.Items[0].TargetUserID)
 	require.NotEmpty(t, auditResp.Items[0].SourceIP)
 	require.Equal(t, "route-test-client", auditResp.Items[0].UserAgent)
 	require.Equal(t, "success", auditResp.Items[0].Result)
-	require.Equal(t, "managed user soft-deleted and sessions revoked", auditResp.Items[0].Reason)
+	require.Equal(t, "organization user soft-deleted and sessions revoked", auditResp.Items[0].Reason)
 }
 
 func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
@@ -724,18 +828,22 @@ func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
 	for _, tc := range []struct {
 		method string
 		path   string
+		code   int
 	}{
-		{method: http.MethodPost, path: "/api/v1/devices/register"},
-		{method: http.MethodPost, path: "/api/v1/projects/connect"},
-		{method: http.MethodGet, path: "/api/v1/execution-queue"},
-		{method: http.MethodPost, path: "/api/v1/executions/result"},
+		{method: http.MethodPost, path: "/api/v1/auth/login", code: http.StatusNotFound},
+		{method: http.MethodPost, path: "/api/v1/admin/users", code: http.StatusMethodNotAllowed},
+		{method: http.MethodPost, path: "/api/v1/admin/users/reset-password", code: http.StatusNotFound},
+		{method: http.MethodPost, path: "/api/v1/devices/register", code: http.StatusNotFound},
+		{method: http.MethodPost, path: "/api/v1/projects/connect", code: http.StatusNotFound},
+		{method: http.MethodGet, path: "/api/v1/execution-queue", code: http.StatusNotFound},
+		{method: http.MethodPost, path: "/api/v1/executions/result", code: http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req = req.WithContext(context.Background())
 		req.Header.Set("X-Crux-Token", conf.App.APIToken)
 		rec := httptest.NewRecorder()
 		echo.ServeHTTP(rec, req)
-		require.Equal(t, http.StatusNotFound, rec.Code, "%s %s should be removed", tc.method, tc.path)
+		require.Equal(t, tc.code, rec.Code, "%s %s should be removed", tc.method, tc.path)
 	}
 }
 
@@ -870,4 +978,96 @@ func requireCookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *h
 
 	require.FailNowf(t, "cookie missing", "expected cookie %q on response", name)
 	return nil
+}
+
+func configureGoogleAuthControllerTest(t *testing.T, conf *configs.Config, users ...googleAuthTestUser) func() {
+	t.Helper()
+
+	byCode := make(map[string]googleAuthTestUser, len(users))
+	for _, user := range users {
+		byCode[user.Code] = user
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			require.Equal(t, http.MethodPost, r.Method)
+			require.NoError(t, r.ParseForm())
+			code := r.Form.Get("code")
+			user, ok := byCode[code]
+			require.True(t, ok, "unexpected google auth code %q", code)
+			require.Equal(t, "test-google-client-id", r.Form.Get("client_id"))
+			require.Equal(t, "test-google-client-secret", r.Form.Get("client_secret"))
+			require.Equal(t, "authorization_code", r.Form.Get("grant_type"))
+			require.Equal(t, "http://example.com/api/v1/auth/google/callback", r.Form.Get("redirect_uri"))
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`{"access_token":"token-` + user.Code + `","token_type":"Bearer"}`))
+			if !isBenignRouteConnError(err) {
+				require.NoError(t, err)
+			}
+		case "/userinfo":
+			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			code := strings.TrimPrefix(token, "token-")
+			user, ok := byCode[code]
+			require.True(t, ok, "unexpected google bearer token %q", token)
+			body, err := json.Marshal(map[string]any{
+				"sub":            user.Subject,
+				"email":          user.Email,
+				"email_verified": user.Verified,
+				"name":           user.Name,
+			})
+			require.NoError(t, err)
+			w.Header().Set("Content-Type", "application/json")
+			_, err = w.Write(body)
+			if !isBenignRouteConnError(err) {
+				require.NoError(t, err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+
+	conf.Auth.Google.ClientID = "test-google-client-id"
+	conf.Auth.Google.ClientSecret = "test-google-client-secret"
+	conf.Auth.Google.AuthURL = server.URL + "/auth"
+	conf.Auth.Google.TokenURL = server.URL + "/token"
+	conf.Auth.Google.UserInfoURL = server.URL + "/userinfo"
+
+	return server.Close
+}
+
+func loginWithGoogleControllerTest(t *testing.T, handler http.Handler, code string) *http.Cookie {
+	t.Helper()
+
+	rec := loginWithGoogleControllerTestExpectRedirect(t, handler, code)
+	require.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	return requireCookie(t, rec, service.WebSessionCookieName)
+}
+
+func loginWithGoogleControllerTestExpectRedirect(t *testing.T, handler http.Handler, code string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	startReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/start", nil)
+	startReq = startReq.WithContext(context.Background())
+	startReq.Header.Set("User-Agent", "route-test-client")
+	startRec := httptest.NewRecorder()
+	handler.ServeHTTP(startRec, startReq)
+	require.Equal(t, http.StatusSeeOther, startRec.Code)
+
+	startURL, err := url.Parse(startRec.Header().Get("Location"))
+	require.NoError(t, err)
+	stateCookie := requireCookie(t, startRec, service.GoogleOAuthStateCookieName)
+
+	callbackReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/auth/google/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(startURL.Query().Get("state")),
+		nil,
+	)
+	callbackReq = callbackReq.WithContext(context.Background())
+	callbackReq.Header.Set("User-Agent", "route-test-client")
+	callbackReq.AddCookie(stateCookie)
+	callbackRec := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRec, callbackReq)
+	require.Equal(t, http.StatusSeeOther, callbackRec.Code)
+	return callbackRec
 }

@@ -31,13 +31,17 @@ Do not remove `~/.codex/sessions` if you still need older real Codex sessions fo
 ```bash
 cp secrets/crux-jwt-secret.example secrets/crux-jwt-secret
 cp secrets/crux-beta-users.json.example secrets/crux-beta-users.json
+cp secrets/crux-google-client-id.example secrets/crux-google-client-id
+cp secrets/crux-google-client-secret.example secrets/crux-google-client-secret
 cp secrets/crux-openai-api-key.example secrets/crux-openai-api-key
 ```
 
 Required contents:
 
 - `secrets/crux-jwt-secret`: one strong random string
-- `secrets/crux-beta-users.json`: at least one beta user entry
+- `secrets/crux-beta-users.json`: optional, for pre-seeding org membership and roles by Google email
+- `secrets/crux-google-client-id`: one Google OAuth client id
+- `secrets/crux-google-client-secret`: one Google OAuth client secret
 - `secrets/crux-openai-api-key`: one real OpenAI API key if you want report generation
 
 ## 3. Start The Server
@@ -46,6 +50,8 @@ Required contents:
 source myenv/bin/activate
 APP_MODE=prod \
 JWT_SECRET_FILE=secrets/crux-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=secrets/crux-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=secrets/crux-google-client-secret \
 AUTH_BOOTSTRAP_USERS_FILE=secrets/crux-beta-users.json \
 OPENAI_API_KEY_FILE=secrets/crux-openai-api-key \
 DB_DSN='data/crux.db?_fk=1' \
@@ -55,11 +61,23 @@ go run .
 
 Keep this shell open.
 
+If you only want an automated server smoke instead of a manual browser flow, run `make closed-beta-prod-smoke` from another shell. That path uses a local OAuth stub rather than your real Google app.
+
+For quick local dashboard development without real Google credentials, you can also run:
+
+```bash
+make run-local-google-stub
+```
+
+That starts `APP_MODE=local` plus a local OAuth stub. The login button still says `Continue with Google`, but the browser round-trip stays on your machine and signs you in as the configured stub identity.
+
 ## 4. Log In On The Web
 
 Open `http://127.0.0.1:8082/`.
 
-Sign in with the user you put into `secrets/crux-beta-users.json`.
+Click `Continue with Google`.
+
+If you kept `secrets/crux-beta-users.json`, sign in with a Google account whose email matches a seeded user to land in that org and role. Otherwise the first Google sign-in creates a fresh admin workspace.
 
 Issue a CLI token from the dashboard.
 

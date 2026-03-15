@@ -17,13 +17,12 @@ func TestBootstrapUserRemovalRevokesExistingTokens(t *testing.T) {
 	conf.App.Mode = "prod"
 	conf.App.StorePath = storePath
 	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:       "beta-user-1",
-		OrgID:    "beta-org",
-		OrgName:  "Beta Org",
-		Email:    "beta1@example.com",
-		Name:     "Beta Operator",
-		Role:     "member",
-		Password: "initial-secret",
+		ID:      "beta-user-1",
+		OrgID:   "beta-org",
+		OrgName: "Beta Org",
+		Email:   "beta1@example.com",
+		Name:    "Beta Operator",
+		Role:    "member",
 	}}
 
 	store, err := NewAnalyticsStore(conf)
@@ -64,20 +63,19 @@ func TestBootstrapUserRemovalRevokesExistingTokens(t *testing.T) {
 	require.True(t, revokedFound)
 }
 
-func TestBootstrapUserPasswordRotationRevokesExistingTokens(t *testing.T) {
+func TestBootstrapUserAccessChangeRevokesExistingTokens(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "crux-store.json")
 
 	conf := &configs.Config{}
 	conf.App.Mode = "prod"
 	conf.App.StorePath = storePath
 	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:       "beta-user-1",
-		OrgID:    "beta-org",
-		OrgName:  "Beta Org",
-		Email:    "beta1@example.com",
-		Name:     "Beta Operator",
-		Role:     "member",
-		Password: "initial-secret",
+		ID:      "beta-user-1",
+		OrgID:   "beta-org",
+		OrgName: "Beta Org",
+		Email:   "beta1@example.com",
+		Name:    "Beta Operator",
+		Role:    "member",
 	}}
 
 	store, err := NewAnalyticsStore(conf)
@@ -94,13 +92,12 @@ func TestBootstrapUserPasswordRotationRevokesExistingTokens(t *testing.T) {
 	confRotated.App.Mode = "prod"
 	confRotated.App.StorePath = storePath
 	confRotated.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:       "beta-user-1",
-		OrgID:    "beta-org",
-		OrgName:  "Beta Org Renamed",
-		Email:    "beta1@example.com",
-		Name:     "Renamed Operator",
-		Role:     "admin",
-		Password: "rotated-secret",
+		ID:      "beta-user-1",
+		OrgID:   "beta-org",
+		OrgName: "Beta Org Renamed",
+		Email:   "beta1@example.com",
+		Name:    "Renamed Operator",
+		Role:    "admin",
 	}}
 
 	reloaded, err := NewAnalyticsStore(confRotated)
@@ -116,7 +113,5 @@ func TestBootstrapUserPasswordRotationRevokesExistingTokens(t *testing.T) {
 	require.Equal(t, userSourceBootstrap, user.Source)
 	require.Equal(t, "Renamed Operator", user.Name)
 	require.Equal(t, userRoleAdmin, normalizeUserRole(user.Role))
-	require.True(t, verifyPassword(user, "rotated-secret"))
-	require.False(t, verifyPassword(user, "initial-secret"))
 	require.Equal(t, "Beta Org Renamed", reloaded.organizations["beta-org"].Name)
 }

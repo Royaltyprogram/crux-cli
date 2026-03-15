@@ -2,12 +2,14 @@ package controller
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/Royaltyprogram/aiops/dto/request"
+	"github.com/Royaltyprogram/aiops/pkg/ecode"
 	"github.com/Royaltyprogram/aiops/routes/common"
 	"github.com/Royaltyprogram/aiops/service"
 )
@@ -22,7 +24,8 @@ func NewAnalyticsRoute(opt Options) *AnalyticsRoute {
 
 func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api := router.Group("/api/v1")
-	api.POST("/auth/login", r.login)
+	api.GET("/auth/google/start", r.googleStart)
+	api.GET("/auth/google/callback", r.googleCallback)
 	api.GET("/auth/me", r.currentSession)
 	api.POST("/auth/logout", r.logout)
 	api.POST("/auth/cli-tokens", r.issueCLIToken)
@@ -39,28 +42,46 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.GET("/reports", r.listReports)
 	api.GET("/audits", r.auditList)
 	api.GET("/admin/users", r.listAdminUsers)
-	api.POST("/admin/users", r.createAdminUser)
-	api.POST("/admin/users/reset-password", r.resetAdminUserPassword)
 	api.POST("/admin/users/deactivate", r.deactivateAdminUser)
 	api.POST("/admin/users/delete", r.deleteAdminUser)
 	api.GET("/dashboard/overview", r.dashboardOverview)
 	api.GET("/dashboard/project-insights", r.dashboardProjectInsights)
 }
 
-func (r *AnalyticsRoute) login(c *echo.Context) error {
-	var req request.LoginReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	resp, err := r.AnalyticsService.Login(c.Request().Context(), &req)
+func (r *AnalyticsRoute) googleStart(c *echo.Context) error {
+	start, err := r.AnalyticsService.BeginGoogleAuth(googleCallbackURL(c))
 	if err != nil {
-		return err
+		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", userFacingError(err)))
+	}
+	c.SetCookie(buildGoogleOAuthStateCookie(c, start.State))
+	return c.Redirect(http.StatusSeeOther, start.RedirectURL)
+}
+
+func (r *AnalyticsRoute) googleCallback(c *echo.Context) error {
+	stateCookie, err := c.Cookie(service.GoogleOAuthStateCookieName)
+	if err != nil || stateCookie == nil || strings.TrimSpace(stateCookie.Value) == "" {
+		c.SetCookie(expiredGoogleOAuthStateCookie(c))
+		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", "Google sign-in state expired. Try again."))
+	}
+	queryState := strings.TrimSpace(c.QueryParam("state"))
+	if queryState == "" || queryState != strings.TrimSpace(stateCookie.Value) {
+		c.SetCookie(expiredGoogleOAuthStateCookie(c))
+		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", "Google sign-in state did not match. Try again."))
+	}
+	if oauthError := strings.TrimSpace(c.QueryParam("error")); oauthError != "" {
+		c.SetCookie(expiredGoogleOAuthStateCookie(c))
+		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", "Google sign-in was canceled or rejected."))
+	}
+
+	resp, err := r.AnalyticsService.CompleteGoogleAuth(c.Request().Context(), googleCallbackURL(c), c.QueryParam("code"))
+	c.SetCookie(expiredGoogleOAuthStateCookie(c))
+	if err != nil {
+		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", userFacingError(err)))
 	}
 	if resp.SessionToken != "" {
 		c.SetCookie(buildSessionCookie(c, resp.SessionToken, resp.SessionExpiresAt))
-		resp.SessionToken = ""
 	}
-	return common.WrapResp(c)(resp, nil)
+	return c.Redirect(http.StatusSeeOther, "/dashboard")
 }
 
 func (r *AnalyticsRoute) currentSession(c *echo.Context) error {
@@ -184,22 +205,6 @@ func (r *AnalyticsRoute) listAdminUsers(c *echo.Context) error {
 	return common.WrapResp(c)(r.AnalyticsService.ListAdminUsers(c.Request().Context(), &req))
 }
 
-func (r *AnalyticsRoute) createAdminUser(c *echo.Context) error {
-	var req request.AdminUserCreateReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.CreateAdminUser(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) resetAdminUserPassword(c *echo.Context) error {
-	var req request.AdminUserPasswordResetReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ResetAdminUserPassword(c.Request().Context(), &req))
-}
-
 func (r *AnalyticsRoute) deactivateAdminUser(c *echo.Context) error {
 	var req request.AdminUserDeactivateReq
 	if err := c.Bind(&req); err != nil {
@@ -261,6 +266,34 @@ func expiredSessionCookie(c *echo.Context) *http.Cookie {
 	}
 }
 
+func buildGoogleOAuthStateCookie(c *echo.Context, value string) *http.Cookie {
+	cookie := &http.Cookie{
+		Name:     service.GoogleOAuthStateCookieName,
+		Value:    strings.TrimSpace(value),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsHTTPS(c),
+	}
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	cookie.Expires = expiresAt
+	cookie.MaxAge = int(time.Until(expiresAt).Seconds())
+	return cookie
+}
+
+func expiredGoogleOAuthStateCookie(c *echo.Context) *http.Cookie {
+	return &http.Cookie{
+		Name:     service.GoogleOAuthStateCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsHTTPS(c),
+		Expires:  time.Unix(0, 0).UTC(),
+		MaxAge:   -1,
+	}
+}
+
 func requestIsHTTPS(c *echo.Context) bool {
 	req := c.Request()
 	if req == nil {
@@ -270,4 +303,40 @@ func requestIsHTTPS(c *echo.Context) bool {
 		return true
 	}
 	return strings.EqualFold(req.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func requestBaseURL(c *echo.Context) string {
+	req := c.Request()
+	if req == nil {
+		return ""
+	}
+	scheme := "http"
+	if requestIsHTTPS(c) {
+		scheme = "https"
+	}
+	host := strings.TrimSpace(req.Host)
+	if host == "" && req.URL != nil {
+		host = strings.TrimSpace(req.URL.Host)
+	}
+	return scheme + "://" + host
+}
+
+func googleCallbackURL(c *echo.Context) string {
+	return requestBaseURL(c) + "/api/v1/auth/google/callback"
+}
+
+func landingRedirectURL(key, value string) string {
+	params := url.Values{}
+	params.Set(key, value)
+	return "/?" + params.Encode()
+}
+
+func userFacingError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if apiErr := ecode.FromError(err); apiErr != nil && strings.TrimSpace(apiErr.Message) != "" {
+		return apiErr.Message
+	}
+	return "Request failed."
 }

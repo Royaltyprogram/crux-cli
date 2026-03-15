@@ -38,7 +38,11 @@ Auth:
       OrgName: Beta Org
       Email: beta1@example.com
       Name: Beta Operator 1
-      Password: "replace-me"
+  Google:
+    ClientID: "replace-with-google-client-id"
+    ClientSecret: "replace-with-google-client-secret"
+    AllowedDomains:
+      - example.com
 
 HTTP:
   AllowedOrigins:

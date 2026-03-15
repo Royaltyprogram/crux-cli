@@ -40,12 +40,11 @@ func TestApplyEnvOverridesLoadsBootstrapUsersFromFile(t *testing.T) {
 				"org_name": "Beta Org",
 				"email": "beta@example.com",
 				"name": "Beta Operator",
-				"role": "admin",
-				"password": "secret"
+				"role": "admin"
 			}
 		]`), 0o644))
 
-	t.Setenv("AUTH_BOOTSTRAP_USERS_JSON", `[{"id":"beta-user-json","org_id":"json-org","org_name":"JSON Org","email":"json@example.com","name":"JSON User","role":"member","password":"json-secret"}]`)
+	t.Setenv("AUTH_BOOTSTRAP_USERS_JSON", `[{"id":"beta-user-json","org_id":"json-org","org_name":"JSON Org","email":"json@example.com","name":"JSON User","role":"member"}]`)
 	t.Setenv("AUTH_BOOTSTRAP_USERS_FILE", usersFile)
 
 	cfg := &Config{}
@@ -62,11 +61,15 @@ func TestApplyEnvOverridesLoadsSecretsFromFiles(t *testing.T) {
 	dbDSNFile := filepath.Join(root, "db-dsn")
 	jwtSecretFile := filepath.Join(root, "jwt-secret")
 	openAIAPIKeyFile := filepath.Join(root, "openai-api-key")
+	googleClientIDFile := filepath.Join(root, "google-client-id")
+	googleClientSecretFile := filepath.Join(root, "google-client-secret")
 
 	require.NoError(t, os.WriteFile(apiTokenFile, []byte("beta-static-token\n"), 0o644))
 	require.NoError(t, os.WriteFile(dbDSNFile, []byte("file:crux.db?_fk=1\n"), 0o644))
 	require.NoError(t, os.WriteFile(jwtSecretFile, []byte("super-secret\n"), 0o644))
 	require.NoError(t, os.WriteFile(openAIAPIKeyFile, []byte("openai-secret\n"), 0o644))
+	require.NoError(t, os.WriteFile(googleClientIDFile, []byte("google-client-id\n"), 0o644))
+	require.NoError(t, os.WriteFile(googleClientSecretFile, []byte("google-client-secret\n"), 0o644))
 
 	t.Setenv("APP_API_TOKEN", "env-token")
 	t.Setenv("DB_DSN", "env-dsn")
@@ -76,6 +79,11 @@ func TestApplyEnvOverridesLoadsSecretsFromFiles(t *testing.T) {
 	t.Setenv("DB_DSN_FILE", dbDSNFile)
 	t.Setenv("JWT_SECRET_FILE", jwtSecretFile)
 	t.Setenv("OPENAI_API_KEY_FILE", openAIAPIKeyFile)
+	t.Setenv("AUTH_GOOGLE_CLIENT_ID", "env-google-client-id")
+	t.Setenv("AUTH_GOOGLE_CLIENT_SECRET", "env-google-client-secret")
+	t.Setenv("AUTH_GOOGLE_CLIENT_ID_FILE", googleClientIDFile)
+	t.Setenv("AUTH_GOOGLE_CLIENT_SECRET_FILE", googleClientSecretFile)
+	t.Setenv("AUTH_GOOGLE_ALLOWED_DOMAINS", "example.com,example.org")
 	t.Setenv("OPENAI_BASE_URL", "https://example-proxy.invalid/v1")
 	t.Setenv("OPENAI_RESPONSES_MODEL", "gpt-5.4")
 	t.Setenv("OPENAI_REPORT_PROMPT_VARIANT", "ko-test")
@@ -86,6 +94,9 @@ func TestApplyEnvOverridesLoadsSecretsFromFiles(t *testing.T) {
 	require.Equal(t, "file:crux.db?_fk=1", cfg.DB.DSN)
 	require.Equal(t, "super-secret", cfg.Jwt.Secret)
 	require.Equal(t, "openai-secret", cfg.OpenAI.APIKey)
+	require.Equal(t, "google-client-id", cfg.Auth.Google.ClientID)
+	require.Equal(t, "google-client-secret", cfg.Auth.Google.ClientSecret)
+	require.Equal(t, []string{"example.com", "example.org"}, cfg.Auth.Google.AllowedDomains)
 	require.Equal(t, "https://example-proxy.invalid/v1", cfg.OpenAI.BaseURL)
 	require.Equal(t, "gpt-5.4", cfg.OpenAI.ResponsesModel)
 	require.Equal(t, "ko-test", cfg.OpenAI.ReportPromptVariant)
@@ -181,13 +192,12 @@ func TestConfigValidateRejectsInvalidCIDRsAndBootstrapUsers(t *testing.T) {
 					Name:    "",
 				},
 				{
-					ID:       "beta-user-1",
-					OrgID:    "beta-org",
-					OrgName:  "Beta Org",
-					Email:    "beta@example.com",
-					Name:     "Beta Operator",
-					Role:     "owner",
-					Password: "secret",
+					ID:      "beta-user-1",
+					OrgID:   "beta-org",
+					OrgName: "Beta Org",
+					Email:   "beta@example.com",
+					Name:    "Beta Operator",
+					Role:    "owner",
 				},
 			},
 		},
@@ -199,10 +209,30 @@ func TestConfigValidateRejectsInvalidCIDRsAndBootstrapUsers(t *testing.T) {
 	require.Contains(t, err.Error(), `HTTP.AdminAllowedCIDRs contains invalid CIDR "bad-admin-cidr"`)
 	require.Contains(t, err.Error(), `HTTP.TrustedProxyCIDRs contains invalid CIDR "also-bad"`)
 	require.Contains(t, err.Error(), "Auth.BootstrapUsers[0].Name is required")
-	require.Contains(t, err.Error(), "Auth.BootstrapUsers[0].Password is required")
 	require.Contains(t, err.Error(), "Auth.BootstrapUsers[1].Role must be one of: admin, member")
 	require.Contains(t, err.Error(), "Auth.BootstrapUsers[1].ID must be unique")
 	require.Contains(t, err.Error(), "Auth.BootstrapUsers[1].Email must be unique")
+}
+
+func TestConfigValidateRejectsIncompleteGoogleAuth(t *testing.T) {
+	cfg := &Config{
+		App: App{
+			Mode: "local",
+		},
+		DB: DB{
+			Dialect: "sqlite3",
+			DSN:     "data/crux-local.db?_fk=1",
+		},
+		Auth: Auth{
+			Google: GoogleAuth{
+				ClientID: "google-client-id",
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Auth.Google.ClientSecret is required when Google auth is configured")
 }
 
 func TestConfigValidateAllowsLocalClosedBetaDefaults(t *testing.T) {
@@ -223,13 +253,12 @@ func TestConfigValidateAllowsLocalClosedBetaDefaults(t *testing.T) {
 			StaticTokenEnabled: true,
 			BootstrapUsers: []BootstrapUser{
 				{
-					ID:       "beta-user-1",
-					OrgID:    "beta-org",
-					OrgName:  "Beta Org",
-					Email:    "beta@example.com",
-					Name:     "Beta Operator",
-					Role:     "admin",
-					Password: "secret",
+					ID:      "beta-user-1",
+					OrgID:   "beta-org",
+					OrgName: "Beta Org",
+					Email:   "beta@example.com",
+					Name:    "Beta Operator",
+					Role:    "admin",
 				},
 			},
 		},

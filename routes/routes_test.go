@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Royaltyprogram/aiops/configs"
-	"github.com/Royaltyprogram/aiops/dto/request"
 	dtoresponse "github.com/Royaltyprogram/aiops/dto/response"
 	"github.com/Royaltyprogram/aiops/pkg/buildinfo"
 	"github.com/Royaltyprogram/aiops/routes/controller"
@@ -103,9 +101,9 @@ func TestNewEchoAppliesConfiguredCORSHeaders(t *testing.T) {
 	})
 	engine.RegisterRoute()
 
-	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/login", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/auth/google/start", nil)
 	req.Header.Set("Origin", "https://beta.example.com")
-	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
 	rec := httptest.NewRecorder()
 	echo.ServeHTTP(rec, req)
 
@@ -138,20 +136,12 @@ func TestNewEchoRateLimitsAPIWhenConfigured(t *testing.T) {
 	})
 	engine.RegisterRoute()
 
-	payload, err := json.Marshal(request.LoginReq{
-		Email:    "demo@example.com",
-		Password: "demo1234",
-	})
-	require.NoError(t, err)
-
-	first := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(payload))
-	first.Header.Set("Content-Type", "application/json")
+	first := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/start", nil)
 	firstRec := httptest.NewRecorder()
 	echo.ServeHTTP(firstRec, first)
-	require.Equal(t, http.StatusOK, firstRec.Code)
+	require.Equal(t, http.StatusSeeOther, firstRec.Code)
 
-	second := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(payload))
-	second.Header.Set("Content-Type", "application/json")
+	second := httptest.NewRequest(http.MethodGet, "/api/v1/auth/google/start", nil)
 	secondRec := httptest.NewRecorder()
 	echo.ServeHTTP(secondRec, second)
 	require.Equal(t, http.StatusTooManyRequests, secondRec.Code)

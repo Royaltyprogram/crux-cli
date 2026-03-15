@@ -62,20 +62,19 @@ type Organization struct {
 }
 
 type User struct {
-	ID                string
-	OrgID             string
-	Email             string
-	Name              string
-	Source            string
-	Role              string
-	Status            string
-	PasswordSalt      string
-	PasswordHash      string
-	CreatedAt         time.Time
-	PasswordChangedAt *time.Time
-	LastLoginAt       *time.Time
-	DisabledAt        *time.Time
-	DeletedAt         *time.Time
+	ID           string
+	OrgID        string
+	Email        string
+	Name         string
+	Source       string
+	AuthProvider string
+	AuthSubject  string
+	Role         string
+	Status       string
+	CreatedAt    time.Time
+	LastLoginAt  *time.Time
+	DisabledAt   *time.Time
+	DeletedAt    *time.Time
 }
 
 type Agent struct {

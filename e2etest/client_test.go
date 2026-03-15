@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Royaltyprogram/aiops/dto/request"
 	"github.com/Royaltyprogram/aiops/dto/response"
 )
 
@@ -38,6 +37,9 @@ func NewClientFromEnv() *Client {
 		baseURL = "http://127.0.0.1:8082"
 	}
 	apiToken := strings.TrimSpace(os.Getenv("E2E_API_TOKEN"))
+	if apiToken == "" {
+		apiToken = strings.TrimSpace(os.Getenv("E2E_CLI_TOKEN"))
+	}
 	if apiToken == "" && (!ok || baseURL == "http://127.0.0.1:8082") {
 		apiToken = "crux-dev-token"
 	}
@@ -106,37 +108,12 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) (int, [
 }
 
 func (c *Client) TryAuthenticate(ctx context.Context) (bool, error) {
+	_ = ctx
+
 	if strings.TrimSpace(c.APIToken) != "" {
 		return true, nil
 	}
-
-	email, password, explicit := lookupE2ECredentials()
-	if email == "" || password == "" {
-		return false, nil
-	}
-
-	loginResp, status, err := postEnvelope[response.LoginResp](ctx, c, "/api/v1/auth/login", request.LoginReq{
-		Email:    email,
-		Password: password,
-	}, false)
-	if err != nil {
-		if !explicit && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	tokenResp, _, err := postEnvelope[response.CLITokenIssueResp](ctx, c, "/api/v1/auth/cli-tokens", request.IssueCLITokenReq{
-		Label: "E2E suite token",
-	}, false)
-	if err != nil {
-		return false, err
-	}
-
-	c.APIToken = strings.TrimSpace(tokenResp.Token)
-	c.AuthOrgID = strings.TrimSpace(loginResp.Organization.ID)
-	c.AuthUserID = strings.TrimSpace(loginResp.User.ID)
-	return c.APIToken != "", nil
+	return false, nil
 }
 
 func postEnvelope[T any](ctx context.Context, c *Client, path string, payload any, withAuth bool) (*T, int, error) {
@@ -183,16 +160,6 @@ func postEnvelope[T any](ctx context.Context, c *Client, path string, payload an
 		return nil, rsp.StatusCode, fmt.Errorf("missing response data: %s", string(raw))
 	}
 	return data, rsp.StatusCode, nil
-}
-
-func lookupE2ECredentials() (email, password string, explicit bool) {
-	email, emailOK := os.LookupEnv("E2E_EMAIL")
-	password, passwordOK := os.LookupEnv("E2E_PASSWORD")
-	explicit = (emailOK && strings.TrimSpace(email) != "") || (passwordOK && strings.TrimSpace(password) != "")
-	if strings.TrimSpace(email) == "" && strings.TrimSpace(password) == "" {
-		return "beta1@example.com", "replace-me", false
-	}
-	return strings.TrimSpace(email), strings.TrimSpace(password), explicit
 }
 
 func decodeEnvelope[T any](body []byte) (Envelope, *T, error) {

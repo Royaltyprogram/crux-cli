@@ -348,7 +348,7 @@ create_wrapper "$BIN_PATH" "$CURRENT_LINK/crux" "$LOCAL_NODE_BIN"
 say "installed $VERSION to $VERSION_DIR"
 say "wrapper created at $BIN_PATH"
 say "release install uses a prebuilt crux binary; Go is not required"
-say "next step: crux setup --server <crux-server-url>"
+say "next step: crux setup"
 if [ -x "$LOCAL_NODE_BIN/node" ]; then
   say "crux will use local Node.js from $LOCAL_NODE_BIN when needed"
 elif command -v node >/dev/null 2>&1; then

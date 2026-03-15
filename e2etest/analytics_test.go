@@ -167,7 +167,7 @@ func reportRefreshSatisfied(
 
 func (s *APISuite) TestAnalyticsLifecycle_GeneratesFeedbackReports() {
 	if !s.analyticsAuthed {
-		s.T().Skip("analytics e2e requires E2E_API_TOKEN or login credentials")
+		s.T().Skip("analytics e2e requires E2E_API_TOKEN or E2E_CLI_TOKEN")
 	}
 
 	now := time.Now().UTC()

@@ -18,13 +18,26 @@ Start the local development server:
 
 ```bash
 make generate
+OPENAI_API_KEY_FILE=secrets/crux-openai-api-key make run-local-google-stub
+```
+
+Open `http://127.0.0.1:8082/` and sign in with Google. In this local-dev path the Google round-trip is served by the local OAuth stub, so you do not need real GCP credentials.
+
+If you want to test against a real Google app instead, use:
+
+```bash
 OPENAI_API_KEY_FILE=secrets/crux-openai-api-key make run
 ```
 
-Open `http://127.0.0.1:8082/` and sign in with the local demo account:
+Required runtime auth envs for the web flow:
 
-- email: `demo@example.com`
-- password: `demo1234`
+- `AUTH_GOOGLE_CLIENT_ID`
+- `AUTH_GOOGLE_CLIENT_SECRET`
+
+Optional:
+
+- `AUTH_GOOGLE_ALLOWED_DOMAINS` if you want to restrict sign-in to specific email domains
+- `AUTH_BOOTSTRAP_USERS_FILE` if you want matching Google emails to join a pre-seeded org or inherit fixed roles
 
 From another shell, run the CLI against the local server. These commands are for source development:
 
@@ -41,7 +54,7 @@ go run ./cmd/crux audit
 Notes:
 
 - In the MVP, every connected repository rolls into one shared workspace per organization.
-- `crux setup` is the shortest onboarding path and includes the initial workspace connection automatically.
+- `crux setup` is the shortest onboarding path and includes the initial workspace connection and first local session upload automatically.
 - installed macOS beta machines also get background collection automatically when setup can register a launchd agent
 - `crux connect` remains available when you need to reconnect a different repo manually.
 - `crux collect --watch` keeps session and snapshot uploads flowing while the shared workspace is being observed by reacting to session file changes and using the interval as a fallback scan.
@@ -79,11 +92,9 @@ go test ./...
 
 Run the closed beta smoke with a seeded beta user:
 
-```bash
-export BETA_SMOKE_EMAIL=beta1@example.com
-export BETA_SMOKE_PASSWORD=replace-me
-make closed-beta-smoke
-```
+`make closed-beta-smoke` expects `BETA_SMOKE_CLI_TOKEN`, which you issue from the dashboard after signing in with Google.
+
+`make closed-beta-prod-smoke` uses a local OAuth stub and stays fully automated. It seeds a beta user, starts the server in `APP_MODE=prod`, completes a synthetic Google sign-in, issues a CLI token, and runs the CLI smoke flow without a browser.
 
 Run the real `APP_MODE=prod` smoke locally:
 
@@ -114,6 +125,8 @@ For closed beta or production, do not use the local demo path.
 Preferred runtime secret inputs:
 
 - `JWT_SECRET_FILE`
+- `AUTH_GOOGLE_CLIENT_ID_FILE`
+- `AUTH_GOOGLE_CLIENT_SECRET_FILE`
 - `AUTH_BOOTSTRAP_USERS_FILE`
 - `DB_DSN_FILE` if using MySQL
 - `OPENAI_API_KEY` or `OPENAI_API_KEY_FILE` for the cloud research agent
@@ -127,13 +140,15 @@ Supported file-based secret envs:
 - `OPENAI_API_KEY_FILE`
 - `DB_DSN_FILE`
 - `APP_API_TOKEN_FILE`
+- `AUTH_GOOGLE_CLIENT_ID_FILE`
+- `AUTH_GOOGLE_CLIENT_SECRET_FILE`
 - `AUTH_BOOTSTRAP_USERS_FILE`
 
-Bootstrap users are managed identities:
+Bootstrap users are pre-seeded Google-linked identities:
 
 - removing a bootstrap user revokes existing tokens
-- rotating a bootstrap password revokes prior sessions
-- seed at least one bootstrap user with `"role":"admin"` if you need the admin user-management APIs; omitted roles default to `member`
+- Google sign-in links to the seeded record when the email matches
+- use them when you need multiple users to join the same org or want fixed `admin` or `member` roles before first sign-in
 
 ## 4. Local Prod-Like Run
 
@@ -142,6 +157,8 @@ Run the server in `prod` mode with secret files:
 ```bash
 APP_MODE=prod \
 JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
 AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
 OPENAI_API_KEY_FILE=/run/secrets/crux-openai-api-key \
 go run .
@@ -157,6 +174,8 @@ If you want to lock access down in-app during closed beta:
 ```bash
 APP_MODE=prod \
 JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
 AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
 HTTP_ALLOWED_CIDRS='203.0.113.10/32,198.51.100.0/24' \
 HTTP_ADMIN_ALLOWED_CIDRS='203.0.113.10/32' \

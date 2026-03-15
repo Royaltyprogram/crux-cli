@@ -49,8 +49,8 @@
       </div>
 
       <div class="wizard-step" data-wizard-step="2">
-        <div class="wizard-title">Authenticate your CLI</div>
-        <div class="wizard-desc">Create a token here, then run the login command in your terminal.</div>
+        <div class="wizard-title">Create a CLI token</div>
+        <div class="wizard-desc">Generate a token here. In the next step, you'll run setup in the repository you want to analyze.</div>
         <div class="stack-gap-lg">
           <button id="wizIssueTokenBtn" class="primary-button button-full" type="button" data-action="wizard-issue-token">Create CLI token</button>
         </div>
@@ -61,13 +61,6 @@
           </div>
           <div class="command-shell token-output" id="wizTokenOutput">Click "Create CLI token" above to generate one.</div>
         </div>
-        <div class="command-block">
-          <div class="command-block-head">
-            <span class="command-label">Login command</span>
-            <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="wizLoginCmd" data-copy-label="login command">Copy</button>
-          </div>
-          <div class="command-shell" id="wizLoginCmd">crux login --server http://127.0.0.1:8082</div>
-        </div>
         <div class="wizard-actions">
           <button class="secondary-button" type="button" data-action="wizard-back">Back</button>
           <button class="primary-button" type="button" data-action="wizard-next">Next</button>
@@ -75,14 +68,14 @@
       </div>
 
       <div class="wizard-step" data-wizard-step="3">
-        <div class="wizard-title">Connect a workspace</div>
-        <div class="wizard-desc">Link a local repository so Crux can start analyzing your Codex session traces and generating analysis reports.</div>
+        <div class="wizard-title">Run setup</div>
+        <div class="wizard-desc">Open a terminal in the repository you want to analyze, then run setup. Crux will prompt for the token, register this device, connect the repo, and upload your local Codex sessions right away.</div>
         <div class="command-block">
           <div class="command-block-head">
-            <span class="command-label">Connect command</span>
-            <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="wizConnectCmd" data-copy-label="connect command">Copy</button>
+            <span class="command-label">Setup command</span>
+            <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="wizSetupCmd" data-copy-label="setup command">Copy</button>
           </div>
-          <div class="command-shell" id="wizConnectCmd">crux connect --repo-path .</div>
+          <div class="command-shell" id="wizSetupCmd">crux setup</div>
         </div>
         <div class="wizard-actions">
           <button class="secondary-button" type="button" data-action="wizard-back">Back</button>
