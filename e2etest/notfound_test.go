@@ -13,7 +13,7 @@ func (s *APISuite) TestNotFound_UnknownRoute() {
 
 	env, data, err := decodeEnvelope[map[string]any](body)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), 1000, env.Code)
+	require.Equal(s.T(), http.StatusNotFound, env.Code)
 	require.NotEmpty(s.T(), env.Message)
 	require.Nil(s.T(), data)
 }
