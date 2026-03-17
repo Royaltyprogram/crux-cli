@@ -31,8 +31,8 @@ When reasoning summaries are generic operational chatter about system instructio
 - `reason` should identify the root cause of misalignment (ambiguous scope, missing constraint, wrong assumption, etc.).
 - `explanation` should explain the gap in concrete terms the user can act on.
 - `strengths` should highlight prompts or habits that produced well-aligned results.
-- `frictions` should describe specific moments where the model went off track.
-- `next_steps` should give concrete, actionable prompting advice.
+- `frictions` should describe specific model behaviors that went wrong, written as rules the model should avoid. Frame each friction as what the **model** did incorrectly, not what the user should have done differently. Example: "Expanded the edit to 5 files when the user asked for a single-file fix" instead of "User should have scoped the request more tightly".
+- `next_steps` should be concrete operating rules that the **model itself** should follow in future sessions to avoid the same misalignment. Write each rule as a direct instruction to the AI agent. Example: "When the user asks for a targeted fix, restrict edits to the file mentioned in the request unless explicitly told otherwise" instead of "Try scoping your requests to a single file".
 - `evidence` should contain short strings referencing specific session observations, not paragraphs.
 - `score` must be between `0.0` and `1.0` (higher = more significant finding).
 - `confidence` must be `low`, `medium`, or `high`.

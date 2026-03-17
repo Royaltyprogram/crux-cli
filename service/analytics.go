@@ -2918,7 +2918,11 @@ func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 		status.Summary = fmt.Sprintf("Feedback analysis finished in %s and produced %d report(s).", humanizeDurationMS(status.LastDurationMS), len(ids))
 		status.LastSuccessfulAt = cloneTime(&completedAt)
 	}
-	bundle, bundleErr := buildLatestSkillSetBundle(job.project.ID, s.activeSkillSetReportsLocked(job.project.ID), s.refineAgent)
+	prevVersion := latestSkillSetVersion(s.AnalyticsStore.skillSetVersions[job.project.ID])
+	bundle, bundleErr := buildLatestSkillSetBundle(job.project.ID, s.activeSkillSetReportsLocked(job.project.ID), skillSetBuildOptions{
+		RefineAgent:     s.refineAgent,
+		PreviousVersion: prevVersion,
+	})
 	if bundleErr == nil {
 		s.ensureLatestSkillSetVersionLocked(job.project, bundle, s.activeSkillSetReportsLocked(job.project.ID))
 	}
