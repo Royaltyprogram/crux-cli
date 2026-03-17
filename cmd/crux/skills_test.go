@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -769,7 +772,7 @@ func TestRunSkillsResolveBackupAndSync(t *testing.T) {
 	require.Contains(t, string(liveContent), "new remote content")
 }
 
-func TestSyncExecutesResolveDirectiveFromServer(t *testing.T) {
+func TestRunSkillsResolveAcceptRemoteWithoutBackup(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CRUX_HOME", root)
 
@@ -781,11 +784,6 @@ func TestSyncExecutesResolveDirectiveFromServer(t *testing.T) {
 	liveHash, err := hashManagedSkillBundle(liveBundlePath)
 	require.NoError(t, err)
 
-	// Create backup for accept-remote to use.
-	backupPath, err := skillSetBackupVersionPath("v-directive-1")
-	require.NoError(t, err)
-	require.NoError(t, writeTestSkillBundle(backupPath, bundle))
-
 	require.NoError(t, saveSkillSetState(skillSetLocalState{
 		SchemaVersion:  skillSetLocalStateSchemaVersion,
 		Mode:           skillSetModeAutopilot,
@@ -795,32 +793,40 @@ func TestSyncExecutesResolveDirectiveFromServer(t *testing.T) {
 		LastSyncStatus: "synced",
 	}))
 
-	// Modify a file locally to cause conflict.
+	// Modify a file locally to cause conflict, but do not create a backup so
+	// accept-remote must refetch from the server.
 	require.NoError(t, os.WriteFile(filepath.Join(liveBundlePath, "01-clarification.md"), []byte("# Modified locally\n"), 0o644))
 
-	var skillClientReq request.SkillSetClientStateUpsertReq
+	latestRequests := 0
+	reportedStatuses := make([]string, 0, 2)
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/skill-sets/latest":
-			// Return bundle with a resolve directive in client state.
-			bundleResp := testSkillSetBundleResp("project-1", "v-directive-2", "hash-directive-2", "new remote content")
-			bundleResp.ClientState = &response.SkillSetClientStateResp{
-				ProjectID:        "project-1",
-				AgentID:          "agent-1",
-				BundleName:       managedSkillBundleName,
-				Mode:             "autopilot",
-				SyncStatus:       "conflict",
-				AppliedVersion:   "v-directive-1",
-				AppliedHash:      liveHash,
-				ResolveDirective: "accept-remote",
+			latestRequests++
+			reqNum := latestRequests
+
+			if reqNum > 2 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				require.NoError(t, json.NewEncoder(w).Encode(envelope{
+					Code:    http.StatusTooManyRequests,
+					Message: "Too Many Request",
+				}))
+				return
 			}
+
+			bundleResp := testSkillSetBundleResp("project-1", "v-directive-2", "hash-directive-2", "new remote content")
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, bundleResp),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/skill-sets/client-state":
+			var skillClientReq request.SkillSetClientStateUpsertReq
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&skillClientReq))
+
+			reportedStatuses = append(reportedStatuses, skillClientReq.SyncStatus)
+
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.SkillSetClientStateResp{
@@ -850,47 +856,24 @@ func TestSyncExecutesResolveDirectiveFromServer(t *testing.T) {
 		WorkspaceID: "project-1",
 	}))
 
-	st, err := loadWorkspaceState()
-	require.NoError(t, err)
-	client := newStateAPIClient(&st)
-
-	// Capture stderr (directive log) and stdout (result).
-	stderrOutput := captureStderr(t, func() {
-		resp, syncErr := syncLatestSkillSet(&st, client, codexHome)
-		require.NoError(t, syncErr)
-		require.Contains(t, resp.Status, "resolved_accept-remote")
+	output := captureStdout(t, func() {
+		require.NoError(t, runSkills([]string{"resolve", "--action", "accept-remote", "--codex-home", codexHome}))
 	})
-	require.Contains(t, stderrOutput, "accept-remote")
+	require.Contains(t, output, `"action": "accept-remote"`)
+	require.Contains(t, output, `"status": "resolved"`)
 
-	// Verify the file was restored to the original (from backup).
+	require.Equal(t, 2, latestRequests)
+	require.Equal(t, []string{"conflict", "synced"}, reportedStatuses)
+
 	clarifyContent, err := os.ReadFile(filepath.Join(liveBundlePath, "01-clarification.md"))
 	require.NoError(t, err)
-	require.Contains(t, string(clarifyContent), "original content")
+	require.Contains(t, string(clarifyContent), "new remote content")
 
-	// State should reflect the resolution.
 	currentState, _, err := loadSkillSetState()
 	require.NoError(t, err)
-	require.Equal(t, "resolved_accept_remote", currentState.LastSyncStatus)
-}
-
-func TestResolveDirectiveFromBundle(t *testing.T) {
-	// nil bundle returns empty.
-	require.Empty(t, resolveDirectiveFromBundle(nil))
-
-	// Bundle without client state returns empty.
-	require.Empty(t, resolveDirectiveFromBundle(&response.SkillSetBundleResp{}))
-
-	// Bundle with empty directive returns empty.
-	require.Empty(t, resolveDirectiveFromBundle(&response.SkillSetBundleResp{
-		ClientState: &response.SkillSetClientStateResp{},
-	}))
-
-	// Bundle with directive returns it.
-	require.Equal(t, "accept-remote", resolveDirectiveFromBundle(&response.SkillSetBundleResp{
-		ClientState: &response.SkillSetClientStateResp{
-			ResolveDirective: "accept-remote",
-		},
-	}))
+	require.Equal(t, "synced", currentState.LastSyncStatus)
+	require.Equal(t, "v-directive-2", currentState.AppliedVersion)
+	require.Equal(t, "hash-directive-2", currentState.AppliedHash)
 }
 
 func TestCountLineDiffs(t *testing.T) {
@@ -913,4 +896,195 @@ func writeTestSkillBundle(root string, bundle response.SkillSetBundleResp) error
 		}
 	}
 	return nil
+}
+
+func TestStripSkillVersionLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "removes version line and following blank line",
+			input:    "# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `v-abc123def456`\n\n## Workflow\n",
+			expected: "# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n",
+		},
+		{
+			name:     "no version line",
+			input:    "# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n",
+			expected: "# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n",
+		},
+		{
+			name:     "empty content",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "version line at end without newline",
+			input:    "# Title\nVersion: `v-abc123`",
+			expected: "# Title\n",
+		},
+		{
+			name:     "preserves other Version-like text",
+			input:    "# Title\nVersion control is important.\nVersion: `v-abc123`\n",
+			expected: "# Title\nVersion control is important.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripSkillVersionLine([]byte(tt.input))
+			require.Equal(t, tt.expected, string(result))
+		})
+	}
+}
+
+func TestHashManagedSkillBundleIgnoresVersionLine(t *testing.T) {
+	// Write two bundles that differ only in the SKILL.md Version line.
+	// Their hashes must be identical.
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	skillWithVersion := "---\nname: test\n---\n\n# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `v-abc123def456`\n\n## Workflow\n"
+	skillWithoutVersion := "---\nname: test\n---\n\n# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n"
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir1, "SKILL.md"), []byte(skillWithVersion), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir1, "01-clarification.md"), []byte("# Clarify\n"), 0o644))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "SKILL.md"), []byte(skillWithoutVersion), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "01-clarification.md"), []byte("# Clarify\n"), 0o644))
+
+	hash1, err := hashManagedSkillBundle(dir1)
+	require.NoError(t, err)
+	hash2, err := hashManagedSkillBundle(dir2)
+	require.NoError(t, err)
+
+	require.Equal(t, hash1, hash2, "version line in SKILL.md should not affect the bundle hash")
+}
+
+func TestAssertManagedSkillBundleUntouchedMigratesLegacyAppliedHash(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CRUX_HOME", root)
+
+	livePath := t.TempDir()
+	skillWithVersion := "---\nname: test\n---\n\n# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `v-abc123def456`\n\n## Workflow\n"
+
+	require.NoError(t, os.WriteFile(filepath.Join(livePath, "SKILL.md"), []byte(skillWithVersion), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(livePath, "01-clarification.md"), []byte("# Clarify\n"), 0o644))
+
+	legacyHash, err := hashManagedSkillBundleLegacy(livePath)
+	require.NoError(t, err)
+	currentHash, err := hashManagedSkillBundle(livePath)
+	require.NoError(t, err)
+	require.NotEqual(t, legacyHash, currentHash)
+
+	state := skillSetLocalState{
+		SchemaVersion: skillSetLocalStateSchemaVersion,
+		BundleName:    managedSkillBundleName,
+		AppliedHash:   legacyHash,
+	}
+	require.NoError(t, saveSkillSetState(state))
+
+	require.NoError(t, assertManagedSkillBundleUntouched(livePath, &state))
+	require.Equal(t, currentHash, state.AppliedHash)
+
+	reloaded, _, err := loadSkillSetState()
+	require.NoError(t, err)
+	require.Equal(t, currentHash, reloaded.AppliedHash)
+}
+
+// TestEndToEndServerBuildDeployConflictCheck simulates the full lifecycle:
+// server builds bundle → client deploys files to disk → client checks for
+// local modifications via assertManagedSkillBundleUntouched.
+// This is the exact scenario that was producing spurious conflict errors.
+func TestEndToEndServerBuildDeployConflictCheck(t *testing.T) {
+	// Import the service package's build function indirectly: we replicate
+	// the server-side hash computation here using the same algorithm.
+
+	// ── Step 1: simulate server-side bundle (same algorithm as service) ──
+
+	// These are the file contents the server would generate.
+	categoryContent := "# Clarify Before Building\n\nConfidence: `0.85`\n\n## Rules\n\n- Ask for missing constraints before touching code.\n\n## Anti-patterns\n\n- Starts implementation before confirming missing requirements.\n\n"
+	evidenceContent := "# Evidence Summary\n\nNo evidence recorded.\n"
+	agentContent := "interface:\n  display_name: \"Crux Personal Skill Set\"\n  short_description: \"Auto-synced personal operating rules from Crux\"\n  default_prompt: \"Use $crux-personal-skillset\"\n\npolicy:\n  allow_implicit_invocation: true\n"
+
+	skillWithoutVersion := "---\nname: crux-personal-skillset\ndescription: Use as the default operating skill set for this user across coding sessions\n---\n\n# Crux Personal Skill Set\n\nThis skill is managed automatically by Crux and should be treated as the user's standing policy layer.\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n\n1. Treat the documents below as cumulative standing instructions for this user.\n2. Load only the category documents that are relevant to the current request.\n\n## Included documents\n\n- [`01-clarification.md`](01-clarification.md) - Clarify Before Building\n\n## References\n\n- [`references/evidence-summary.md`](references/evidence-summary.md)\n"
+
+	// Compute the compiled hash the same way the server does
+	// (SKILL.md without version, no manifest).
+	type hashedFile struct {
+		Path    string
+		Content string
+	}
+	seedFiles := []hashedFile{
+		{Path: "01-clarification.md", Content: categoryContent},
+		{Path: "SKILL.md", Content: skillWithoutVersion},
+		{Path: "agents/openai.yaml", Content: agentContent},
+		{Path: "references/evidence-summary.md", Content: evidenceContent},
+	}
+	sort.Slice(seedFiles, func(i, j int) bool {
+		return seedFiles[i].Path < seedFiles[j].Path
+	})
+
+	serverHasher := sha256.New()
+	for _, f := range seedFiles {
+		_, _ = serverHasher.Write([]byte(strings.TrimSpace(f.Path)))
+		_, _ = serverHasher.Write([]byte{0})
+		_, _ = serverHasher.Write([]byte(f.Content))
+		_, _ = serverHasher.Write([]byte{0})
+	}
+	serverCompiledHash := hex.EncodeToString(serverHasher.Sum(nil))
+	serverVersion := "v" + serverCompiledHash[:12]
+
+	// SKILL.md that actually gets written to disk includes the version.
+	skillWithVersion := "---\nname: crux-personal-skillset\ndescription: Use as the default operating skill set for this user across coding sessions\n---\n\n# Crux Personal Skill Set\n\nThis skill is managed automatically by Crux and should be treated as the user's standing policy layer.\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `" + serverVersion + "`\n\n## Workflow\n\n1. Treat the documents below as cumulative standing instructions for this user.\n2. Load only the category documents that are relevant to the current request.\n\n## Included documents\n\n- [`01-clarification.md`](01-clarification.md) - Clarify Before Building\n\n## References\n\n- [`references/evidence-summary.md`](references/evidence-summary.md)\n"
+
+	// Build a bundle response (what the server returns to the client).
+	bundle := response.SkillSetBundleResp{
+		SchemaVersion: "crux-skillset.v1",
+		ProjectID:     "project-1",
+		Status:        "ready",
+		BundleName:    "crux-personal-skillset",
+		Version:       serverVersion,
+		CompiledHash:  serverCompiledHash,
+		Files: []response.SkillSetFileResp{
+			{Path: "01-clarification.md", Content: categoryContent},
+			{Path: "agents/openai.yaml", Content: agentContent},
+			{Path: "references/evidence-summary.md", Content: evidenceContent},
+			{Path: "SKILL.md", Content: skillWithVersion},
+			{Path: "00-manifest.json", Content: `{"schema_version":"crux-skillset.v1"}` + "\n"},
+		},
+	}
+
+	// ── Step 2: simulate client deploy ──
+
+	codexRoot := t.TempDir()
+	livePath := filepath.Join(codexRoot, "skills", bundle.BundleName)
+
+	// Write the bundle to disk exactly as stageManagedSkillSetBundle does.
+	for _, file := range bundle.Files {
+		targetPath := filepath.Join(livePath, filepath.FromSlash(strings.TrimSpace(file.Path)))
+		require.NoError(t, os.MkdirAll(filepath.Dir(targetPath), 0o755))
+		require.NoError(t, os.WriteFile(targetPath, []byte(file.Content), 0o644))
+	}
+
+	// Record AppliedHash the same way deployManagedSkillSetBundle does.
+	appliedHash := strings.TrimSpace(bundle.CompiledHash)
+
+	// ── Step 3: simulate conflict check (assertManagedSkillBundleUntouched) ──
+
+	diskHash, err := hashManagedSkillBundle(livePath)
+	require.NoError(t, err)
+
+	require.Equal(t, appliedHash, diskHash,
+		"disk hash must match server CompiledHash immediately after deploy — "+
+			"mismatch here causes the spurious 'modified locally' conflict.\n"+
+			"server CompiledHash = %s\nclient disk hash    = %s", appliedHash, diskHash)
+
+	// Also verify via the actual function.
+	state := skillSetLocalState{
+		AppliedHash: appliedHash,
+	}
+	err = assertManagedSkillBundleUntouched(livePath, &state)
+	require.NoError(t, err, "assertManagedSkillBundleUntouched should pass right after deploy")
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -227,7 +228,7 @@ func runSkillsRollback(args []string) error {
 	if !fileExists(backupPath) {
 		return fmt.Errorf("managed skill backup %q does not exist", targetVersion)
 	}
-	if err := assertManagedSkillBundleUntouched(livePath, current); err != nil {
+	if err := assertManagedSkillBundleUntouched(livePath, &current); err != nil {
 		return err
 	}
 
@@ -305,9 +306,9 @@ type skillSetConflictDiff struct {
 }
 
 type skillSetFileDiffSummary struct {
-	Path       string `json:"path"`
-	AddedLines int    `json:"added_lines"`
-	RemovedLines int  `json:"removed_lines"`
+	Path         string `json:"path"`
+	AddedLines   int    `json:"added_lines"`
+	RemovedLines int    `json:"removed_lines"`
 }
 
 type skillSetResolveResp struct {
@@ -360,7 +361,7 @@ func runSkillsResolve(args []string) error {
 	livePath := skillSetLiveBundlePath(codexRoot, current.BundleName)
 
 	// If no conflict exists, report that and exit.
-	if err := assertManagedSkillBundleUntouched(livePath, current); err == nil {
+	if err := assertManagedSkillBundleUntouched(livePath, &current); err == nil {
 		return prettyPrint(skillSetResolveResp{
 			Action:         "none",
 			Status:         "no_conflict",
@@ -625,7 +626,7 @@ func diffManagedSkillBundle(codexHome string) (skillSetConflictDiff, error) {
 		AppliedVersion: current.AppliedVersion,
 	}
 
-	if err := assertManagedSkillBundleUntouched(livePath, current); err == nil {
+	if err := assertManagedSkillBundleUntouched(livePath, &current); err == nil {
 		result.HasConflict = false
 		return result, nil
 	}
@@ -743,62 +744,6 @@ func countLineDiffs(old, new string) (added, removed int) {
 	return added, removed
 }
 
-// resolveDirectiveFromBundle extracts a pending resolve directive from the
-// server-supplied bundle response. The directive is set by the web dashboard.
-func resolveDirectiveFromBundle(bundle *response.SkillSetBundleResp) string {
-	if bundle == nil || bundle.ClientState == nil {
-		return ""
-	}
-	return strings.TrimSpace(bundle.ClientState.ResolveDirective)
-}
-
-// executeResolveDirective runs a resolve action triggered by a dashboard directive
-// during an automatic sync. It uses the do* functions to avoid printing to stdout.
-func executeResolveDirective(directive string, current skillSetLocalState, livePath, codexRoot, codexHome string, st *state, client *apiClient) (skillSetSyncResp, error) {
-	var resolveResult skillSetResolveResp
-	var resolveErr error
-
-	switch directive {
-	case "keep-local":
-		resolveResult, resolveErr = doResolveKeepLocal(current, livePath)
-	case "accept-remote":
-		resolveResult, resolveErr = doResolveAcceptRemote(current, codexRoot, codexHome)
-	case "backup-and-sync":
-		resolveResult, resolveErr = doResolveBackupAndSync(current, livePath, codexRoot, codexHome)
-	default:
-		return skillSetSyncResp{}, fmt.Errorf("unknown resolve directive %q from server", directive)
-	}
-	if resolveErr != nil {
-		return skillSetSyncResp{}, resolveErr
-	}
-
-	// Reload state after resolve.
-	resolved, _, err := loadSkillSetState()
-	if err != nil {
-		return skillSetSyncResp{}, err
-	}
-
-	now := time.Now().UTC()
-	resp := skillSetSyncResp{
-		Status:         "resolved_" + directive,
-		Mode:           resolved.Mode,
-		BundleName:     resolved.BundleName,
-		BundlePath:     resolveResult.BundlePath,
-		StatePath:      mustSkillSetStatePath(),
-		AppliedVersion: resolved.AppliedVersion,
-		CompiledHash:   resolved.AppliedHash,
-		LastSyncedAt:   cloneTime(&now),
-		PausedAt:       cloneTime(resolved.PausedAt),
-		BackupPath:     resolveResult.BackupPath,
-	}
-
-	// Report the resolved state to the server so the directive gets cleared.
-	if reportErr := reportSkillSetClientState(st, client, resolved); reportErr != nil {
-		return skillSetSyncResp{}, reportErr
-	}
-	return resp, nil
-}
-
 func syncLatestSkillSet(st *state, client *apiClient, codexHome string) (skillSetSyncResp, error) {
 	current, _, err := loadSkillSetState()
 	if err != nil {
@@ -901,13 +846,7 @@ func syncLatestSkillSet(st *state, client *apiClient, codexHome string) (skillSe
 		return resp, nil
 	}
 
-	if err := assertManagedSkillBundleUntouched(resp.BundlePath, current); err != nil {
-		// Check if the server has a pending resolve directive from the dashboard.
-		directive := resolveDirectiveFromBundle(bundle)
-		if directive != "" {
-			fmt.Fprintf(os.Stderr, "Resolve directive %q received from dashboard, executing automatically.\n", directive)
-			return executeResolveDirective(directive, current, resp.BundlePath, codexRoot, codexHome, st, client)
-		}
+	if err := assertManagedSkillBundleUntouched(resp.BundlePath, &current); err != nil {
 		resp.Status = "conflict"
 		resp.AppliedVersion = current.AppliedVersion
 		resp.CompiledHash = current.AppliedHash
@@ -1134,24 +1073,30 @@ func currentSkillSetStatus(codexHome string) (skillSetStatusResp, error) {
 	}
 
 	// When the bundle has been modified locally, include a conflict diff summary.
-	if assertManagedSkillBundleUntouched(status.BundlePath, current) != nil {
+	if assertManagedSkillBundleUntouched(status.BundlePath, &current) != nil {
 		diff, diffErr := diffManagedSkillBundle(codexHome)
 		if diffErr == nil && diff.HasConflict {
 			status.ConflictDiff = &diff
 			status.ResolveHint = "run \"crux skills resolve\" to view options and resolve the conflict"
 		}
 	}
+	status.AppliedHash = current.AppliedHash
 
 	return status, nil
 }
 
-func assertManagedSkillBundleUntouched(livePath string, current skillSetLocalState) error {
-	if !fileExists(livePath) || strings.TrimSpace(current.AppliedHash) == "" {
+func assertManagedSkillBundleUntouched(livePath string, current *skillSetLocalState) error {
+	if current == nil || !fileExists(livePath) || strings.TrimSpace(current.AppliedHash) == "" {
 		return nil
 	}
-	liveHash, err := hashManagedSkillBundle(livePath)
+	liveHash, migrated, err := reconcileManagedSkillBundleHash(livePath, current)
 	if err != nil {
 		return err
+	}
+	if migrated {
+		if err := saveSkillSetState(*current); err != nil {
+			return err
+		}
 	}
 	if liveHash != strings.TrimSpace(current.AppliedHash) {
 		return fmt.Errorf("managed skill bundle at %s was modified locally; run \"crux skills resolve\" to view changes and choose how to proceed", livePath)
@@ -1159,7 +1104,37 @@ func assertManagedSkillBundleUntouched(livePath string, current skillSetLocalSta
 	return nil
 }
 
+func reconcileManagedSkillBundleHash(livePath string, current *skillSetLocalState) (string, bool, error) {
+	if current == nil || !fileExists(livePath) || strings.TrimSpace(current.AppliedHash) == "" {
+		return "", false, nil
+	}
+	liveHash, err := hashManagedSkillBundle(livePath)
+	if err != nil {
+		return "", false, err
+	}
+	if liveHash == strings.TrimSpace(current.AppliedHash) {
+		return liveHash, false, nil
+	}
+	legacyHash, err := hashManagedSkillBundleLegacy(livePath)
+	if err != nil {
+		return "", false, err
+	}
+	if legacyHash == strings.TrimSpace(current.AppliedHash) {
+		current.AppliedHash = liveHash
+		return liveHash, true, nil
+	}
+	return liveHash, false, nil
+}
+
 func hashManagedSkillBundle(root string) (string, error) {
+	return hashManagedSkillBundleWithOptions(root, true)
+}
+
+func hashManagedSkillBundleLegacy(root string) (string, error) {
+	return hashManagedSkillBundleWithOptions(root, false)
+}
+
+func hashManagedSkillBundleWithOptions(root string, stripSkillVersion bool) (string, error) {
 	type hashedFile struct {
 		Path    string
 		Content []byte
@@ -1185,6 +1160,12 @@ func hashManagedSkillBundle(root string) (string, error) {
 		if err != nil {
 			return err
 		}
+		// Strip the Version line from SKILL.md so the hash matches the
+		// server-side computation which hashes SKILL.md before the version
+		// is injected.
+		if stripSkillVersion && strings.EqualFold(relativePath, "SKILL.md") {
+			content = stripSkillVersionLine(content)
+		}
 		files = append(files, hashedFile{Path: relativePath, Content: content})
 		return nil
 	})
@@ -1203,6 +1184,39 @@ func hashManagedSkillBundle(root string) (string, error) {
 		_, _ = hasher.Write([]byte{0})
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// stripSkillVersionLine removes the "Version: `v-…`" line (and the blank
+// line that follows it) from SKILL.md content so the client-side hash
+// matches the server-side hash which is computed before the version string
+// is injected.
+func stripSkillVersionLine(content []byte) []byte {
+	var result []byte
+	remaining := content
+	skipNextBlank := false
+	for len(remaining) > 0 {
+		idx := bytes.IndexByte(remaining, '\n')
+		var line []byte
+		if idx < 0 {
+			line = remaining
+			remaining = nil
+		} else {
+			line = remaining[:idx+1]
+			remaining = remaining[idx+1:]
+		}
+		trimmed := bytes.TrimSpace(line)
+		if bytes.HasPrefix(trimmed, []byte("Version:")) && bytes.Contains(trimmed, []byte("`v")) {
+			skipNextBlank = true
+			continue
+		}
+		if skipNextBlank && len(trimmed) == 0 {
+			skipNextBlank = false
+			continue
+		}
+		skipNextBlank = false
+		result = append(result, line...)
+	}
+	return result
 }
 
 func cleanManagedSkillPath(path string) (string, error) {
