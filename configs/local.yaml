@@ -50,3 +50,9 @@ HTTP:
   RateLimitPerMinute: 120
   BulkImportRateLimitPerMinute: 240
   LogToStdout: true
+
+
+OpenAI:
+  APIKey: ""
+  BaseURL: ""
+  ResponsesModel: "gpt-5.4"

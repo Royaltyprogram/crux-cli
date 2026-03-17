@@ -279,6 +279,107 @@ type ReportListResp struct {
 	Items         []ReportResp `json:"items"`
 }
 
+type SkillSetFileResp struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	SHA256  string `json:"sha256,omitempty"`
+	Bytes   int    `json:"bytes"`
+}
+
+type SkillSetClientStateResp struct {
+	ProjectID        string     `json:"project_id"`
+	AgentID          string     `json:"agent_id"`
+	BundleName       string     `json:"bundle_name"`
+	Mode             string     `json:"mode"`
+	SyncStatus       string     `json:"sync_status"`
+	AppliedVersion   string     `json:"applied_version,omitempty"`
+	AppliedHash      string     `json:"applied_hash,omitempty"`
+	LastSyncedAt     *time.Time `json:"last_synced_at,omitempty"`
+	PausedAt         *time.Time `json:"paused_at,omitempty"`
+	LastError        string     `json:"last_error,omitempty"`
+	ResolveDirective string     `json:"resolve_directive,omitempty"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type SkillSetResolveResp struct {
+	ProjectID        string    `json:"project_id"`
+	Action           string    `json:"action"`
+	ResolveDirective string    `json:"resolve_directive"`
+	Status           string    `json:"status"`
+	IssuedAt         time.Time `json:"issued_at"`
+}
+
+type SkillSetDeploymentEventResp struct {
+	ID              string    `json:"id"`
+	ProjectID       string    `json:"project_id"`
+	AgentID         string    `json:"agent_id"`
+	BundleName      string    `json:"bundle_name"`
+	EventType       string    `json:"event_type"`
+	Summary         string    `json:"summary,omitempty"`
+	Mode            string    `json:"mode,omitempty"`
+	SyncStatus      string    `json:"sync_status,omitempty"`
+	AppliedVersion  string    `json:"applied_version,omitempty"`
+	PreviousVersion string    `json:"previous_version,omitempty"`
+	AppliedHash     string    `json:"applied_hash,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
+	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+type SkillSetShadowEvaluationResp struct {
+	Score                float64 `json:"score"`
+	AverageConfidence    float64 `json:"average_confidence"`
+	ChangedDocumentCount int     `json:"changed_document_count"`
+	AddedRuleCount       int     `json:"added_rule_count"`
+	RemovedRuleCount     int     `json:"removed_rule_count"`
+	RuleChurn            int     `json:"rule_churn"`
+	Guardrail            string  `json:"guardrail,omitempty"`
+}
+
+type SkillSetVersionResp struct {
+	ID                 string                        `json:"id"`
+	ProjectID          string                        `json:"project_id"`
+	BundleName         string                        `json:"bundle_name"`
+	Version            string                        `json:"version"`
+	CompiledHash       string                        `json:"compiled_hash"`
+	CreatedAt          time.Time                     `json:"created_at"`
+	GeneratedAt        time.Time                     `json:"generated_at"`
+	BasedOnReportIDs   []string                      `json:"based_on_report_ids,omitempty"`
+	Summary            []string                      `json:"summary,omitempty"`
+	DeploymentDecision string                        `json:"deployment_decision,omitempty"`
+	DecisionReason     string                        `json:"decision_reason,omitempty"`
+	ShadowEvaluation   *SkillSetShadowEvaluationResp `json:"shadow_evaluation,omitempty"`
+}
+
+type SkillSetVersionDiffFileResp struct {
+	Path    string   `json:"path"`
+	Added   []string `json:"added,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+}
+
+type SkillSetVersionDiffResp struct {
+	FromVersion  string                        `json:"from_version,omitempty"`
+	ToVersion    string                        `json:"to_version,omitempty"`
+	Summary      []string                      `json:"summary,omitempty"`
+	ChangedFiles []SkillSetVersionDiffFileResp `json:"changed_files,omitempty"`
+}
+
+type SkillSetBundleResp struct {
+	SchemaVersion     string                        `json:"schema_version"`
+	ProjectID         string                        `json:"project_id"`
+	Status            string                        `json:"status"`
+	BundleName        string                        `json:"bundle_name"`
+	Version           string                        `json:"version,omitempty"`
+	CompiledHash      string                        `json:"compiled_hash,omitempty"`
+	GeneratedAt       *time.Time                    `json:"generated_at,omitempty"`
+	BasedOnReportIDs  []string                      `json:"based_on_report_ids,omitempty"`
+	Summary           []string                      `json:"summary,omitempty"`
+	Files             []SkillSetFileResp            `json:"files,omitempty"`
+	ClientState       *SkillSetClientStateResp      `json:"client_state,omitempty"`
+	DeploymentHistory []SkillSetDeploymentEventResp `json:"deployment_history,omitempty"`
+	VersionHistory    []SkillSetVersionResp         `json:"version_history,omitempty"`
+	LatestDiff        *SkillSetVersionDiffResp      `json:"latest_diff,omitempty"`
+}
+
 type ProjectResp struct {
 	ID             string             `json:"id"`
 	Name           string             `json:"name"`

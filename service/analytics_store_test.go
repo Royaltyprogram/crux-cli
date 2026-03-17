@@ -48,6 +48,44 @@ func TestAnalyticsStorePersistenceRoundTrip(t *testing.T) {
 			Timestamp: now,
 		},
 	}
+	store.skillSetVersions["project_1"] = []*SkillSetVersion{{
+		ID:                 "skver_1",
+		ProjectID:          "project_1",
+		OrgID:              "demo-org",
+		BundleName:         managedSkillBundleName,
+		Version:            "v123",
+		CompiledHash:       "hash-123",
+		CreatedAt:          now,
+		GeneratedAt:        now,
+		BasedOnReportIDs:   []string{"rep_1"},
+		Summary:            []string{"Ask clarifying questions before building."},
+		Files:              []SkillSetVersionFile{{Path: "01-clarification.md", Content: "- Ask clarifying questions", Bytes: 28}},
+		DeploymentDecision: "deployed",
+		DecisionReason:     "latest active reports synthesized into a managed bundle",
+		ShadowEvaluation: &SkillSetShadowEvaluation{
+			Score:                0.68,
+			AverageConfidence:    0.74,
+			ChangedDocumentCount: 1,
+			AddedRuleCount:       2,
+			RemovedRuleCount:     0,
+			RuleChurn:            2,
+			Guardrail:            "passed",
+		},
+	}}
+	store.skillSetClients["project_1"] = &SkillSetClientState{
+		ProjectID:        "project_1",
+		OrgID:            "demo-org",
+		AgentID:          "agent-1",
+		BundleName:       managedSkillBundleName,
+		Mode:             "autopilot",
+		SyncStatus:       "conflict",
+		AppliedVersion:   "v123",
+		AppliedHash:      "hash-123",
+		LastSyncedAt:     cloneTime(&now),
+		LastError:        "managed skill bundle was modified locally",
+		ResolveDirective: "accept-remote",
+		UpdatedAt:        now,
+	}
 	require.NoError(t, store.persistLocked())
 	store.mu.Unlock()
 
@@ -64,6 +102,15 @@ func TestAnalyticsStorePersistenceRoundTrip(t *testing.T) {
 	require.Equal(t, "session_1", loaded.sessionSummaries["project_1"][0].ID)
 	require.Equal(t, []string{"Checking controller flow before patching."}, loaded.sessionSummaries["project_1"][0].ReasoningSummaries)
 	require.NotNil(t, loaded.projects["project_1"].LastIngestedAt)
+	require.Len(t, loaded.skillSetVersions["project_1"], 1)
+	require.Equal(t, "v123", loaded.skillSetVersions["project_1"][0].Version)
+	require.Equal(t, "01-clarification.md", loaded.skillSetVersions["project_1"][0].Files[0].Path)
+	require.NotNil(t, loaded.skillSetVersions["project_1"][0].ShadowEvaluation)
+	require.Equal(t, "passed", loaded.skillSetVersions["project_1"][0].ShadowEvaluation.Guardrail)
+	require.InDelta(t, 0.68, loaded.skillSetVersions["project_1"][0].ShadowEvaluation.Score, 0.01)
+	require.NotNil(t, loaded.skillSetClients["project_1"])
+	require.Equal(t, "conflict", loaded.skillSetClients["project_1"].SyncStatus)
+	require.Equal(t, "accept-remote", loaded.skillSetClients["project_1"].ResolveDirective)
 }
 
 func TestAnalyticsStoreCollapsesProjectsIntoSharedWorkspaceOnLoad(t *testing.T) {

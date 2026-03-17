@@ -124,6 +124,50 @@ func (s *AnalyticsService) CompleteGoogleAuth(ctx context.Context, redirectURL, 
 	}, nil
 }
 
+func (s *AnalyticsService) DevLogin() (*response.LoginResp, error) {
+	if s.Config == nil || !s.Config.IsDebugMode() {
+		return nil, ecode.NotFound.WithCause(fmt.Errorf("dev login is not available"))
+	}
+	if !s.Config.AllowsDemoUser() {
+		return nil, ecode.Forbidden(1020, "demo user is not enabled")
+	}
+
+	now := time.Now().UTC()
+
+	s.AnalyticsStore.mu.Lock()
+	defer s.AnalyticsStore.mu.Unlock()
+
+	user, ok := s.AnalyticsStore.users[defaultDemoUserID]
+	if !ok || !userCanAuthenticate(user) {
+		return nil, ecode.NotFound.WithCause(fmt.Errorf("demo user not found"))
+	}
+	org, ok := s.AnalyticsStore.organizations[user.OrgID]
+	if !ok {
+		return nil, ecode.NotFound.WithCause(fmt.Errorf("demo org not found"))
+	}
+
+	tokenValue, tokenRecord, err := s.AnalyticsStore.issueAccessTokenLocked(TokenKindWebSession, user.OrgID, user.ID, "dev login session", defaultSessionTokenTTL, now)
+	if err != nil {
+		return nil, err
+	}
+
+	user.LastLoginAt = cloneTime(&now)
+	if err := s.AnalyticsStore.persistLocked(); err != nil {
+		return nil, err
+	}
+
+	return &response.LoginResp{
+		SessionToken:     tokenValue,
+		SessionExpiresAt: tokenRecord.ExpiresAt,
+		User:             toSessionUser(user),
+		Organization:     toSessionOrganization(org),
+	}, nil
+}
+
+func (s *AnalyticsService) IsDevMode() bool {
+	return s.Config != nil && s.Config.IsDebugMode()
+}
+
 func (s *AnalyticsService) googleAuthConfig() (googleAuthConfig, error) {
 	if s == nil || s.Config == nil {
 		return googleAuthConfig{}, ecode.New(1012, 503, "google sign-in is not configured")

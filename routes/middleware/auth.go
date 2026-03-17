@@ -19,7 +19,7 @@ func RequireAPIToken(configuredToken string, staticTokenEnabled bool, store *ser
 			if !strings.HasPrefix(path, "/api/v1/") {
 				return next(c)
 			}
-			if path == "/api/v1/auth/google/start" || path == "/api/v1/auth/google/callback" || path == "/api/v1/auth/cli/refresh" {
+			if path == "/api/v1/auth/google/start" || path == "/api/v1/auth/google/callback" || path == "/api/v1/auth/cli/refresh" || path == "/api/v1/auth/dev/login" {
 				return next(c)
 			}
 

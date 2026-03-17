@@ -30,35 +30,41 @@ type AnalyticsStore struct {
 	lastSeenDirty  bool
 	lastSeenFlush  bool
 
-	organizations     map[string]*Organization
-	users             map[string]*User
-	accessTokens      map[string]*AccessToken
-	agents            map[string]*Agent
-	projects          map[string]*Project
-	configSnapshots   map[string][]*ConfigSnapshot
-	sessionSummaries  map[string][]*SessionSummary
-	reports           map[string]*Report
-	projectReports    map[string][]string
-	reportResearch    map[string]*ReportResearchStatus
-	sessionImportJobs map[string]*SessionImportJob
-	audits            []*AuditEvent
+	organizations       map[string]*Organization
+	users               map[string]*User
+	accessTokens        map[string]*AccessToken
+	agents              map[string]*Agent
+	projects            map[string]*Project
+	configSnapshots     map[string][]*ConfigSnapshot
+	sessionSummaries    map[string][]*SessionSummary
+	reports             map[string]*Report
+	projectReports      map[string][]string
+	reportResearch      map[string]*ReportResearchStatus
+	skillSetClients     map[string]*SkillSetClientState
+	skillSetDeployments map[string][]*SkillSetDeploymentEvent
+	skillSetVersions    map[string][]*SkillSetVersion
+	sessionImportJobs   map[string]*SessionImportJob
+	audits              []*AuditEvent
 }
 
 type analyticsStoreState struct {
-	SchemaVersion     string                           `json:"schema_version"`
-	Seq               uint64                           `json:"seq"`
-	Organizations     map[string]*Organization         `json:"organizations"`
-	Users             map[string]*User                 `json:"users"`
-	AccessTokens      map[string]*AccessToken          `json:"access_tokens"`
-	Agents            map[string]*Agent                `json:"agents"`
-	Projects          map[string]*Project              `json:"projects"`
-	ConfigSnapshots   map[string][]*ConfigSnapshot     `json:"config_snapshots"`
-	SessionSummaries  map[string][]*SessionSummary     `json:"session_summaries"`
-	Reports           map[string]*Report               `json:"reports"`
-	ProjectReports    map[string][]string              `json:"project_reports"`
-	ReportResearch    map[string]*ReportResearchStatus `json:"report_research"`
-	SessionImportJobs map[string]*SessionImportJob     `json:"session_import_jobs"`
-	Audits            []*AuditEvent                    `json:"audits"`
+	SchemaVersion       string                                `json:"schema_version"`
+	Seq                 uint64                                `json:"seq"`
+	Organizations       map[string]*Organization              `json:"organizations"`
+	Users               map[string]*User                      `json:"users"`
+	AccessTokens        map[string]*AccessToken               `json:"access_tokens"`
+	Agents              map[string]*Agent                     `json:"agents"`
+	Projects            map[string]*Project                   `json:"projects"`
+	ConfigSnapshots     map[string][]*ConfigSnapshot          `json:"config_snapshots"`
+	SessionSummaries    map[string][]*SessionSummary          `json:"session_summaries"`
+	Reports             map[string]*Report                    `json:"reports"`
+	ProjectReports      map[string][]string                   `json:"project_reports"`
+	ReportResearch      map[string]*ReportResearchStatus      `json:"report_research"`
+	SkillSetClients     map[string]*SkillSetClientState       `json:"skill_set_clients"`
+	SkillSetDeployments map[string][]*SkillSetDeploymentEvent `json:"skill_set_deployments"`
+	SkillSetVersions    map[string][]*SkillSetVersion         `json:"skill_set_versions"`
+	SessionImportJobs   map[string]*SessionImportJob          `json:"session_import_jobs"`
+	Audits              []*AuditEvent                         `json:"audits"`
 }
 
 type Organization struct {
@@ -193,6 +199,73 @@ type ReportResearchStatus struct {
 	LastDurationMS   int
 }
 
+type SkillSetClientState struct {
+	ProjectID        string
+	OrgID            string
+	AgentID          string
+	BundleName       string
+	Mode             string
+	SyncStatus       string
+	AppliedVersion   string
+	AppliedHash      string
+	LastSyncedAt     *time.Time
+	PausedAt         *time.Time
+	LastError        string
+	ResolveDirective string
+	UpdatedAt        time.Time
+}
+
+type SkillSetDeploymentEvent struct {
+	ID              string
+	ProjectID       string
+	OrgID           string
+	AgentID         string
+	BundleName      string
+	EventType       string
+	Summary         string
+	Mode            string
+	SyncStatus      string
+	AppliedVersion  string
+	PreviousVersion string
+	AppliedHash     string
+	LastError       string
+	OccurredAt      time.Time
+}
+
+type SkillSetVersion struct {
+	ID                 string
+	ProjectID          string
+	OrgID              string
+	BundleName         string
+	Version            string
+	CompiledHash       string
+	CreatedAt          time.Time
+	GeneratedAt        time.Time
+	BasedOnReportIDs   []string
+	Summary            []string
+	Files              []SkillSetVersionFile
+	DeploymentDecision string
+	DecisionReason     string
+	ShadowEvaluation   *SkillSetShadowEvaluation
+}
+
+type SkillSetVersionFile struct {
+	Path    string
+	Content string
+	SHA256  string
+	Bytes   int
+}
+
+type SkillSetShadowEvaluation struct {
+	Score                float64
+	AverageConfidence    float64
+	ChangedDocumentCount int
+	AddedRuleCount       int
+	RemovedRuleCount     int
+	RuleChurn            int
+	Guardrail            string
+}
+
 type SessionImportJobSession struct {
 	SessionID              string
 	Tool                   string
@@ -278,23 +351,26 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 	}
 
 	store := &AnalyticsStore{
-		db:                db,
-		dbDialect:         dialect,
-		filePath:          conf.App.StorePath,
-		allowDemoUser:     conf.AllowsDemoUser(),
-		bootstrapUsers:    append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
-		organizations:     make(map[string]*Organization),
-		users:             make(map[string]*User),
-		accessTokens:      make(map[string]*AccessToken),
-		agents:            make(map[string]*Agent),
-		projects:          make(map[string]*Project),
-		configSnapshots:   make(map[string][]*ConfigSnapshot),
-		sessionSummaries:  make(map[string][]*SessionSummary),
-		reports:           make(map[string]*Report),
-		projectReports:    make(map[string][]string),
-		reportResearch:    make(map[string]*ReportResearchStatus),
-		sessionImportJobs: make(map[string]*SessionImportJob),
-		audits:            make([]*AuditEvent, 0, 32),
+		db:                  db,
+		dbDialect:           dialect,
+		filePath:            conf.App.StorePath,
+		allowDemoUser:       conf.AllowsDemoUser(),
+		bootstrapUsers:      append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
+		organizations:       make(map[string]*Organization),
+		users:               make(map[string]*User),
+		accessTokens:        make(map[string]*AccessToken),
+		agents:              make(map[string]*Agent),
+		projects:            make(map[string]*Project),
+		configSnapshots:     make(map[string][]*ConfigSnapshot),
+		sessionSummaries:    make(map[string][]*SessionSummary),
+		reports:             make(map[string]*Report),
+		projectReports:      make(map[string][]string),
+		reportResearch:      make(map[string]*ReportResearchStatus),
+		skillSetClients:     make(map[string]*SkillSetClientState),
+		skillSetDeployments: make(map[string][]*SkillSetDeploymentEvent),
+		skillSetVersions:    make(map[string][]*SkillSetVersion),
+		sessionImportJobs:   make(map[string]*SessionImportJob),
+		audits:              make([]*AuditEvent, 0, 32),
 	}
 	if err := store.initDB(); err != nil {
 		_ = db.Close()
@@ -612,6 +688,43 @@ func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 			return nil, err
 		}
 	}
+	for _, projectID := range sortedKeys(s.skillSetClients) {
+		if err := appendRecord("skill_set_client", "", projectID, normalizeSkillSetClientState(s.skillSetClients[projectID])); err != nil {
+			return nil, err
+		}
+	}
+	for _, projectID := range sortedKeys(s.skillSetDeployments) {
+		items := append([]*SkillSetDeploymentEvent(nil), s.skillSetDeployments[projectID]...)
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].OccurredAt.Equal(items[j].OccurredAt) {
+				return items[i].ID < items[j].ID
+			}
+			return items[i].OccurredAt.Before(items[j].OccurredAt)
+		})
+		for _, item := range items {
+			if item != nil {
+				if err := appendRecord("skill_set_deployment", projectID, item.ID, normalizeSkillSetDeploymentEvent(item)); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	for _, projectID := range sortedKeys(s.skillSetVersions) {
+		items := append([]*SkillSetVersion(nil), s.skillSetVersions[projectID]...)
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+				return items[i].ID < items[j].ID
+			}
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		})
+		for _, item := range items {
+			if item != nil {
+				if err := appendRecord("skill_set_version", projectID, item.ID, normalizeSkillSetVersion(item)); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	for _, id := range sortedKeys(s.sessionImportJobs) {
 		if err := appendRecord("session_import_job", "", id, normalizeSessionImportJob(s.sessionImportJobs[id])); err != nil {
 			return nil, err
@@ -757,6 +870,24 @@ func (s *AnalyticsStore) applyLoadedRecord(recordType, scopeID, recordID string,
 			return err
 		}
 		s.reportResearch[recordID] = normalizeReportResearchStatus(&item)
+	case "skill_set_client":
+		var item SkillSetClientState
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return err
+		}
+		s.skillSetClients[recordID] = normalizeSkillSetClientState(&item)
+	case "skill_set_deployment":
+		var item SkillSetDeploymentEvent
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return err
+		}
+		s.skillSetDeployments[scopeID] = append(s.skillSetDeployments[scopeID], normalizeSkillSetDeploymentEvent(&item))
+	case "skill_set_version":
+		var item SkillSetVersion
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return err
+		}
+		s.skillSetVersions[scopeID] = append(s.skillSetVersions[scopeID], normalizeSkillSetVersion(&item))
 	case "session_import_job":
 		var item SessionImportJob
 		if err := json.Unmarshal(payload, &item); err != nil {
@@ -809,26 +940,32 @@ func (s *AnalyticsStore) resetInMemoryState() {
 	s.reports = make(map[string]*Report)
 	s.projectReports = make(map[string][]string)
 	s.reportResearch = make(map[string]*ReportResearchStatus)
+	s.skillSetClients = make(map[string]*SkillSetClientState)
+	s.skillSetDeployments = make(map[string][]*SkillSetDeploymentEvent)
+	s.skillSetVersions = make(map[string][]*SkillSetVersion)
 	s.sessionImportJobs = make(map[string]*SessionImportJob)
 	s.audits = make([]*AuditEvent, 0, 32)
 }
 
 func (s *AnalyticsStore) snapshotStateLocked() analyticsStoreState {
 	return analyticsStoreState{
-		SchemaVersion:     analyticsStoreSchemaVersion,
-		Seq:               s.seq,
-		Organizations:     s.organizations,
-		Users:             s.users,
-		AccessTokens:      s.accessTokens,
-		Agents:            s.agents,
-		Projects:          s.projects,
-		ConfigSnapshots:   s.configSnapshots,
-		SessionSummaries:  s.sessionSummaries,
-		Reports:           s.reports,
-		ProjectReports:    s.projectReports,
-		ReportResearch:    normalizeReportResearchMap(s.reportResearch),
-		SessionImportJobs: normalizeSessionImportJobMap(s.sessionImportJobs),
-		Audits:            s.audits,
+		SchemaVersion:       analyticsStoreSchemaVersion,
+		Seq:                 s.seq,
+		Organizations:       s.organizations,
+		Users:               s.users,
+		AccessTokens:        s.accessTokens,
+		Agents:              s.agents,
+		Projects:            s.projects,
+		ConfigSnapshots:     s.configSnapshots,
+		SessionSummaries:    s.sessionSummaries,
+		Reports:             s.reports,
+		ProjectReports:      s.projectReports,
+		ReportResearch:      normalizeReportResearchMap(s.reportResearch),
+		SkillSetClients:     normalizeSkillSetClientMap(s.skillSetClients),
+		SkillSetDeployments: normalizeSkillSetDeploymentMap(s.skillSetDeployments),
+		SkillSetVersions:    normalizeSkillSetVersionMap(s.skillSetVersions),
+		SessionImportJobs:   normalizeSessionImportJobMap(s.sessionImportJobs),
+		Audits:              s.audits,
 	}
 }
 
@@ -844,6 +981,9 @@ func (s *AnalyticsStore) replaceStateLocked(state analyticsStoreState) error {
 	s.reports = ensureMap(state.Reports)
 	s.projectReports = ensureStringSliceMap(state.ProjectReports)
 	s.reportResearch = ensureMap(normalizeReportResearchMap(state.ReportResearch))
+	s.skillSetClients = ensureMap(normalizeSkillSetClientMap(state.SkillSetClients))
+	s.skillSetDeployments = ensureNestedMap(normalizeSkillSetDeploymentMap(state.SkillSetDeployments))
+	s.skillSetVersions = ensureNestedMap(normalizeSkillSetVersionMap(state.SkillSetVersions))
 	s.sessionImportJobs = ensureMap(normalizeSessionImportJobMap(state.SessionImportJobs))
 	if state.Audits == nil {
 		s.audits = make([]*AuditEvent, 0, 32)
@@ -869,6 +1009,116 @@ func normalizeReportResearchStatus(status *ReportResearchStatus) *ReportResearch
 		return nil
 	}
 	cloned := *status
+	return &cloned
+}
+
+func normalizeSkillSetClientMap(input map[string]*SkillSetClientState) map[string]*SkillSetClientState {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]*SkillSetClientState, len(input))
+	for key, value := range input {
+		out[key] = normalizeSkillSetClientState(value)
+	}
+	return out
+}
+
+func normalizeSkillSetClientState(state *SkillSetClientState) *SkillSetClientState {
+	if state == nil {
+		return nil
+	}
+	cloned := *state
+	cloned.LastSyncedAt = cloneTime(state.LastSyncedAt)
+	cloned.PausedAt = cloneTime(state.PausedAt)
+	if !cloned.UpdatedAt.IsZero() {
+		cloned.UpdatedAt = cloned.UpdatedAt.UTC()
+	}
+	return &cloned
+}
+
+func normalizeSkillSetDeploymentMap(input map[string][]*SkillSetDeploymentEvent) map[string][]*SkillSetDeploymentEvent {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string][]*SkillSetDeploymentEvent, len(input))
+	for key, items := range input {
+		if len(items) == 0 {
+			out[key] = []*SkillSetDeploymentEvent{}
+			continue
+		}
+		cloned := make([]*SkillSetDeploymentEvent, 0, len(items))
+		for _, item := range items {
+			if normalized := normalizeSkillSetDeploymentEvent(item); normalized != nil {
+				cloned = append(cloned, normalized)
+			}
+		}
+		out[key] = cloned
+	}
+	return out
+}
+
+func normalizeSkillSetDeploymentEvent(event *SkillSetDeploymentEvent) *SkillSetDeploymentEvent {
+	if event == nil {
+		return nil
+	}
+	cloned := *event
+	if !cloned.OccurredAt.IsZero() {
+		cloned.OccurredAt = cloned.OccurredAt.UTC()
+	}
+	return &cloned
+}
+
+func normalizeSkillSetVersionMap(input map[string][]*SkillSetVersion) map[string][]*SkillSetVersion {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string][]*SkillSetVersion, len(input))
+	for key, items := range input {
+		if len(items) == 0 {
+			out[key] = []*SkillSetVersion{}
+			continue
+		}
+		cloned := make([]*SkillSetVersion, 0, len(items))
+		for _, item := range items {
+			if normalized := normalizeSkillSetVersion(item); normalized != nil {
+				cloned = append(cloned, normalized)
+			}
+		}
+		out[key] = cloned
+	}
+	return out
+}
+
+func normalizeSkillSetVersion(version *SkillSetVersion) *SkillSetVersion {
+	if version == nil {
+		return nil
+	}
+	cloned := *version
+	if !cloned.CreatedAt.IsZero() {
+		cloned.CreatedAt = cloned.CreatedAt.UTC()
+	}
+	if !cloned.GeneratedAt.IsZero() {
+		cloned.GeneratedAt = cloned.GeneratedAt.UTC()
+	}
+	cloned.BasedOnReportIDs = cloneStringSlice(version.BasedOnReportIDs)
+	cloned.Summary = cloneStringSlice(version.Summary)
+	cloned.ShadowEvaluation = normalizeSkillSetShadowEvaluation(version.ShadowEvaluation)
+	if len(version.Files) > 0 {
+		cloned.Files = make([]SkillSetVersionFile, len(version.Files))
+		copy(cloned.Files, version.Files)
+	} else {
+		cloned.Files = []SkillSetVersionFile{}
+	}
+	return &cloned
+}
+
+func normalizeSkillSetShadowEvaluation(evaluation *SkillSetShadowEvaluation) *SkillSetShadowEvaluation {
+	if evaluation == nil {
+		return nil
+	}
+	cloned := *evaluation
+	cloned.Score = round(cloned.Score)
+	cloned.AverageConfidence = round(cloned.AverageConfidence)
 	return &cloned
 }
 
@@ -1188,6 +1438,57 @@ func (s *AnalyticsStore) collapseProjectsLocked() bool {
 				if rec != nil && rec.ProjectID == project.ID {
 					rec.ProjectID = canonical.ID
 				}
+			}
+
+			if clientState, ok := s.skillSetClients[project.ID]; ok && clientState != nil {
+				clientState.ProjectID = canonical.ID
+				current := s.skillSetClients[canonical.ID]
+				if current == nil || clientState.UpdatedAt.After(current.UpdatedAt) {
+					s.skillSetClients[canonical.ID] = clientState
+				}
+				delete(s.skillSetClients, project.ID)
+			}
+			if history, ok := s.skillSetDeployments[project.ID]; ok && len(history) > 0 {
+				for _, event := range history {
+					if event == nil {
+						continue
+					}
+					event.ProjectID = canonical.ID
+					s.skillSetDeployments[canonical.ID] = append(s.skillSetDeployments[canonical.ID], event)
+				}
+				sort.Slice(s.skillSetDeployments[canonical.ID], func(i, j int) bool {
+					left := s.skillSetDeployments[canonical.ID][i]
+					right := s.skillSetDeployments[canonical.ID][j]
+					if left == nil || right == nil {
+						return left != nil
+					}
+					if left.OccurredAt.Equal(right.OccurredAt) {
+						return left.ID < right.ID
+					}
+					return left.OccurredAt.Before(right.OccurredAt)
+				})
+				delete(s.skillSetDeployments, project.ID)
+			}
+			if versions, ok := s.skillSetVersions[project.ID]; ok && len(versions) > 0 {
+				for _, version := range versions {
+					if version == nil {
+						continue
+					}
+					version.ProjectID = canonical.ID
+					s.skillSetVersions[canonical.ID] = append(s.skillSetVersions[canonical.ID], version)
+				}
+				sort.Slice(s.skillSetVersions[canonical.ID], func(i, j int) bool {
+					left := s.skillSetVersions[canonical.ID][i]
+					right := s.skillSetVersions[canonical.ID][j]
+					if left == nil || right == nil {
+						return left != nil
+					}
+					if left.CreatedAt.Equal(right.CreatedAt) {
+						return left.ID < right.ID
+					}
+					return left.CreatedAt.Before(right.CreatedAt)
+				})
+				delete(s.skillSetVersions, project.ID)
 			}
 
 			for _, audit := range s.audits {

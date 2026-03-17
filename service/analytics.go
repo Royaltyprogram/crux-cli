@@ -19,6 +19,7 @@ import (
 type AnalyticsService struct {
 	Options
 	researchAgent     *CloudResearchAgent
+	refineAgent       *SkillRefineAgent
 	reportMinSessions int
 	reportRefreshMu   sync.Mutex
 	reportRefreshLive map[string]bool
@@ -53,6 +54,7 @@ func NewAnalyticsService(opt Options) *AnalyticsService {
 	return &AnalyticsService{
 		Options:           opt,
 		researchAgent:     NewCloudResearchAgent(opt.Config),
+		refineAgent:       NewSkillRefineAgent(opt.Config),
 		reportMinSessions: reportMinSessions,
 		reportRefreshLive: make(map[string]bool),
 		reportRefreshNext: make(map[string]*reportRefreshJob),
@@ -2915,6 +2917,10 @@ func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 		status.State = "succeeded"
 		status.Summary = fmt.Sprintf("Feedback analysis finished in %s and produced %d report(s).", humanizeDurationMS(status.LastDurationMS), len(ids))
 		status.LastSuccessfulAt = cloneTime(&completedAt)
+	}
+	bundle, bundleErr := buildLatestSkillSetBundle(job.project.ID, s.activeSkillSetReportsLocked(job.project.ID), s.refineAgent)
+	if bundleErr == nil {
+		s.ensureLatestSkillSetVersionLocked(job.project, bundle, s.activeSkillSetReportsLocked(job.project.ID))
 	}
 	s.setReportResearchStatusLocked(job.project.ID, status)
 	_ = s.AnalyticsStore.persistLocked()

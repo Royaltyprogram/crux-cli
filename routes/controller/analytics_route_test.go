@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,11 @@ func sanitizeForRouteTest(value string) string {
 		return "route-device"
 	}
 	return value
+}
+
+func ptrTime(value time.Time) *time.Time {
+	cloned := value.UTC()
+	return &cloned
 }
 
 func waitForDashboardResearchStatus(
@@ -255,6 +261,90 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Contains(t, recResp.Items[0].RawSuggestion, "\"kind\": \"llm-workflow-review\"")
 	require.NotEmpty(t, recResp.Items[0].UserIntent)
 	require.NotEmpty(t, recResp.Items[0].ModelInterpretation)
+
+	syncedAt := time.Now().UTC()
+	skillClientState := postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
+		ProjectID:      projectResp.ProjectID,
+		BundleName:     "crux-personal-skillset",
+		Mode:           "autopilot",
+		SyncStatus:     "synced",
+		AppliedVersion: "v-sync-1",
+		AppliedHash:    "hash-sync-1",
+		LastSyncedAt:   ptrTime(syncedAt),
+	})
+	require.Equal(t, projectResp.ProjectID, skillClientState.ProjectID)
+	require.Equal(t, cliLoginResp.AgentID, skillClientState.AgentID)
+	require.Equal(t, "synced", skillClientState.SyncStatus)
+
+	postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
+		ProjectID:      projectResp.ProjectID,
+		BundleName:     "crux-personal-skillset",
+		Mode:           "autopilot",
+		SyncStatus:     "synced",
+		AppliedVersion: "v-sync-1",
+		AppliedHash:    "hash-sync-1",
+		LastSyncedAt:   ptrTime(syncedAt.Add(2 * time.Minute)),
+	})
+
+	skillSetResp := getJSON[response.SkillSetBundleResp](t, echo, deviceToken, "/api/v1/skill-sets/latest", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.Equal(t, "skill-set-bundle.v1", skillSetResp.SchemaVersion)
+	require.Equal(t, "ready", skillSetResp.Status)
+	require.Equal(t, "crux-personal-skillset", skillSetResp.BundleName)
+	require.NotEmpty(t, skillSetResp.Version)
+	require.NotEmpty(t, skillSetResp.CompiledHash)
+	require.NotEmpty(t, skillSetResp.Files)
+	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
+		return strings.HasSuffix(item.Path, ".md")
+	}))
+	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
+		return item.Path == "SKILL.md" &&
+			strings.Contains(item.Content, "name: crux-personal-skillset") &&
+			strings.Contains(item.Content, "Crux Personal Skill Set")
+	}))
+	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
+		return item.Path == "agents/openai.yaml" &&
+			strings.Contains(item.Content, "display_name: \"Crux Personal Skill Set\"")
+	}))
+	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
+		return item.Path == "00-manifest.json" && strings.Contains(item.Content, skillSetResp.Version)
+	}))
+	require.NotNil(t, skillSetResp.ClientState)
+	require.Equal(t, "v-sync-1", skillSetResp.ClientState.AppliedVersion)
+	require.Equal(t, "synced", skillSetResp.ClientState.SyncStatus)
+	require.Len(t, skillSetResp.DeploymentHistory, 1)
+	require.Equal(t, "skillset_deployed", skillSetResp.DeploymentHistory[0].EventType)
+	require.Equal(t, "v-sync-1", skillSetResp.DeploymentHistory[0].AppliedVersion)
+	require.Contains(t, skillSetResp.DeploymentHistory[0].Summary, "Deployed")
+	require.Len(t, skillSetResp.VersionHistory, 1)
+	require.Equal(t, skillSetResp.Version, skillSetResp.VersionHistory[0].Version)
+	require.Equal(t, skillSetResp.CompiledHash, skillSetResp.VersionHistory[0].CompiledHash)
+	require.Equal(t, "shadow", skillSetResp.VersionHistory[0].DeploymentDecision)
+	require.NotNil(t, skillSetResp.VersionHistory[0].ShadowEvaluation)
+	require.Equal(t, "passed", skillSetResp.VersionHistory[0].ShadowEvaluation.Guardrail)
+	require.Greater(t, skillSetResp.VersionHistory[0].ShadowEvaluation.Score, 0.0)
+	require.GreaterOrEqual(t, skillSetResp.VersionHistory[0].ShadowEvaluation.AverageConfidence, 0.0)
+	require.Greater(t, skillSetResp.VersionHistory[0].ShadowEvaluation.ChangedDocumentCount, 0)
+	require.Nil(t, skillSetResp.LatestDiff)
+
+	postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
+		ProjectID:      projectResp.ProjectID,
+		BundleName:     "crux-personal-skillset",
+		Mode:           "autopilot",
+		SyncStatus:     "synced",
+		AppliedVersion: skillSetResp.Version,
+		AppliedHash:    skillSetResp.CompiledHash,
+		LastSyncedAt:   ptrTime(syncedAt.Add(4 * time.Minute)),
+	})
+
+	skillSetResp = getJSON[response.SkillSetBundleResp](t, echo, deviceToken, "/api/v1/skill-sets/latest", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.Len(t, skillSetResp.VersionHistory, 1)
+	require.Equal(t, "deployed", skillSetResp.VersionHistory[0].DeploymentDecision)
+	require.Contains(t, skillSetResp.VersionHistory[0].DecisionReason, "connected CLI applied")
+	require.NotNil(t, skillSetResp.VersionHistory[0].ShadowEvaluation)
 
 	postApplySession := postJSON[response.SessionIngestResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
 		ProjectID: projectResp.ProjectID,
@@ -2107,4 +2197,93 @@ func loginWithGoogleControllerTestExpectRedirect(t *testing.T, handler http.Hand
 	handler.ServeHTTP(callbackRec, callbackReq)
 	require.Equal(t, http.StatusSeeOther, callbackRec.Code)
 	return callbackRec
+}
+
+func TestAnalyticsRouteResolveSkillSetConflict(t *testing.T) {
+	conf := &configs.Config{}
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
+		Code:     "resolve-conflict-login",
+		Subject:  "google-resolve-conflict-subject",
+		Email:    "demo@example.com",
+		Name:     "Demo Operator",
+		Verified: true,
+	})
+	defer closeGoogle()
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+
+	route := controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	})
+	route.RegisterRoute(echo.Group(""))
+
+	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "resolve-conflict-login", "resolve-conflict-device")
+	deviceToken := cliLoginResp.AccessToken
+
+	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:   cliLoginResp.OrgID,
+		AgentID: cliLoginResp.AgentID,
+		Name:    "resolve-conflict-project",
+		RepoHash: "abc123resolve",
+	})
+	require.NotEmpty(t, projectResp.ProjectID)
+
+	// Report a conflict state from CLI.
+	postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
+		ProjectID:      projectResp.ProjectID,
+		BundleName:     "crux-personal-skillset",
+		Mode:           "autopilot",
+		SyncStatus:     "conflict",
+		AppliedVersion: "v-conflict-1",
+		AppliedHash:    "hash-conflict-1",
+		LastError:      "managed skill bundle was modified locally",
+	})
+
+	// Issue a resolve directive from the dashboard (using session cookie).
+	sessionCookie := loginWithGoogleControllerTest(t, echo, "resolve-conflict-login")
+	resolveResp := postJSON[response.SkillSetResolveResp](t, echo, "", http.MethodPost, "/api/v1/skill-sets/resolve", request.SkillSetResolveReq{
+		ProjectID: projectResp.ProjectID,
+		Action:    "accept-remote",
+	}, sessionCookie)
+	require.Equal(t, projectResp.ProjectID, resolveResp.ProjectID)
+	require.Equal(t, "accept-remote", resolveResp.Action)
+	require.Equal(t, "accept-remote", resolveResp.ResolveDirective)
+	require.Equal(t, "pending", resolveResp.Status)
+
+	// Verify the client state now includes the resolve directive.
+	skillSetResp := getJSON[response.SkillSetBundleResp](t, echo, deviceToken, "/api/v1/skill-sets/latest", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.NotNil(t, skillSetResp.ClientState)
+	require.Equal(t, "accept-remote", skillSetResp.ClientState.ResolveDirective)
+	require.Equal(t, "conflict", skillSetResp.ClientState.SyncStatus)
+
+	// Simulate CLI picking up the directive and resolving.
+	postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
+		ProjectID:      projectResp.ProjectID,
+		BundleName:     "crux-personal-skillset",
+		Mode:           "autopilot",
+		SyncStatus:     "resolved_accept_remote",
+		AppliedVersion: "v-conflict-1",
+		AppliedHash:    "hash-conflict-1",
+	})
+
+	// Verify directive is cleared after resolution.
+	skillSetResp = getJSON[response.SkillSetBundleResp](t, echo, deviceToken, "/api/v1/skill-sets/latest", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.NotNil(t, skillSetResp.ClientState)
+	require.Empty(t, skillSetResp.ClientState.ResolveDirective)
+	require.Equal(t, "resolved_accept_remote", skillSetResp.ClientState.SyncStatus)
 }

@@ -26,6 +26,7 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api := router.Group("/api/v1")
 	api.GET("/auth/google/start", r.googleStart)
 	api.GET("/auth/google/callback", r.googleCallback)
+	api.POST("/auth/dev/login", r.devLogin)
 	api.GET("/auth/me", r.currentSession)
 	api.POST("/auth/logout", r.logout)
 	api.POST("/auth/cli-tokens", r.issueCLIToken)
@@ -48,6 +49,9 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.GET("/session-summaries", r.listSessionSummaries)
 	api.GET("/projects", r.listProjects)
 	api.GET("/reports", r.listReports)
+	api.GET("/skill-sets/latest", r.latestSkillSet)
+	api.POST("/skill-sets/client-state", r.upsertSkillSetClientState)
+	api.POST("/skill-sets/resolve", r.resolveSkillSetConflict)
 	api.GET("/audits", r.auditList)
 	api.GET("/admin/import-job-metrics", r.adminImportJobMetrics)
 	api.GET("/admin/users", r.listAdminUsers)
@@ -84,6 +88,17 @@ func (r *AnalyticsRoute) googleCallback(c *echo.Context) error {
 
 	resp, err := r.AnalyticsService.CompleteGoogleAuth(c.Request().Context(), googleCallbackURL(c), c.QueryParam("code"))
 	c.SetCookie(expiredGoogleOAuthStateCookie(c))
+	if err != nil {
+		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", userFacingError(err)))
+	}
+	if resp.SessionToken != "" {
+		c.SetCookie(buildSessionCookie(c, resp.SessionToken, resp.SessionExpiresAt))
+	}
+	return c.Redirect(http.StatusSeeOther, "/dashboard")
+}
+
+func (r *AnalyticsRoute) devLogin(c *echo.Context) error {
+	resp, err := r.AnalyticsService.DevLogin()
 	if err != nil {
 		return c.Redirect(http.StatusSeeOther, landingRedirectURL("auth_error", userFacingError(err)))
 	}
@@ -248,6 +263,30 @@ func (r *AnalyticsRoute) listReports(c *echo.Context) error {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.ListReports(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) latestSkillSet(c *echo.Context) error {
+	var req request.SkillSetBundleReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.GetLatestSkillSetBundle(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) upsertSkillSetClientState(c *echo.Context) error {
+	var req request.SkillSetClientStateUpsertReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.UpsertSkillSetClientState(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) resolveSkillSetConflict(c *echo.Context) error {
+	var req request.SkillSetResolveReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.ResolveSkillSetConflict(c.Request().Context(), &req))
 }
 
 func (r *AnalyticsRoute) listProjects(c *echo.Context) error {

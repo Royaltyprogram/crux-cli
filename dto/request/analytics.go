@@ -128,6 +128,27 @@ type ReportListReq struct {
 	ProjectID string `query:"project_id"`
 }
 
+type SkillSetBundleReq struct {
+	ProjectID string `query:"project_id"`
+}
+
+type SkillSetClientStateUpsertReq struct {
+	ProjectID      string     `json:"project_id" validate:"required"`
+	BundleName     string     `json:"bundle_name"`
+	Mode           string     `json:"mode"`
+	SyncStatus     string     `json:"sync_status"`
+	AppliedVersion string     `json:"applied_version"`
+	AppliedHash    string     `json:"applied_hash"`
+	LastSyncedAt   *time.Time `json:"last_synced_at,omitempty"`
+	PausedAt       *time.Time `json:"paused_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+}
+
+type SkillSetResolveReq struct {
+	ProjectID string `json:"project_id" validate:"required"`
+	Action    string `json:"action" validate:"required"`
+}
+
 type DashboardOverviewReq struct {
 	OrgID string `query:"org_id" validate:"required"`
 }
