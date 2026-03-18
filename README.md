@@ -1,4 +1,5 @@
 # Autoskills CLI
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/ce24943d-8f96-4bde-ab93-3a701db9aebf" />
 
 Public distribution repository for the Autoskills CLI. Pre-built binaries are published via GitHub Releases.
 
@@ -17,6 +18,11 @@ AUTOSKILLS_VERSION=<release-tag> curl -fsSL https://raw.githubusercontent.com/Ro
 ```
 
 The installer selects the newest published release that has a bundle for the current platform (macOS and Linux supported).
+
+
+# How it works
+
+<img width="943" height="446" alt="image" src="https://github.com/user-attachments/assets/ca56990a-29f3-4d2e-bd05-008ad4487341" />
 
 ## Usage
 
