@@ -37,7 +37,7 @@ func testCLILoginResp(deviceID, orgID, userID string) response.CLILoginResp {
 
 func TestRunSetupLogsInConnectsAndCollects(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	repoPath := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(repoPath, 0o755))
@@ -64,14 +64,14 @@ func TestRunSetupLogsInConnectsAndCollects(t *testing.T) {
 
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/cli/login":
-			require.Equal(t, "setup-token", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "setup-token", r.Header.Get("X-AutoSkills-Token"))
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&loginReq))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, testCLILoginResp("device-1", "org-1", "user-1")),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
-			require.Equal(t, "agt_dva_device-1", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "agt_dva_device-1", r.Header.Get("X-AutoSkills-Token"))
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&projectReq))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
@@ -137,7 +137,7 @@ func TestRunSetupLogsInConnectsAndCollects(t *testing.T) {
 	require.Equal(t, "uploaded", payload.Collect.SessionStatus)
 	require.Equal(t, 1, payload.Collect.SessionUploaded)
 	require.Equal(t, "disabled", payload.Background.Status)
-	require.Contains(t, payload.Background.Command, "crux")
+	require.Contains(t, payload.Background.Command, "autoskills")
 
 	require.NotEmpty(t, loginReq.DeviceName)
 	require.NotEmpty(t, loginReq.Platform)
@@ -154,7 +154,7 @@ func TestRunSetupLogsInConnectsAndCollects(t *testing.T) {
 
 func TestRunSetupBackfillsFullCodexHistoryOnFirstWorkspaceSetup(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	repoPath := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(repoPath, 0o755))
@@ -258,7 +258,7 @@ func TestRunSetupBackfillsFullCodexHistoryOnFirstWorkspaceSetup(t *testing.T) {
 
 func TestRunSetupKeepsRecentIncrementalUploadWhenWorkspaceAlreadyConfigured(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	require.NoError(t, saveState(state{
 		ServerURL:   "https://existing.example.com",
@@ -357,7 +357,7 @@ func TestRunSetupKeepsRecentIncrementalUploadWhenWorkspaceAlreadyConfigured(t *t
 
 func TestRunSetupReusesSavedLoginWithoutPromptingForCLIToken(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	repoPath := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(repoPath, 0o755))
@@ -379,7 +379,7 @@ func TestRunSetupReusesSavedLoginWithoutPromptingForCLIToken(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/cli/login":
 			t.Fatalf("setup should reuse the saved device login instead of calling /auth/cli/login")
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/register":
-			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "saved-access", r.Header.Get("X-AutoSkills-Token"))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.ProjectRegistrationResp{
@@ -389,13 +389,13 @@ func TestRunSetupReusesSavedLoginWithoutPromptingForCLIToken(t *testing.T) {
 				}),
 			}))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/config-snapshots":
-			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "saved-access", r.Header.Get("X-AutoSkills-Token"))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.ConfigSnapshotListResp{}),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/config-snapshots":
-			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "saved-access", r.Header.Get("X-AutoSkills-Token"))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.ConfigSnapshotResp{
@@ -405,7 +405,7 @@ func TestRunSetupReusesSavedLoginWithoutPromptingForCLIToken(t *testing.T) {
 				}),
 			}))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/session-summaries":
-			require.Equal(t, "saved-access", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "saved-access", r.Header.Get("X-AutoSkills-Token"))
 			var sessionReq request.SessionSummaryReq
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&sessionReq))
 			sessionIDs = append(sessionIDs, sessionReq.SessionID)
@@ -451,7 +451,7 @@ func TestRunSetupReusesSavedLoginWithoutPromptingForCLIToken(t *testing.T) {
 
 func TestRunSetupRejectsExplicitServerMismatchWithoutCLIToken(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	require.NoError(t, saveState(state{
 		ServerURL:    "https://saved.example.com",
@@ -468,7 +468,7 @@ func TestRunSetupRejectsExplicitServerMismatchWithoutCLIToken(t *testing.T) {
 		"--server", "https://other.example.com",
 		"--background=false",
 	})
-	require.EqualError(t, err, "saved cli state is for https://saved.example.com, but setup requested https://other.example.com; run `crux login --server https://other.example.com --token <CLI_TOKEN_FROM_DASHBOARD>` or `crux reset` first")
+	require.EqualError(t, err, "saved cli state is for https://saved.example.com, but setup requested https://other.example.com; run `autoskills login --server https://other.example.com --token <CLI_TOKEN_FROM_DASHBOARD>` or `autoskills reset` first")
 }
 
 func TestRunSetupEnablesBackgroundWhenInstalledBinaryAndLaunchctlAreAvailable(t *testing.T) {
@@ -476,9 +476,9 @@ func TestRunSetupEnablesBackgroundWhenInstalledBinaryAndLaunchctlAreAvailable(t 
 	homeDir := filepath.Join(root, "home")
 	require.NoError(t, os.MkdirAll(homeDir, 0o755))
 	t.Setenv("HOME", homeDir)
-	t.Setenv("CRUX_HOME", filepath.Join(root, "crux-home"))
+	t.Setenv("AUTOSKILLS_HOME", filepath.Join(root, "autoskills-home"))
 
-	binRoot, err := os.MkdirTemp(".", ".crux-installed-*")
+	binRoot, err := os.MkdirTemp(".", ".autoskills-installed-*")
 	require.NoError(t, err)
 	binRoot, err = filepath.Abs(binRoot)
 	require.NoError(t, err)
@@ -487,14 +487,14 @@ func TestRunSetupEnablesBackgroundWhenInstalledBinaryAndLaunchctlAreAvailable(t 
 	})
 	binDir := filepath.Join(binRoot, "bin")
 	require.NoError(t, os.MkdirAll(binDir, 0o755))
-	cruxPath := filepath.Join(binDir, "crux")
+	cruxPath := filepath.Join(binDir, "autoskills")
 	require.NoError(t, os.WriteFile(cruxPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 
 	launchctlLog := filepath.Join(root, "launchctl.log")
 	launchctlPath := filepath.Join(root, "launchctl")
 	require.NoError(t, os.WriteFile(launchctlPath, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$LAUNCHCTL_LOG\"\nexit 0\n"), 0o755))
 	t.Setenv("LAUNCHCTL_LOG", launchctlLog)
-	t.Setenv("CRUX_LAUNCHCTL_BIN", launchctlPath)
+	t.Setenv("AUTOSKILLS_LAUNCHCTL_BIN", launchctlPath)
 
 	originalPath := os.Getenv("PATH")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+originalPath)
@@ -570,14 +570,14 @@ func TestRunSetupEnablesBackgroundWhenInstalledBinaryAndLaunchctlAreAvailable(t 
 }
 
 func TestDefaultCommandShowsSetupHintWhenUnconfigured(t *testing.T) {
-	t.Setenv("CRUX_HOME", t.TempDir())
+	t.Setenv("AUTOSKILLS_HOME", t.TempDir())
 
 	output := captureStdout(t, func() {
 		require.NoError(t, run(nil))
 	})
 
-	require.Contains(t, output, "Crux is not set up yet.")
-	require.Contains(t, output, "crux setup")
+	require.Contains(t, output, "AutoSkills is not set up yet.")
+	require.Contains(t, output, "autoskills setup")
 }
 
 func TestHelpHighlightsSetup(t *testing.T) {
@@ -585,14 +585,14 @@ func TestHelpHighlightsSetup(t *testing.T) {
 		require.NoError(t, run([]string{"help"}))
 	})
 
-	require.Contains(t, output, "Crux quickstart:")
+	require.Contains(t, output, "AutoSkills quickstart:")
 	require.Contains(t, output, "setup             register this device")
-	require.Contains(t, output, "crux setup")
+	require.Contains(t, output, "autoskills setup")
 }
 
 func TestRunWithoutArgsUsesSavedServerHintWhenWorkspaceMissing(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	require.NoError(t, saveState(state{
 		ServerURL: "https://crux.example.com",
@@ -606,12 +606,12 @@ func TestRunWithoutArgsUsesSavedServerHintWhenWorkspaceMissing(t *testing.T) {
 		require.NoError(t, run(nil))
 	})
 
-	require.Contains(t, output, "crux setup --server https://crux.example.com")
+	require.Contains(t, output, "autoskills setup --server https://crux.example.com")
 }
 
 func TestRunWithoutArgsShowsStatusWhenConfigured(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -685,7 +685,7 @@ func TestRunWithoutArgsShowsStatusWhenConfigured(t *testing.T) {
 
 func TestRunImportsListsWorkspaceScopedImportJobs(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -749,7 +749,7 @@ func TestRunImportsListsWorkspaceScopedImportJobs(t *testing.T) {
 
 func TestRunImportsSupportsCursorFailedOnlyProjectAndAgentFilters(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -818,7 +818,7 @@ func TestRunImportsSupportsCursorFailedOnlyProjectAndAgentFilters(t *testing.T) 
 
 func TestRunImportsCancelCancelsImportJob(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -874,7 +874,7 @@ func TestRunImportsCancelCancelsImportJob(t *testing.T) {
 
 func TestRunWorkspaceIncludesLastUploadedSessionCursor(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -938,7 +938,7 @@ func TestRunWorkspaceIncludesLastUploadedSessionCursor(t *testing.T) {
 
 func TestRunSessionsIncludesLastUploadedSessionCursor(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

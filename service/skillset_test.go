@@ -62,13 +62,13 @@ func TestEnsureLatestSkillSetVersionLockedTracksHistoryAndDiff(t *testing.T) {
 	require.Equal(t, 0, latest.ShadowEvaluation.RuleChurn)
 	require.InDelta(t, 0.66, latest.ShadowEvaluation.Score, 0.01)
 	require.True(t, hasSkillSetFile(firstBundle.Files, "SKILL.md", func(content string) bool {
-		return strings.Contains(content, "---\nname: crux-personal-skillset\n") &&
+		return strings.Contains(content, "---\nname: autoskills-personal-skillset\n") &&
 			strings.Contains(content, "description: Use as the default operating skill set for this user across coding sessions") &&
 			strings.Contains(content, "## Workflow")
 	}))
 	require.True(t, hasSkillSetFile(firstBundle.Files, "agents/openai.yaml", func(content string) bool {
-		return strings.Contains(content, "display_name: \"Crux Personal Skill Set\"") &&
-			strings.Contains(content, "default_prompt: \"Use $crux-personal-skillset")
+		return strings.Contains(content, "display_name: \"AutoSkills Personal Skill Set\"") &&
+			strings.Contains(content, "default_prompt: \"Use $autoskills-personal-skillset")
 	}))
 
 	secondReports := []*Report{{

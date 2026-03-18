@@ -1,6 +1,6 @@
 const ADMIN_STORAGE_KEYS = {
-  sessionUser: "crux_session_user",
-  sessionOrg: "crux_session_org",
+  sessionUser: "autoskills_session_user",
+  sessionOrg: "autoskills_session_org",
 };
 
 const adminState = {
@@ -73,9 +73,9 @@ function setStatus(text, isError = false) {
 function setLandingNotice(message) {
   try {
     if (message) {
-      window.sessionStorage.setItem("crux_redirect_notice", message);
+      window.sessionStorage.setItem("autoskills_redirect_notice", message);
     } else {
-      window.sessionStorage.removeItem("crux_redirect_notice");
+      window.sessionStorage.removeItem("autoskills_redirect_notice");
     }
   } catch (error) {
   }

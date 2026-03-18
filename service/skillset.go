@@ -18,8 +18,8 @@ import (
 
 const (
 	skillSetBundleSchemaVersion    = "skill-set-bundle.v1"
-	managedSkillBundleName         = "crux-personal-skillset"
-	managedSkillBundleTitle        = "Crux Personal Skill Set"
+	managedSkillBundleName         = "autoskills-personal-skillset"
+	managedSkillBundleTitle        = "AutoSkills Personal Skill Set"
 	managedSkillBundleDescription  = "Use as the default operating skill set for this user across coding sessions to preserve recurring clarification, planning, validation, and collaboration rules learned from prior sessions."
 	skillSetDeploymentHistoryLimit = 20
 	skillSetVersionHistoryLimit    = 12
@@ -1561,7 +1561,7 @@ func renderSkillEntryPoint(bundleName, version string, generatedAt time.Time, ca
 	builder.WriteString("description: " + managedSkillBundleDescription + "\n")
 	builder.WriteString("---\n\n")
 	builder.WriteString("# " + managedSkillBundleTitle + "\n\n")
-	builder.WriteString("This skill is managed automatically by Crux and should be treated as the user's standing policy layer.\n\n")
+	builder.WriteString("This skill is managed automatically by AutoSkills and should be treated as the user's standing policy layer.\n\n")
 	builder.WriteString("Generated at: `" + generatedAt.UTC().Format(time.RFC3339) + "`\n\n")
 	if version != "" {
 		builder.WriteString("Version: `" + version + "`\n\n")
@@ -1588,7 +1588,7 @@ func renderSkillOpenAIYAML() string {
 	var builder strings.Builder
 	builder.WriteString("interface:\n")
 	builder.WriteString("  display_name: \"" + managedSkillBundleTitle + "\"\n")
-	builder.WriteString("  short_description: \"Auto-synced personal operating rules from Crux\"\n")
+	builder.WriteString("  short_description: \"Auto-synced personal operating rules from AutoSkills\"\n")
 	builder.WriteString("  default_prompt: \"Use $" + managedSkillBundleName + " as the default operating skill set for this user, then follow the relevant category documents before responding.\"\n\n")
 	builder.WriteString("policy:\n")
 	builder.WriteString("  allow_implicit_invocation: true\n")

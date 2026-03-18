@@ -73,8 +73,8 @@ func (c *Client) applyAuth(req *http.Request) {
 	if req == nil {
 		return
 	}
-	if strings.TrimSpace(req.Header.Get("X-Crux-Token")) == "" && strings.TrimSpace(c.APIToken) != "" {
-		req.Header.Set("X-Crux-Token", c.APIToken)
+	if strings.TrimSpace(req.Header.Get("X-AutoSkills-Token")) == "" && strings.TrimSpace(c.APIToken) != "" {
+		req.Header.Set("X-AutoSkills-Token", c.APIToken)
 	}
 }
 
@@ -128,7 +128,7 @@ func (c *Client) TryAuthenticate(ctx context.Context) (bool, error) {
 			return false, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Crux-Token", c.EnrollmentToken)
+		req.Header.Set("X-AutoSkills-Token", c.EnrollmentToken)
 
 		rsp, err := c.HTTP.Do(req)
 		if err != nil {

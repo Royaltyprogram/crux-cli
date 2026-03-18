@@ -65,7 +65,7 @@ const defaultServerURL = "https://useautoskills.com"
 const reportAPISchemaVersion = "report-api.v1"
 
 var (
-	errStateNotFound         = errors.New("crux state not found")
+	errStateNotFound         = errors.New("autoskills state not found")
 	errWorkspaceNotConnected = errors.New("shared workspace is not connected")
 )
 
@@ -248,28 +248,28 @@ func runDefaultCommand() error {
 }
 
 func printDefaultSetupHint(serverURL string) {
-	command := "crux setup"
+	command := "autoskills setup"
 	trimmedServerURL := strings.TrimRight(strings.TrimSpace(serverURL), "/")
 	if trimmedServerURL != "" && trimmedServerURL != defaultServerURL {
-		command = "crux setup --server " + trimmedServerURL
+		command = "autoskills setup --server " + trimmedServerURL
 	}
-	fmt.Println(`Crux is not set up yet.
+	fmt.Println(`AutoSkills is not set up yet.
 
 Next step:
   ` + command + `
 
 The CLI will prompt for the issued token.
-Use ` + "`crux help`" + ` for advanced commands.`)
+Use ` + "`autoskills help`" + ` for advanced commands.`)
 }
 
 func printUsage() {
-	fmt.Println(`Crux quickstart:
+	fmt.Println(`AutoSkills quickstart:
   setup             register this device, connect the current repo, backfill local Codex history on first setup, and enable background collection when supported
 
 Common commands:
   status            print org overview and shared workspace feedback reports
   reports           list feedback reports for the shared workspace
-  imports           list recent async session import jobs, or run crux imports cancel <job_id>
+  imports           list recent async session import jobs, or run autoskills imports cancel <job_id>
   collect           upload local usage data now and optionally keep collecting on an interval
   skills            manage the auto-synced personal skill bundle on this machine
   sessions          list recent session summaries for the shared workspace
@@ -288,8 +288,8 @@ Advanced commands:
   store-import      import a runtime analytics store backup into the configured database
 
 Install and onboard:
-  curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
-  crux setup`)
+  curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+  autoskills setup`)
 }
 
 func printVersion() {
@@ -297,13 +297,13 @@ func printVersion() {
 }
 
 func versionString() string {
-	return buildinfo.Summary("crux")
+	return buildinfo.Summary("autoskills")
 }
 
 func runLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	server := fs.String("server", defaultServerURL, "server base URL")
-	token := fs.String("token", os.Getenv("CRUX_TOKEN"), "CLI token issued from the dashboard")
+	token := fs.String("token", os.Getenv("AUTOSKILLS_TOKEN"), "CLI token issued from the dashboard")
 	device := fs.String("device", "", "device name")
 	hostname := fs.String("hostname", "", "hostname")
 	tools := fs.String("tools", "codex,claude-code", "comma separated tool names")
@@ -360,7 +360,7 @@ func runSetup(args []string) error {
 	serverExplicit := flagProvided(args, "server")
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	server := fs.String("server", defaultServerURL, "server base URL")
-	token := fs.String("token", os.Getenv("CRUX_TOKEN"), "CLI token issued from the dashboard")
+	token := fs.String("token", os.Getenv("AUTOSKILLS_TOKEN"), "CLI token issued from the dashboard")
 	repoPath := fs.String("repo-path", ".", "repo path to connect")
 	device := fs.String("device", "", "device name")
 	codexHome := fs.String("codex-home", "", "override Codex home used for initial session collection")
@@ -436,14 +436,14 @@ func runSetup(args []string) error {
 		skillSetResp = &resp
 	}
 
-	// Inject the crux-personal-skillset section into the global AGENTS.md
+	// Inject the autoskills-personal-skillset section into the global AGENTS.md
 	// so that every query automatically consults the user's personal skillset.
 	codexRoot, err := codexHomePath(*codexHome)
 	if err == nil {
 		if injErr := ensureAgentsMDSkillSetSection(codexRoot); injErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not update AGENTS.md with skillset section: %v\n", injErr)
 		} else {
-			fmt.Fprintln(os.Stderr, "Global AGENTS.md updated with crux-personal-skillset instructions")
+			fmt.Fprintln(os.Stderr, "Global AGENTS.md updated with autoskills-personal-skillset instructions")
 		}
 	}
 
@@ -496,7 +496,7 @@ func resolveSetupState(opts loginOptions, serverExplicit bool) (state, response.
 
 		if serverExplicit && strings.TrimSpace(opts.Token) == "" && requestedServer != "" && requestedServer != savedServer {
 			return state{}, response.CLILoginResp{}, fmt.Errorf(
-				"saved cli state is for %s, but setup requested %s; run `crux login --server %s --token <CLI_TOKEN_FROM_DASHBOARD>` or `crux reset` first",
+				"saved cli state is for %s, but setup requested %s; run `autoskills login --server %s --token <CLI_TOKEN_FROM_DASHBOARD>` or `autoskills reset` first",
 				savedServer,
 				requestedServer,
 				requestedServer,
@@ -567,7 +567,7 @@ func runReset(args []string) error {
 	resp.Warnings = append(resp.Warnings, background.Warnings...)
 
 	if err := removeDirIfEmpty(homeDir); err != nil {
-		resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to prune empty crux home dir: %v", err))
+		resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to prune empty autoskills home dir: %v", err))
 	}
 
 	return prettyPrint(resp)
@@ -1316,7 +1316,7 @@ func (c *apiClient) doJSONOnce(method, path string, body any, out any, token str
 		return err
 	}
 	if token != "" {
-		req.Header.Set("X-Crux-Token", token)
+		req.Header.Set("X-AutoSkills-Token", token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -1363,7 +1363,7 @@ func (c *apiClient) doJSONOnce(method, path string, body any, out any, token str
 }
 
 func cruxDebugHTTPEnabled() bool {
-	value := strings.TrimSpace(os.Getenv("CRUX_DEBUG_HTTP"))
+	value := strings.TrimSpace(os.Getenv("AUTOSKILLS_DEBUG_HTTP"))
 	if value == "" {
 		return false
 	}
@@ -1459,7 +1459,7 @@ func (c *apiClient) refreshAccessToken() error {
 
 func validateCLILoginResp(resp response.CLILoginResp) error {
 	if strings.TrimSpace(resp.AccessToken) == "" || strings.TrimSpace(resp.RefreshToken) == "" {
-		return errors.New("cli login succeeded but server did not return device tokens; update the CLI/server pair and retry `crux login` after clearing stale state")
+		return errors.New("cli login succeeded but server did not return device tokens; update the CLI/server pair and retry `autoskills login` after clearing stale state")
 	}
 	return nil
 }
@@ -1478,12 +1478,12 @@ func (c *apiClient) annotateStateAuthError(err error) error {
 	if apiErr.Code == 1001 && token != "" && strings.TrimSpace(c.state.RefreshToken) == "" {
 		statePath, pathErr := stateFilePath()
 		if pathErr != nil {
-			statePath = "~/.crux/state.json"
+			statePath = "~/.autoskills/state.json"
 		}
 		if isLegacyEnrollmentToken(token) {
-			return fmt.Errorf("%w; saved cli state still contains a legacy enrollment token (%s). Remove %s and run `crux login` or `crux setup` again", err, tokenPreview(token), statePath)
+			return fmt.Errorf("%w; saved cli state still contains a legacy enrollment token (%s). Remove %s and run `autoskills login` or `autoskills setup` again", err, tokenPreview(token), statePath)
 		}
-		return fmt.Errorf("%w; saved cli state looks stale and has no refresh token. Remove %s and run `crux login` or `crux setup` again", err, statePath)
+		return fmt.Errorf("%w; saved cli state looks stale and has no refresh token. Remove %s and run `autoskills login` or `autoskills setup` again", err, statePath)
 	}
 
 	return err
@@ -1497,7 +1497,7 @@ func loadState() (state, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return state{}, fmt.Errorf("%w; run `crux setup` first", errStateNotFound)
+			return state{}, fmt.Errorf("%w; run `autoskills setup` first", errStateNotFound)
 		}
 		return state{}, err
 	}
@@ -1533,7 +1533,7 @@ func loadWorkspaceState() (state, error) {
 		return state{}, err
 	}
 	if st.workspaceID() == "" {
-		return state{}, fmt.Errorf("%w; run `crux setup` or `crux connect` first", errWorkspaceNotConnected)
+		return state{}, fmt.Errorf("%w; run `autoskills setup` or `autoskills connect` first", errWorkspaceNotConnected)
 	}
 	return st, nil
 }
@@ -1573,14 +1573,14 @@ func saveState(st state) error {
 }
 
 func stateFilePath() (string, error) {
-	if root := os.Getenv("CRUX_HOME"); root != "" {
+	if root := os.Getenv("AUTOSKILLS_HOME"); root != "" {
 		return filepath.Join(root, "state.json"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".crux", "state.json"), nil
+	return filepath.Join(home, ".autoskills", "state.json"), nil
 }
 
 func normalizedServerURL(value string) string {

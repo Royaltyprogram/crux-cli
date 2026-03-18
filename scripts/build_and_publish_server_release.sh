@@ -27,7 +27,7 @@ DRAFT="${DRAFT:-0}"
 PRERELEASE="${PRERELEASE:-0}"
 LATEST_MODE="${LATEST_MODE:-}"
 DRY_RUN="${DRY_RUN:-0}"
-GH_BIN="${CRUX_GH_BIN:-gh}"
+GH_BIN="${AUTOSKILLS_GH_BIN:-gh}"
 
 usage() {
   cat <<'EOF'
@@ -101,7 +101,7 @@ release_exists() {
 
 default_title() {
   local version="$1"
-  printf 'Crux %s\n' "$version"
+  printf 'AutoSkills %s\n' "$version"
 }
 
 default_notes() {
@@ -110,7 +110,7 @@ default_notes() {
   local assets=("$@")
 
   cat <<EOF
-# Crux $version
+# AutoSkills $version
 
 Server release bundles:
 $(for path in "${assets[@]}"; do printf -- '- `%s`\n' "$(basename "$path")"; done)
@@ -126,9 +126,9 @@ EOF
 collect_assets() {
   shopt -s nullglob
   local assets=(
-    "$RELEASE_DIR"/crux-server-"$VERSION_LABEL"-*.tar.gz
-    "$RELEASE_DIR"/crux-server-"$VERSION_LABEL"-*.tar.gz.sha256
-    "$RELEASE_DIR"/crux-server-"$VERSION_LABEL"-*.json
+    "$RELEASE_DIR"/autoskills-server-"$VERSION_LABEL"-*.tar.gz
+    "$RELEASE_DIR"/autoskills-server-"$VERSION_LABEL"-*.tar.gz.sha256
+    "$RELEASE_DIR"/autoskills-server-"$VERSION_LABEL"-*.json
   )
   shopt -u nullglob
 
@@ -247,7 +247,7 @@ while IFS= read -r asset; do
 done < <(collect_assets)
 say "built ${#ASSETS[@]} server assets for $VERSION_LABEL"
 
-TMPDIR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/crux-server-release.XXXXXX")"
+TMPDIR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/autoskills-server-release.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_WORK"
 }

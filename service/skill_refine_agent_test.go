@@ -229,8 +229,8 @@ func TestDiffAndRefineCategoriesAllUnchangedSkipsLLM(t *testing.T) {
 
 func TestExtractPreviousRefineMapFromVersion(t *testing.T) {
 	manifest := `{
-		"schema_version": "crux-skillset.v1",
-		"bundle_name": "crux-personal-skillset",
+		"schema_version": "autoskills-skillset.v1",
+		"bundle_name": "autoskills-personal-skillset",
 		"project_id": "proj-1",
 		"version": "v-abc123",
 		"compiled_hash": "abc123",
@@ -269,8 +269,8 @@ func TestExtractPreviousRefineMapFromVersion(t *testing.T) {
 
 func TestExtractPreviousRefineMapSkipsNonReusableFallbackMappings(t *testing.T) {
 	manifest := `{
-		"schema_version": "crux-skillset.v1",
-		"bundle_name": "crux-personal-skillset",
+		"schema_version": "autoskills-skillset.v1",
+		"bundle_name": "autoskills-personal-skillset",
 		"project_id": "proj-1",
 		"version": "v-abc123",
 		"compiled_hash": "abc123",
@@ -547,7 +547,7 @@ func TestExtractPreviousRefineMapMismatchedLengths(t *testing.T) {
 	// pre_refine_rules has 3 items, refined_rules has 2.
 	// Only the first 2 should be mapped.
 	manifest := `{
-		"schema_version": "crux-skillset.v1",
+		"schema_version": "autoskills-skillset.v1",
 		"bundle_name": "test",
 		"project_id": "proj-1",
 		"version": "v-abc",
@@ -591,7 +591,7 @@ func TestExtractPreviousRefineMapInvalidJSON(t *testing.T) {
 
 func TestExtractPreviousRefineMapMultipleCategories(t *testing.T) {
 	manifest := `{
-		"schema_version": "crux-skillset.v1",
+		"schema_version": "autoskills-skillset.v1",
 		"bundle_name": "test",
 		"project_id": "proj-1",
 		"version": "v-abc",

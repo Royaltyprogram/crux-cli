@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Crux — Docs</title>
+  <title>AutoSkills — Docs</title>
   <link rel="icon" href="/assets/logo.ico" type="image/x-icon">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -302,8 +302,8 @@
   <nav class="nav">
     <div class="nav-inner">
       <a class="nav-brand" href="/">
-        <img src="/assets/logo.svg" alt="Crux" class="nav-logo">
-        <span class="nav-wordmark">Crux</span>
+        <img src="/assets/logo.svg" alt="AutoSkills" class="nav-logo">
+        <span class="nav-wordmark">AutoSkills</span>
       </a>
       <ul class="nav-links">
         <li><a href="/docs" class="nav-link-text is-current">Docs</a></li>
@@ -332,7 +332,7 @@
 
       <h1 id="setup">How to Setup</h1>
       <p class="docs-lead">
-        If you're new to Crux or skipped the onboarding, follow this guide to complete the setup.
+        If you're new to AutoSkills or skipped the onboarding, follow this guide to complete the setup.
         Just three steps and you'll be ready to start analyzing Codex sessions.
       </p>
 
@@ -343,18 +343,18 @@
           <div class="step-num step-num--teal">1</div>
           <div class="step-body">
             <h3>Install the CLI</h3>
-            <p>Install the Crux CLI on the machine you want to analyze. The CLI collects Codex session data in the background.</p>
+            <p>Install the AutoSkills CLI on the machine you want to analyze. The CLI collects Codex session data in the background.</p>
           </div>
         </div>
 
         <p>Open a terminal and run the following command:</p>
         <div class="cmd">
           <button class="cmd-copy" type="button" onclick="copyCommand(this)">Copy</button>
-          curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+          curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
         </div>
 
         <div class="info-box info-box--tip">
-          <p><strong>Tip:</strong> After installation, run <code>crux --version</code> to verify that the CLI was installed correctly.</p>
+          <p><strong>Tip:</strong> After installation, run <code>autoskills --version</code> to verify that the CLI was installed correctly.</p>
         </div>
       </section>
 
@@ -371,7 +371,7 @@
 
         <h3>How to Create a Token</h3>
         <ol>
-          <li>Log in to the <a href="/login">Crux dashboard</a>.</li>
+          <li>Log in to the <a href="/login">AutoSkills dashboard</a>.</li>
           <li>Click the <strong>Settings</strong> tab at the top.</li>
           <li>Click the <strong>Create CLI token</strong> button.</li>
           <li>Copy the generated token.</li>
@@ -396,12 +396,12 @@
         <p>Run this in the repository directory you want to analyze:</p>
         <div class="cmd">
           <button class="cmd-copy" type="button" onclick="copyCommand(this)">Copy</button>
-          crux setup
+          autoskills setup
         </div>
         <p>You'll be prompted to enter the token you copied earlier. Paste it in and setup is complete.</p>
 
         <div class="info-box info-box--tip">
-          <p><strong>Tip:</strong> If you're using a self-hosted server, specify the server address with <code>crux setup --server https://your-server.com</code>.</p>
+          <p><strong>Tip:</strong> If you're using a self-hosted server, specify the server address with <code>autoskills setup --server https://your-server.com</code>.</p>
         </div>
       </section>
 
@@ -419,23 +419,23 @@
           </thead>
           <tbody>
             <tr>
-              <td><code>crux setup</code></td>
+              <td><code>autoskills setup</code></td>
               <td>Register the device and connect the project.</td>
             </tr>
             <tr>
-              <td><code>crux collect</code></td>
+              <td><code>autoskills collect</code></td>
               <td>Collect local Codex sessions and upload them to the server.</td>
             </tr>
             <tr>
-              <td><code>crux collect --watch</code></td>
+              <td><code>autoskills collect --watch</code></td>
               <td>Continuously collect sessions in the background.</td>
             </tr>
             <tr>
-              <td><code>crux collect --recent 30</code></td>
+              <td><code>autoskills collect --recent 30</code></td>
               <td>Batch-collect sessions from the last 30 days.</td>
             </tr>
             <tr>
-              <td><code>crux --version</code></td>
+              <td><code>autoskills --version</code></td>
               <td>Check the installed CLI version.</td>
             </tr>
           </tbody>
@@ -465,7 +465,7 @@
 
   <footer class="footer">
     <div class="footer-inner">
-      <span class="footer-copy">Crux &middot; Understand What Your Codex Agent Actually Did</span>
+      <span class="footer-copy">AutoSkills &middot; Understand What Your Codex Agent Actually Did</span>
       <ul class="footer-links">
         <li><a href="https://github.com/Royaltyprogram/aiops" target="_blank" rel="noopener">GitHub</a></li>
         <li><a href="/healthz">Status</a></li>

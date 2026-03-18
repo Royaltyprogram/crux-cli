@@ -265,7 +265,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	syncedAt := time.Now().UTC()
 	skillClientState := postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
 		ProjectID:      projectResp.ProjectID,
-		BundleName:     "crux-personal-skillset",
+		BundleName:     "autoskills-personal-skillset",
 		Mode:           "autopilot",
 		SyncStatus:     "synced",
 		AppliedVersion: "v-sync-1",
@@ -278,7 +278,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 
 	postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
 		ProjectID:      projectResp.ProjectID,
-		BundleName:     "crux-personal-skillset",
+		BundleName:     "autoskills-personal-skillset",
 		Mode:           "autopilot",
 		SyncStatus:     "synced",
 		AppliedVersion: "v-sync-1",
@@ -291,7 +291,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	})
 	require.Equal(t, "skill-set-bundle.v1", skillSetResp.SchemaVersion)
 	require.Equal(t, "ready", skillSetResp.Status)
-	require.Equal(t, "crux-personal-skillset", skillSetResp.BundleName)
+	require.Equal(t, "autoskills-personal-skillset", skillSetResp.BundleName)
 	require.NotEmpty(t, skillSetResp.Version)
 	require.NotEmpty(t, skillSetResp.CompiledHash)
 	require.NotEmpty(t, skillSetResp.Files)
@@ -300,12 +300,12 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	}))
 	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
 		return item.Path == "SKILL.md" &&
-			strings.Contains(item.Content, "name: crux-personal-skillset") &&
-			strings.Contains(item.Content, "Crux Personal Skill Set")
+			strings.Contains(item.Content, "name: autoskills-personal-skillset") &&
+			strings.Contains(item.Content, "AutoSkills Personal Skill Set")
 	}))
 	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
 		return item.Path == "agents/openai.yaml" &&
-			strings.Contains(item.Content, "display_name: \"Crux Personal Skill Set\"")
+			strings.Contains(item.Content, "display_name: \"AutoSkills Personal Skill Set\"")
 	}))
 	require.True(t, slices.ContainsFunc(skillSetResp.Files, func(item response.SkillSetFileResp) bool {
 		return item.Path == "00-manifest.json" && strings.Contains(item.Content, skillSetResp.Version)
@@ -330,7 +330,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 
 	postJSON[response.SkillSetClientStateResp](t, echo, deviceToken, http.MethodPost, "/api/v1/skill-sets/client-state", request.SkillSetClientStateUpsertReq{
 		ProjectID:      projectResp.ProjectID,
-		BundleName:     "crux-personal-skillset",
+		BundleName:     "autoskills-personal-skillset",
 		Mode:           "autopilot",
 		SyncStatus:     "synced",
 		AppliedVersion: skillSetResp.Version,
@@ -1967,7 +1967,7 @@ func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req = req.WithContext(context.Background())
-		req.Header.Set("X-Crux-Token", conf.App.APIToken)
+		req.Header.Set("X-AutoSkills-Token", conf.App.APIToken)
 		rec := httptest.NewRecorder()
 		echo.ServeHTTP(rec, req)
 		require.Equal(t, tc.code, rec.Code, "%s %s should be removed", tc.method, tc.path)
@@ -1992,7 +1992,7 @@ func postJSONRecorder(t *testing.T, handler http.Handler, token, method, path st
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "route-test-client")
 	if token != "" {
-		req.Header.Set("X-Crux-Token", token)
+		req.Header.Set("X-AutoSkills-Token", token)
 	}
 	for _, cookie := range cookies {
 		if cookie != nil {
@@ -2017,7 +2017,7 @@ func getJSON[T any](t *testing.T, handler http.Handler, token, path string, quer
 	req = req.WithContext(context.Background())
 	req.Header.Set("User-Agent", "route-test-client")
 	if token != "" {
-		req.Header.Set("X-Crux-Token", token)
+		req.Header.Set("X-AutoSkills-Token", token)
 	}
 	for _, cookie := range cookies {
 		if cookie != nil {
@@ -2043,7 +2043,7 @@ func getJSONExpectCode(t *testing.T, handler http.Handler, token, path string, q
 	req = req.WithContext(context.Background())
 	req.Header.Set("User-Agent", "route-test-client")
 	if token != "" {
-		req.Header.Set("X-Crux-Token", token)
+		req.Header.Set("X-AutoSkills-Token", token)
 	}
 	for _, cookie := range cookies {
 		if cookie != nil {
@@ -2080,7 +2080,7 @@ func postJSONExpectCode(t *testing.T, handler http.Handler, token, method, path 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "route-test-client")
 	if token != "" {
-		req.Header.Set("X-Crux-Token", token)
+		req.Header.Set("X-AutoSkills-Token", token)
 	}
 	for _, cookie := range cookies {
 		if cookie != nil {

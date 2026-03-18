@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	skillSetLocalStateSchemaVersion = "crux-skillset-state.v1"
+	skillSetLocalStateSchemaVersion = "autoskills-skillset-state.v1"
 	skillSetBundleSchemaVersion     = "skill-set-bundle.v1"
-	managedSkillBundleName          = "crux-personal-skillset"
+	managedSkillBundleName          = "autoskills-personal-skillset"
 	skillSetModeAutopilot           = "autopilot"
 	skillSetModeFrozen              = "frozen"
 )
@@ -394,9 +394,9 @@ func runSkillsResolve(args []string) error {
 				"backup-and-sync",
 			},
 			Examples: []string{
-				"crux skills resolve --action keep-local       # pause auto-sync and keep your local changes",
-				"crux skills resolve --action accept-remote    # discard local changes and sync latest from server",
-				"crux skills resolve --action backup-and-sync  # backup local changes, then sync latest from server",
+				"autoskills skills resolve --action keep-local       # pause auto-sync and keep your local changes",
+				"autoskills skills resolve --action accept-remote    # discard local changes and sync latest from server",
+				"autoskills skills resolve --action backup-and-sync  # backup local changes, then sync latest from server",
 			},
 		})
 	}
@@ -1077,7 +1077,7 @@ func currentSkillSetStatus(codexHome string) (skillSetStatusResp, error) {
 		diff, diffErr := diffManagedSkillBundle(codexHome)
 		if diffErr == nil && diff.HasConflict {
 			status.ConflictDiff = &diff
-			status.ResolveHint = "run \"crux skills resolve\" to view options and resolve the conflict"
+			status.ResolveHint = "run \"autoskills skills resolve\" to view options and resolve the conflict"
 		}
 	}
 	status.AppliedHash = current.AppliedHash
@@ -1099,7 +1099,7 @@ func assertManagedSkillBundleUntouched(livePath string, current *skillSetLocalSt
 		}
 	}
 	if liveHash != strings.TrimSpace(current.AppliedHash) {
-		return fmt.Errorf("managed skill bundle at %s was modified locally; run \"crux skills resolve\" to view changes and choose how to proceed", livePath)
+		return fmt.Errorf("managed skill bundle at %s was modified locally; run \"autoskills skills resolve\" to view changes and choose how to proceed", livePath)
 	}
 	return nil
 }
@@ -1469,13 +1469,13 @@ func copyDir(sourcePath, targetPath string) error {
 }
 
 // cruxSkillSetAgentsSection is the marker-delimited block injected into the
-// global AGENTS.md so that every query consults crux-personal-skillset first.
-const cruxSkillSetSectionStart = "<!-- crux-personal-skillset:start -->"
-const cruxSkillSetSectionEnd = "<!-- crux-personal-skillset:end -->"
+// global AGENTS.md so that every query consults autoskills-personal-skillset first.
+const cruxSkillSetSectionStart = "<!-- autoskills-personal-skillset:start -->"
+const cruxSkillSetSectionEnd = "<!-- autoskills-personal-skillset:end -->"
 
 func cruxSkillSetAgentsSection() string {
 	return cruxSkillSetSectionStart + `
-## Crux Personal Skillset
+## AutoSkills Personal Skillset
 
 Before processing any query, you MUST first review and apply the user's personal skillset located at:
 
@@ -1493,7 +1493,7 @@ precedence over generic defaults but yield to explicit per-query instructions.
 }
 
 // ensureAgentsMDSkillSetSection ensures the global AGENTS.md in the codex home
-// directory contains the crux-personal-skillset instruction section. It is
+// directory contains the autoskills-personal-skillset instruction section. It is
 // idempotent — if the section already exists it returns without modification.
 func ensureAgentsMDSkillSetSection(codexRoot string) error {
 	agentsPath := filepath.Join(codexRoot, "AGENTS.md")

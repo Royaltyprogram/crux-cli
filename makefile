@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-CRUX_LDFLAGS = -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Version=$(VERSION)' -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Commit=$(GIT_COMMIT)' -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Date=$(BUILD_DATE)'
+AUTOSKILLS_LDFLAGS = -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Version=$(VERSION)' -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Commit=$(GIT_COMMIT)' -X 'github.com/Royaltyprogram/aiops/pkg/buildinfo.Date=$(BUILD_DATE)'
 
 run:
 	APP_MODE=local go run main.go wire_gen.go
@@ -54,16 +54,16 @@ publish-server-release:
 	./scripts/build_and_publish_server_release.sh
 
 store-export: build
-	./output/crux store-export --output "$(OUTPUT)"
+	./output/autoskills store-export --output "$(OUTPUT)"
 
 store-import: build
-	./output/crux store-import --input "$(INPUT)" --yes
+	./output/autoskills store-import --input "$(INPUT)" --yes
 
 print-version:
 	@echo $(VERSION)
 
 docker-build:
-	docker build -t crux-beta .
+	docker build -t autoskills-beta .
 
 generate:
 	go generate ./data
@@ -71,8 +71,8 @@ generate:
 
 build: generate
 	go mod tidy -v
-	go build -ldflags "$(CRUX_LDFLAGS)" -o=output/server main.go wire_gen.go
-	go build -ldflags "$(CRUX_LDFLAGS)" -o=output/crux ./cmd/crux
+	go build -ldflags "$(AUTOSKILLS_LDFLAGS)" -o=output/server main.go wire_gen.go
+	go build -ldflags "$(AUTOSKILLS_LDFLAGS)" -o=output/autoskills ./cmd/crux
 
 install-cli-dev:
 	./scripts/install_local_dev.sh

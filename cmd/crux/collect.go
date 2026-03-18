@@ -405,7 +405,7 @@ func uploadCodexParsedSessionImportJob(st *state, client *apiClient, sessions []
 	}
 
 	if detach {
-		fmt.Fprintf(os.Stderr, "Detached from backfill job %s. Re-run `crux collect --reset-sessions` to resume polling.\n", job.JobID)
+		fmt.Fprintf(os.Stderr, "Detached from backfill job %s. Re-run `autoskills collect --reset-sessions` to resume polling.\n", job.JobID)
 		return "import_job_queued", 0, nil, job, nil
 	}
 

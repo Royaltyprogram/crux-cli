@@ -19,7 +19,7 @@ import (
 
 func TestSaveStateWritesSecureTokenSchema(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	accessExpiresAt := time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC)
 	refreshExpiresAt := time.Date(2026, 4, 14, 9, 0, 0, 0, time.UTC)
@@ -55,7 +55,7 @@ func TestSaveStateWritesSecureTokenSchema(t *testing.T) {
 
 func TestLoadStateReadsLegacyAPIToken(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	statePath := filepath.Join(root, "state.json")
 	require.NoError(t, os.WriteFile(statePath, []byte(`{
@@ -79,7 +79,7 @@ func TestLoadStateReadsLegacyAPIToken(t *testing.T) {
 
 func TestAPIClientRefreshesExpiredDeviceAccessToken(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	refreshCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +88,7 @@ func TestAPIClientRefreshesExpiredDeviceAccessToken(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/config-snapshots":
 			if refreshCalls == 0 {
-				require.Equal(t, "old-access", r.Header.Get("X-Crux-Token"))
+				require.Equal(t, "old-access", r.Header.Get("X-AutoSkills-Token"))
 				w.WriteHeader(http.StatusUnauthorized)
 				require.NoError(t, json.NewEncoder(w).Encode(envelope{
 					Code:    service.ErrCodeDeviceAccessTokenExpired,
@@ -96,7 +96,7 @@ func TestAPIClientRefreshesExpiredDeviceAccessToken(t *testing.T) {
 				}))
 				return
 			}
-			require.Equal(t, "new-access", r.Header.Get("X-Crux-Token"))
+			require.Equal(t, "new-access", r.Header.Get("X-AutoSkills-Token"))
 			require.NoError(t, json.NewEncoder(w).Encode(envelope{
 				Code: 0,
 				Data: mustJSONRawMessage(t, response.ConfigSnapshotListResp{}),
@@ -145,11 +145,11 @@ func TestAPIClientRefreshesExpiredDeviceAccessToken(t *testing.T) {
 
 func TestLoginAndSaveStateRejectsIncompleteDeviceTokenResponse(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		require.Equal(t, "setup-token", r.Header.Get("X-Crux-Token"))
+		require.Equal(t, "setup-token", r.Header.Get("X-AutoSkills-Token"))
 		require.NoError(t, json.NewEncoder(w).Encode(envelope{
 			Code: 0,
 			Data: mustJSONRawMessage(t, response.CLILoginResp{
@@ -168,7 +168,7 @@ func TestLoginAndSaveStateRejectsIncompleteDeviceTokenResponse(t *testing.T) {
 		ServerURL: server.URL,
 		Token:     "setup-token",
 	})
-	require.EqualError(t, err, "cli login succeeded but server did not return device tokens; update the CLI/server pair and retry `crux login` after clearing stale state")
+	require.EqualError(t, err, "cli login succeeded but server did not return device tokens; update the CLI/server pair and retry `autoskills login` after clearing stale state")
 
 	_, loadErr := loadState()
 	require.ErrorIs(t, loadErr, errStateNotFound)
@@ -176,7 +176,7 @@ func TestLoginAndSaveStateRejectsIncompleteDeviceTokenResponse(t *testing.T) {
 
 func TestAPIClientHintsWhenLegacyEnrollmentTokenIsSaved(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -203,13 +203,13 @@ func TestAPIClientHintsWhenLegacyEnrollmentTokenIsSaved(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "saved cli state still contains a legacy enrollment token")
 	require.Contains(t, err.Error(), filepath.Join(root, "state.json"))
-	require.Contains(t, err.Error(), "run `crux login` or `crux setup` again")
+	require.Contains(t, err.Error(), "run `autoskills login` or `autoskills setup` again")
 }
 
 func TestAPIClientIncludesHTTPDebugContextOnFailure(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
-	t.Setenv("CRUX_DEBUG_HTTP", "1")
+	t.Setenv("AUTOSKILLS_HOME", root)
+	t.Setenv("AUTOSKILLS_DEBUG_HTTP", "1")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

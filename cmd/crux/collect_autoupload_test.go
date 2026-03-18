@@ -19,7 +19,7 @@ import (
 
 func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "03", "10", "latest.jsonl")
@@ -121,7 +121,7 @@ func TestRunCollectUploadsSnapshotAndSession(t *testing.T) {
 
 func TestRunCollectSkipsUnchangedSnapshotAndHandlesMissingSessions(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	require.NoError(t, saveState(state{
 		ServerURL:   "http://example.com",
@@ -186,7 +186,7 @@ func TestRunCollectSkipsUnchangedSnapshotAndHandlesMissingSessions(t *testing.T)
 
 func TestRunCollectUploadsAllNewSessionsAfterCursor(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	baseTime := time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC)
@@ -290,7 +290,7 @@ func TestRunCollectUploadsAllNewSessionsAfterCursor(t *testing.T) {
 
 func TestRunCollectResetSessionsReuploadsFullLocalHistory(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	baseTime := time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC)
@@ -389,7 +389,7 @@ func TestRunCollectResetSessionsReuploadsFullLocalHistory(t *testing.T) {
 
 func TestRunCollectFallsBackToSingleSessionEndpointWhenBatchUnsupported(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	baseTime := time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC)
@@ -460,7 +460,7 @@ func TestRunCollectFallsBackToSingleSessionEndpointWhenBatchUnsupported(t *testi
 
 func TestRunCollectUsesSessionImportJobForLargeBackfill(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	originalThreshold := sessionImportJobAsyncThreshold
 	originalPollInterval := sessionImportJobPollInterval
@@ -594,7 +594,7 @@ func TestRunCollectUsesSessionImportJobForLargeBackfill(t *testing.T) {
 
 func TestRunCollectDetachThenResumeSessionImportJob(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	originalThreshold := sessionImportJobAsyncThreshold
 	originalPollInterval := sessionImportJobPollInterval
@@ -769,7 +769,7 @@ func TestRunCollectDetachThenResumeSessionImportJob(t *testing.T) {
 
 func TestRunCollectReturnsErrorWhenSessionImportJobCanceled(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	originalThreshold := sessionImportJobAsyncThreshold
 	originalPollInterval := sessionImportJobPollInterval
@@ -892,7 +892,7 @@ func TestRunCollectReturnsErrorWhenSessionImportJobCanceled(t *testing.T) {
 
 func TestRunCollectShowsImportJobETAAndLatestFailure(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	originalThreshold := sessionImportJobAsyncThreshold
 	originalPollInterval := sessionImportJobPollInterval
@@ -1036,7 +1036,7 @@ func TestRunCollectShowsImportJobETAAndLatestFailure(t *testing.T) {
 
 func TestRunCollectFallsBackToBatchWhenImportJobUnsupported(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	originalThreshold := sessionImportJobAsyncThreshold
 	sessionImportJobAsyncThreshold = 2
@@ -1115,7 +1115,7 @@ func TestRunCollectFallsBackToBatchWhenImportJobUnsupported(t *testing.T) {
 
 func TestRunCollectSkipsInvalidSessionAndAdvancesCursor(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	baseTime := time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC)
@@ -1225,8 +1225,8 @@ func TestRunCollectSkipsInvalidSessionAndAdvancesCursor(t *testing.T) {
 
 func TestRunCollectIncludesStructuredDebugFailureFields(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
-	t.Setenv("CRUX_DEBUG_HTTP", "1")
+	t.Setenv("AUTOSKILLS_HOME", root)
+	t.Setenv("AUTOSKILLS_DEBUG_HTTP", "1")
 
 	codexHome := filepath.Join(root, ".codex")
 	baseTime := time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC)
@@ -1284,7 +1284,7 @@ func TestRunCollectIncludesStructuredDebugFailureFields(t *testing.T) {
 
 func TestRunCollectRetriesRateLimitedSessionUpload(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	originalBaseDelay := sessionUploadRetryBaseDelay
 	originalMaxDelay := sessionUploadRetryMaxDelay
@@ -1394,7 +1394,7 @@ func TestWatchCollectSessionChangesEmitsOnSessionWrite(t *testing.T) {
 }
 
 func TestResolveBackgroundBaseCommandPrefersInstalledCrux(t *testing.T) {
-	root, err := os.MkdirTemp(".", ".crux-bin-*")
+	root, err := os.MkdirTemp(".", ".autoskills-bin-*")
 	require.NoError(t, err)
 	root, err = filepath.Abs(root)
 	require.NoError(t, err)
@@ -1405,7 +1405,7 @@ func TestResolveBackgroundBaseCommandPrefersInstalledCrux(t *testing.T) {
 	binDir := filepath.Join(root, "bin")
 	require.NoError(t, os.MkdirAll(binDir, 0o755))
 
-	cruxPath := filepath.Join(binDir, "crux")
+	cruxPath := filepath.Join(binDir, "autoskills")
 	require.NoError(t, os.WriteFile(cruxPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 
 	originalPath := os.Getenv("PATH")
