@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"sort"
 	"strings"
 	"time"
 )
@@ -366,6 +367,68 @@ func (s *AnalyticsStore) revokeUserTokensLocked(userID string, now time.Time) bo
 		modified = true
 	}
 	return modified
+}
+
+func (s *AnalyticsStore) accessTokenChainIDsLocked(rootTokenID string) []string {
+	rootTokenID = strings.TrimSpace(rootTokenID)
+	if rootTokenID == "" {
+		return nil
+	}
+
+	queue := []string{rootTokenID}
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, 4)
+
+	for len(queue) > 0 {
+		tokenID := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[tokenID]; ok {
+			continue
+		}
+		seen[tokenID] = struct{}{}
+		ids = append(ids, tokenID)
+		for _, candidate := range s.accessTokens {
+			if candidate == nil || strings.TrimSpace(candidate.ParentTokenID) != tokenID {
+				continue
+			}
+			queue = append(queue, candidate.ID)
+		}
+	}
+
+	sort.Strings(ids)
+	return ids
+}
+
+func (s *AnalyticsStore) accessTokenIDsForAgentLocked(agentID string) []string {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil
+	}
+
+	ids := make([]string, 0)
+	for _, token := range s.accessTokens {
+		if token != nil && token.AgentID == agentID {
+			ids = append(ids, token.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (s *AnalyticsStore) accessTokenIDsForUserLocked(userID string) []string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+
+	ids := make([]string, 0)
+	for _, token := range s.accessTokens {
+		if token != nil && token.UserID == userID {
+			ids = append(ids, token.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (s *AnalyticsStore) revokeLegacyWebSessionsLocked(now time.Time) bool {

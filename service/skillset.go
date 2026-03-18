@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -102,6 +103,7 @@ func (s *AnalyticsService) GetLatestSkillSetBundle(ctx context.Context, req *req
 	clientState := s.AnalyticsStore.skillSetClients[req.ProjectID]
 	latestVersion := latestSkillSetVersion(s.AnalyticsStore.skillSetVersions[req.ProjectID])
 	previousVersion := previousSkillSetVersion(s.AnalyticsStore.skillSetVersions[req.ProjectID])
+	previousVersionIDs := skillSetVersionIDs(s.AnalyticsStore.skillSetVersions[req.ProjectID])
 	persisted := false
 
 	var bundle *response.SkillSetBundleResp
@@ -135,7 +137,9 @@ func (s *AnalyticsService) GetLatestSkillSetBundle(ctx context.Context, req *req
 		previousVersion = previousSkillSetVersion(s.AnalyticsStore.skillSetVersions[req.ProjectID])
 	}
 	if persisted {
-		if err := s.AnalyticsStore.persistLocked(); err != nil {
+		if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.syncSkillSetVersionHistoryLocked(tx, req.ProjectID, previousVersionIDs)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -161,6 +165,8 @@ func (s *AnalyticsService) UpsertSkillSetClientState(ctx context.Context, req *r
 
 	identity, _ := AuthIdentityFromContext(ctx)
 	now := time.Now().UTC()
+	previousDeploymentIDs := skillSetDeploymentIDs(s.AnalyticsStore.skillSetDeployments[req.ProjectID])
+	previousVersionIDs := skillSetVersionIDs(s.AnalyticsStore.skillSetVersions[req.ProjectID])
 	previousState := normalizeSkillSetClientState(s.AnalyticsStore.skillSetClients[req.ProjectID])
 	clientState := normalizeSkillSetClientState(previousState)
 	if clientState == nil {
@@ -187,14 +193,25 @@ func (s *AnalyticsService) UpsertSkillSetClientState(ctx context.Context, req *r
 	s.recordSkillSetDeploymentLocked(project, previousState, clientState)
 	s.reconcileSkillSetVersionDecisionLocked(project, previousState, clientState)
 
-	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
 		ProjectID: req.ProjectID,
 		Type:      "skillset.client_state",
 		Message:   "managed skill bundle client state updated",
 		Result:    "success",
 		Reason:    firstNonEmpty(clientState.SyncStatus, "skillset client state reported"),
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistSkillSetClientLocked(tx, req.ProjectID); err != nil {
+			return err
+		}
+		if err := s.syncSkillSetDeploymentHistoryLocked(tx, req.ProjectID, previousDeploymentIDs); err != nil {
+			return err
+		}
+		if err := s.syncSkillSetVersionHistoryLocked(tx, req.ProjectID, previousVersionIDs); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 	return toSkillSetClientStateResp(clientState), nil
@@ -672,6 +689,66 @@ func (s *AnalyticsService) activeSkillSetReportsLocked(projectID string) []*Repo
 		reports = append(reports, report)
 	}
 	return reports
+}
+
+func skillSetDeploymentIDs(history []*SkillSetDeploymentEvent) []string {
+	ids := make([]string, 0, len(history))
+	for _, item := range history {
+		if item != nil {
+			ids = append(ids, item.ID)
+		}
+	}
+	return uniqueNonEmptyStrings(ids...)
+}
+
+func skillSetVersionIDs(history []*SkillSetVersion) []string {
+	ids := make([]string, 0, len(history))
+	for _, item := range history {
+		if item != nil {
+			ids = append(ids, item.ID)
+		}
+	}
+	return uniqueNonEmptyStrings(ids...)
+}
+
+func (s *AnalyticsService) syncSkillSetDeploymentHistoryLocked(tx *sql.Tx, projectID string, previousIDs []string) error {
+	currentIDs := skillSetDeploymentIDs(s.AnalyticsStore.skillSetDeployments[projectID])
+	if err := s.AnalyticsStore.persistSkillSetDeploymentsForProjectLocked(tx, projectID, currentIDs); err != nil {
+		return err
+	}
+	currentSet := make(map[string]struct{}, len(currentIDs))
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+	for _, id := range uniqueNonEmptyStrings(previousIDs...) {
+		if _, ok := currentSet[id]; ok {
+			continue
+		}
+		if err := s.AnalyticsStore.deleteRecordLocked(tx, "skill_set_deployment", projectID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsService) syncSkillSetVersionHistoryLocked(tx *sql.Tx, projectID string, previousIDs []string) error {
+	currentIDs := skillSetVersionIDs(s.AnalyticsStore.skillSetVersions[projectID])
+	if err := s.AnalyticsStore.persistSkillSetVersionsForProjectLocked(tx, projectID, currentIDs); err != nil {
+		return err
+	}
+	currentSet := make(map[string]struct{}, len(currentIDs))
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+	for _, id := range uniqueNonEmptyStrings(previousIDs...) {
+		if _, ok := currentSet[id]; ok {
+			continue
+		}
+		if err := s.AnalyticsStore.deleteRecordLocked(tx, "skill_set_version", projectID, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *AnalyticsService) ensureLatestSkillSetVersionLocked(project *Project, bundle *response.SkillSetBundleResp, reports []*Report) (*SkillSetVersion, *SkillSetVersion, bool) {

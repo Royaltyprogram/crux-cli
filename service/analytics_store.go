@@ -29,6 +29,7 @@ type AnalyticsStore struct {
 	seq            uint64
 	lastSeenDirty  bool
 	lastSeenFlush  bool
+	lastSeenTokens map[string]struct{}
 
 	organizations       map[string]*Organization
 	users               map[string]*User
@@ -355,6 +356,7 @@ func NewAnalyticsStore(conf *configs.Config) (*AnalyticsStore, error) {
 		filePath:            conf.App.StorePath,
 		allowDemoUser:       conf.AllowsDemoUser(),
 		bootstrapUsers:      append([]configs.BootstrapUser(nil), conf.Auth.BootstrapUsers...),
+		lastSeenTokens:      make(map[string]struct{}),
 		organizations:       make(map[string]*Organization),
 		users:               make(map[string]*User),
 		accessTokens:        make(map[string]*AccessToken),
@@ -465,6 +467,10 @@ func (s *AnalyticsStore) MarkAccessTokenSeenAsync(tokenID string, seenAt time.Ti
 	}
 	record.LastSeenAt = cloneTime(&seenAt)
 	s.lastSeenDirty = true
+	if s.lastSeenTokens == nil {
+		s.lastSeenTokens = make(map[string]struct{})
+	}
+	s.lastSeenTokens[tokenID] = struct{}{}
 	if s.lastSeenFlush {
 		s.mu.Unlock()
 		return
@@ -482,8 +488,20 @@ func (s *AnalyticsStore) flushLastSeenAsync() {
 	defer s.mu.Unlock()
 
 	if s.lastSeenDirty {
+		tokenIDs := make([]string, 0, len(s.lastSeenTokens))
+		for tokenID := range s.lastSeenTokens {
+			tokenIDs = append(tokenIDs, tokenID)
+		}
 		s.lastSeenDirty = false
-		_ = s.persistLocked()
+		s.lastSeenTokens = make(map[string]struct{})
+		_ = s.withTxLocked(func(tx *sql.Tx) error {
+			for _, tokenID := range tokenIDs {
+				if err := s.persistAccessTokenLocked(tx, tokenID); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
 	s.lastSeenFlush = false
 }
@@ -493,7 +511,7 @@ func (s *AnalyticsStore) nextID(prefix string) string {
 	return fmt.Sprintf("%s_%06d", prefix, s.seq)
 }
 
-func (s *AnalyticsStore) persistLocked() error {
+func (s *AnalyticsStore) withTxLocked(fn func(tx *sql.Tx) error) error {
 	if s.db == nil {
 		return nil
 	}
@@ -509,44 +527,82 @@ func (s *AnalyticsStore) persistLocked() error {
 		}
 	}()
 
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", analyticsStoreMetaTable)); err != nil {
+	if err := s.saveSeqLocked(tx); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(
-		ctx,
-		fmt.Sprintf("INSERT INTO %s(meta_key, meta_value) VALUES(?, ?)", analyticsStoreMetaTable),
-		"seq",
-		fmt.Sprintf("%d", s.seq),
-	); err != nil {
+	if err := fn(tx); err != nil {
 		return err
 	}
-
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", analyticsStoreRecordTable)); err != nil {
-		return err
-	}
-
-	records, err := s.recordsForPersistence()
-	if err != nil {
-		return err
-	}
-	for _, record := range records {
-		if _, err := tx.ExecContext(
-			ctx,
-			fmt.Sprintf("INSERT INTO %s(record_type, scope_id, record_id, payload) VALUES(?, ?, ?, ?)", analyticsStoreRecordTable),
-			record.recordType,
-			record.scopeID,
-			record.recordID,
-			record.payload,
-		); err != nil {
-			return err
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	tx = nil
 	return nil
+}
+
+func (s *AnalyticsStore) saveSeqLocked(tx *sql.Tx) error {
+	if tx == nil {
+		return nil
+	}
+	_, err := tx.ExecContext(
+		context.Background(),
+		analyticsStoreMetaUpsertQuery(s.dbDialect),
+		"seq",
+		fmt.Sprintf("%d", s.seq),
+	)
+	return err
+}
+
+func (s *AnalyticsStore) upsertRecordLocked(tx *sql.Tx, recordType, scopeID, recordID string, payload any) error {
+	if tx == nil {
+		return nil
+	}
+	data, err := marshalAnalyticsRecordPayload(payload)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(
+		context.Background(),
+		analyticsStoreRecordUpsertQuery(s.dbDialect),
+		recordType,
+		scopeID,
+		recordID,
+		data,
+	)
+	return err
+}
+
+func (s *AnalyticsStore) deleteRecordLocked(tx *sql.Tx, recordType, scopeID, recordID string) error {
+	if tx == nil {
+		return nil
+	}
+	_, err := tx.ExecContext(
+		context.Background(),
+		fmt.Sprintf("DELETE FROM %s WHERE record_type = ? AND scope_id = ? AND record_id = ?", analyticsStoreRecordTable),
+		recordType,
+		scopeID,
+		recordID,
+	)
+	return err
+}
+
+func (s *AnalyticsStore) persistLocked() error {
+	return s.withTxLocked(func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(context.Background(), fmt.Sprintf("DELETE FROM %s", analyticsStoreRecordTable)); err != nil {
+			return err
+		}
+
+		records, err := s.recordsForPersistence()
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			if err := s.upsertRecordLocked(tx, record.recordType, record.scopeID, record.recordID, json.RawMessage(record.payload)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *AnalyticsStore) initDB() error {
@@ -590,6 +646,20 @@ func analyticsStoreRecordTableDDL(dialect string) string {
 	)
 }
 
+func analyticsStoreMetaUpsertQuery(dialect string) string {
+	if strings.TrimSpace(dialect) == "mysql" {
+		return fmt.Sprintf("INSERT INTO %s(meta_key, meta_value) VALUES(?, ?) ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)", analyticsStoreMetaTable)
+	}
+	return fmt.Sprintf("INSERT INTO %s(meta_key, meta_value) VALUES(?, ?) ON CONFLICT(meta_key) DO UPDATE SET meta_value = excluded.meta_value", analyticsStoreMetaTable)
+}
+
+func analyticsStoreRecordUpsertQuery(dialect string) string {
+	if strings.TrimSpace(dialect) == "mysql" {
+		return fmt.Sprintf("INSERT INTO %s(record_type, scope_id, record_id, payload) VALUES(?, ?, ?, ?) ON DUPLICATE KEY UPDATE payload = VALUES(payload)", analyticsStoreRecordTable)
+	}
+	return fmt.Sprintf("INSERT INTO %s(record_type, scope_id, record_id, payload) VALUES(?, ?, ?, ?) ON CONFLICT(record_type, scope_id, record_id) DO UPDATE SET payload = excluded.payload", analyticsStoreRecordTable)
+}
+
 type analyticsDBRecord struct {
 	recordType string
 	scopeID    string
@@ -597,11 +667,241 @@ type analyticsDBRecord struct {
 	payload    string
 }
 
+func marshalAnalyticsRecordPayload(payload any) (string, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (s *AnalyticsStore) persistOrganizationLocked(tx *sql.Tx, id string) error {
+	record, ok := s.organizations[id]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "organization", "", id)
+	}
+	return s.upsertRecordLocked(tx, "organization", "", id, record)
+}
+
+func (s *AnalyticsStore) persistUserLocked(tx *sql.Tx, id string) error {
+	record, ok := s.users[id]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "user", "", id)
+	}
+	return s.upsertRecordLocked(tx, "user", "", id, record)
+}
+
+func (s *AnalyticsStore) persistAccessTokenLocked(tx *sql.Tx, id string) error {
+	record, ok := s.accessTokens[id]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "access_token", "", id)
+	}
+	return s.upsertRecordLocked(tx, "access_token", "", id, record)
+}
+
+func (s *AnalyticsStore) persistAgentLocked(tx *sql.Tx, id string) error {
+	record, ok := s.agents[id]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "agent", "", id)
+	}
+	return s.upsertRecordLocked(tx, "agent", "", id, record)
+}
+
+func (s *AnalyticsStore) persistProjectLocked(tx *sql.Tx, id string) error {
+	record, ok := s.projects[id]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "project", "", id)
+	}
+	return s.upsertRecordLocked(tx, "project", "", id, record)
+}
+
+func (s *AnalyticsStore) persistConfigSnapshotLocked(tx *sql.Tx, projectID, snapshotID string) error {
+	record := s.findConfigSnapshotLocked(projectID, snapshotID)
+	if record == nil {
+		return s.deleteRecordLocked(tx, "config_snapshot", projectID, snapshotID)
+	}
+	return s.upsertRecordLocked(tx, "config_snapshot", projectID, snapshotID, record)
+}
+
+func (s *AnalyticsStore) persistSessionSummaryLocked(tx *sql.Tx, projectID, sessionID string) error {
+	record := s.findSessionSummaryLocked(projectID, sessionID)
+	if record == nil {
+		return s.deleteRecordLocked(tx, "session_summary", projectID, sessionID)
+	}
+	return s.upsertRecordLocked(tx, "session_summary", projectID, sessionID, record)
+}
+
+func (s *AnalyticsStore) persistReportLocked(tx *sql.Tx, id string) error {
+	record, ok := s.reports[id]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "report", "", id)
+	}
+	return s.upsertRecordLocked(tx, "report", "", id, record)
+}
+
+func (s *AnalyticsStore) deleteReportLocked(tx *sql.Tx, id string) error {
+	return s.deleteRecordLocked(tx, "report", "", id)
+}
+
+func (s *AnalyticsStore) persistProjectReportsLocked(tx *sql.Tx, projectID string) error {
+	record, ok := s.projectReports[projectID]
+	if !ok {
+		return s.deleteRecordLocked(tx, "project_report", "", projectID)
+	}
+	return s.upsertRecordLocked(tx, "project_report", "", projectID, record)
+}
+
+func (s *AnalyticsStore) replaceProjectReportsLocked(tx *sql.Tx, projectID string, ids []string) error {
+	return s.upsertRecordLocked(tx, "project_report", "", projectID, ids)
+}
+
+func (s *AnalyticsStore) persistReportResearchLocked(tx *sql.Tx, projectID string) error {
+	record, ok := s.reportResearch[projectID]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "report_research", "", projectID)
+	}
+	return s.upsertRecordLocked(tx, "report_research", "", projectID, normalizeReportResearchStatus(record))
+}
+
+func (s *AnalyticsStore) persistSkillSetClientLocked(tx *sql.Tx, projectID string) error {
+	record, ok := s.skillSetClients[projectID]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "skill_set_client", "", projectID)
+	}
+	return s.upsertRecordLocked(tx, "skill_set_client", "", projectID, normalizeSkillSetClientState(record))
+}
+
+func (s *AnalyticsStore) persistSkillSetDeploymentLocked(tx *sql.Tx, projectID, eventID string) error {
+	record := s.findSkillSetDeploymentLocked(projectID, eventID)
+	if record == nil {
+		return s.deleteRecordLocked(tx, "skill_set_deployment", projectID, eventID)
+	}
+	return s.upsertRecordLocked(tx, "skill_set_deployment", projectID, eventID, normalizeSkillSetDeploymentEvent(record))
+}
+
+func (s *AnalyticsStore) persistSkillSetVersionLocked(tx *sql.Tx, projectID, versionID string) error {
+	record := s.findSkillSetVersionLocked(projectID, versionID)
+	if record == nil {
+		return s.deleteRecordLocked(tx, "skill_set_version", projectID, versionID)
+	}
+	return s.upsertRecordLocked(tx, "skill_set_version", projectID, versionID, normalizeSkillSetVersion(record))
+}
+
+func (s *AnalyticsStore) persistSessionImportJobLocked(tx *sql.Tx, jobID string) error {
+	record, ok := s.sessionImportJobs[jobID]
+	if !ok || record == nil {
+		return s.deleteRecordLocked(tx, "session_import_job", "", jobID)
+	}
+	return s.upsertRecordLocked(tx, "session_import_job", "", jobID, normalizeSessionImportJob(record))
+}
+
+func (s *AnalyticsStore) deleteSessionImportJobLocked(tx *sql.Tx, jobID string) error {
+	return s.deleteRecordLocked(tx, "session_import_job", "", jobID)
+}
+
+func (s *AnalyticsStore) persistAuditLocked(tx *sql.Tx, auditID string) error {
+	record := s.findAuditLocked(auditID)
+	if record == nil {
+		return s.deleteRecordLocked(tx, "audit", "", auditID)
+	}
+	return s.upsertRecordLocked(tx, "audit", "", auditID, record)
+}
+
+func (s *AnalyticsStore) findConfigSnapshotLocked(projectID, snapshotID string) *ConfigSnapshot {
+	for _, item := range s.configSnapshots[projectID] {
+		if item != nil && item.ID == snapshotID {
+			return item
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) findSessionSummaryLocked(projectID, sessionID string) *SessionSummary {
+	for _, item := range s.sessionSummaries[projectID] {
+		if item != nil && item.ID == sessionID {
+			return item
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) findSkillSetDeploymentLocked(projectID, eventID string) *SkillSetDeploymentEvent {
+	for _, item := range s.skillSetDeployments[projectID] {
+		if item != nil && item.ID == eventID {
+			return item
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) findSkillSetVersionLocked(projectID, versionID string) *SkillSetVersion {
+	for _, item := range s.skillSetVersions[projectID] {
+		if item != nil && item.ID == versionID {
+			return item
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) findAuditLocked(auditID string) *AuditEvent {
+	for _, item := range s.audits {
+		if item != nil && item.ID == auditID {
+			return item
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) persistAccessTokensLocked(tx *sql.Tx, ids ...string) error {
+	for _, id := range uniqueNonEmptyStrings(ids...) {
+		if err := s.persistAccessTokenLocked(tx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) persistSessionSummariesForProjectLocked(tx *sql.Tx, projectID string, sessionIDs []string) error {
+	for _, sessionID := range uniqueNonEmptyStrings(sessionIDs...) {
+		if err := s.persistSessionSummaryLocked(tx, projectID, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) persistReportsLocked(tx *sql.Tx, ids ...string) error {
+	for _, id := range uniqueNonEmptyStrings(ids...) {
+		if err := s.persistReportLocked(tx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) persistSkillSetDeploymentsForProjectLocked(tx *sql.Tx, projectID string, ids []string) error {
+	for _, id := range uniqueNonEmptyStrings(ids...) {
+		if err := s.persistSkillSetDeploymentLocked(tx, projectID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AnalyticsStore) persistSkillSetVersionsForProjectLocked(tx *sql.Tx, projectID string, ids []string) error {
+	for _, id := range uniqueNonEmptyStrings(ids...) {
+		if err := s.persistSkillSetVersionLocked(tx, projectID, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 	recordMap := make(map[string]analyticsDBRecord)
 
 	appendRecord := func(recordType, scopeID, recordID string, payload any) error {
-		data, err := json.Marshal(payload)
+		data, err := marshalAnalyticsRecordPayload(payload)
 		if err != nil {
 			return err
 		}
@@ -610,7 +910,7 @@ func (s *AnalyticsStore) recordsForPersistence() ([]analyticsDBRecord, error) {
 			recordType: recordType,
 			scopeID:    scopeID,
 			recordID:   recordID,
-			payload:    string(data),
+			payload:    data,
 		}
 		return nil
 	}
@@ -1267,6 +1567,23 @@ func sortedKeys[T any](items map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func uniqueNonEmptyStrings(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (s *AnalyticsStore) Ping(ctx context.Context) error {

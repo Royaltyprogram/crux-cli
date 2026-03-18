@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math"
@@ -121,13 +122,18 @@ func (s *AnalyticsService) Logout(ctx context.Context) (*response.LogoutResp, er
 		return nil, ecode.NotFound.WithCause(ecode.NewInvalidParamsErr("unknown token_id"))
 	}
 	record.RevokedAt = &now
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
 		Type:    "auth.logout",
 		Message: "dashboard session revoked",
 		Result:  "success",
 		Reason:  "user signed out from the dashboard",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistAccessTokenLocked(tx, record.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -162,13 +168,18 @@ func (s *AnalyticsService) IssueCLIToken(ctx context.Context, req *request.Issue
 		return nil, err
 	}
 
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
 		Type:    "auth.cli_token_issued",
 		Message: "cli token issued from dashboard",
 		Result:  "success",
 		Reason:  "user issued a new CLI token from the dashboard",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistAccessTokenLocked(tx, tokenRecord.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -248,13 +259,19 @@ func (s *AnalyticsService) RevokeCLIToken(ctx context.Context, req *request.Revo
 	if !s.AnalyticsStore.revokeAccessTokenChainLocked(rootTokenID, now) && record.RevokedAt == nil {
 		record.RevokedAt = cloneTime(&now)
 	}
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
+	tokenIDs := s.AnalyticsStore.accessTokenChainIDsLocked(rootTokenID)
+	audit := s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
 		Type:    "auth.cli_token_revoked",
 		Message: "cli token revoked from dashboard",
 		Result:  "success",
 		Reason:  "user revoked a CLI token from the dashboard",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistAccessTokensLocked(tx, tokenIDs...); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -324,14 +341,23 @@ func (s *AnalyticsService) AuthenticateCLI(ctx context.Context, req *request.CLI
 		return nil, err
 	}
 
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
+	agentTokenIDs := s.AnalyticsStore.accessTokenIDsForAgentLocked(deviceID)
+	audit := s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
 		Type:         "device.registered",
 		Message:      "local cli device registered",
 		TargetUserID: user.ID,
 		Result:       "success",
 		Reason:       "cli device authenticated and registered",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistAgentLocked(tx, agent.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistAccessTokensLocked(tx, append(agentTokenIDs, tokenRecord.ID)...); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -379,7 +405,10 @@ func (s *AnalyticsService) RefreshCLI(ctx context.Context, req *request.CLIRefre
 	if record.ConsumedAt != nil {
 		if rootTokenID := s.AnalyticsStore.accessTokenChainRootLocked(record.ID); rootTokenID != "" {
 			s.AnalyticsStore.revokeAccessTokenChainLocked(rootTokenID, now)
-			_ = s.AnalyticsStore.persistLocked()
+			tokenIDs := s.AnalyticsStore.accessTokenChainIDsLocked(rootTokenID)
+			_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+				return s.AnalyticsStore.persistAccessTokensLocked(tx, tokenIDs...)
+			})
 		}
 		return nil, ecode.Unauthorized(1001, "refresh token has already been used")
 	}
@@ -411,7 +440,10 @@ func (s *AnalyticsService) RefreshCLI(ctx context.Context, req *request.CLIRefre
 	if err != nil {
 		return nil, err
 	}
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	tokenIDs := append(s.AnalyticsStore.accessTokenChainIDsLocked(record.ID), accessRecord.ID, refreshRecord.ID)
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		return s.AnalyticsStore.persistAccessTokensLocked(tx, tokenIDs...)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -680,14 +712,25 @@ func (s *AnalyticsService) RegisterAgent(ctx context.Context, req *request.Regis
 		RegisteredAt:  now,
 	}
 
-	s.appendAuditLocked(ctx, req.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, req.OrgID, auditEventInput{
 		Type:         "device.registered",
 		Message:      "local cli device registered",
 		TargetUserID: req.UserID,
 		Result:       "success",
 		Reason:       "collector registered a local cli device",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistOrganizationLocked(tx, req.OrgID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistUserLocked(tx, req.UserID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistAgentLocked(tx, deviceID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -755,14 +798,19 @@ func (s *AnalyticsService) RegisterProject(ctx context.Context, req *request.Reg
 	project.DefaultTool = req.DefaultTool
 	project.ConnectedAt = now
 
-	s.appendAuditLocked(ctx, req.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, req.OrgID, auditEventInput{
 		ProjectID: projectID,
 		Type:      "workspace.connected",
 		Message:   "shared workspace connected to aiops",
 		Result:    "success",
 		Reason:    "collector connected the shared workspace",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistProjectLocked(tx, projectID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -817,14 +865,22 @@ func (s *AnalyticsService) UploadConfigSnapshot(ctx context.Context, req *reques
 	project.LastProfileID = profileID
 	project.LastIngestedAt = &capturedAt
 
-	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
 		ProjectID: req.ProjectID,
 		Type:      "config.snapshot",
 		Message:   "config snapshot uploaded from local collector",
 		Result:    "success",
 		Reason:    "collector uploaded a config snapshot",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistConfigSnapshotLocked(tx, req.ProjectID, snapshot.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistProjectLocked(tx, project.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -904,14 +960,25 @@ func (s *AnalyticsService) UploadSessionSummary(ctx context.Context, req *reques
 	resp.LatestReportIDs = reportIDs(reports)
 	resp.ResearchStatus = cloneReportResearchStatusResp(s.AnalyticsStore.reportResearch[project.ID])
 
-	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
 		ProjectID: req.ProjectID,
 		Type:      "session.ingested",
 		Message:   "session summary uploaded from local collector",
 		Result:    "success",
 		Reason:    "collector uploaded a session summary",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistSessionSummaryLocked(tx, project.ID, resp.SessionID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistProjectLocked(tx, project.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistReportResearchLocked(tx, project.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -945,6 +1012,7 @@ func (s *AnalyticsService) UploadSessionSummaries(ctx context.Context, req *requ
 
 	previousSessionCount := len(s.AnalyticsStore.sessionSummaries[project.ID])
 	lastSuccessfulSessionID := ""
+	successfulSessionIDs := make([]string, 0, len(req.Sessions))
 	successCount := 0
 	for _, itemReq := range req.Sessions {
 		itemReq.ProjectID = project.ID
@@ -959,6 +1027,7 @@ func (s *AnalyticsService) UploadSessionSummaries(ctx context.Context, req *requ
 		}
 
 		lastSuccessfulSessionID = itemResp.SessionID
+		successfulSessionIDs = append(successfulSessionIDs, itemResp.SessionID)
 		successCount++
 		if updated {
 			resp.Updated++
@@ -983,14 +1052,25 @@ func (s *AnalyticsService) UploadSessionSummaries(ctx context.Context, req *requ
 	var refreshJob *reportRefreshJob
 	if successCount > 0 {
 		reports, refreshJob = s.prepareReportRefreshLocked(project, lastSuccessfulSessionID, previousSessionCount)
-		s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+		audit := s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
 			ProjectID: req.ProjectID,
 			Type:      "session.batch_ingested",
 			Message:   fmt.Sprintf("%d session summaries uploaded from local collector", successCount),
 			Result:    "success",
 			Reason:    "collector uploaded session summaries in batch",
 		})
-		if err := s.AnalyticsStore.persistLocked(); err != nil {
+		if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			if err := s.AnalyticsStore.persistSessionSummariesForProjectLocked(tx, project.ID, successfulSessionIDs); err != nil {
+				return err
+			}
+			if err := s.AnalyticsStore.persistProjectLocked(tx, project.ID); err != nil {
+				return err
+			}
+			if err := s.AnalyticsStore.persistReportResearchLocked(tx, project.ID); err != nil {
+				return err
+			}
+			return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -1028,7 +1108,9 @@ func (s *AnalyticsService) CreateSessionImportJob(ctx context.Context, req *requ
 		if totalSessions > existing.TotalSessions {
 			existing.TotalSessions = totalSessions
 		}
-		if err := s.AnalyticsStore.persistLocked(); err != nil {
+		if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.AnalyticsStore.persistSessionImportJobLocked(tx, existing.ID)
+		}); err != nil {
 			return nil, err
 		}
 		logSessionImportJobEvent(slog.LevelInfo, "reused", existing)
@@ -1048,14 +1130,19 @@ func (s *AnalyticsService) CreateSessionImportJob(ctx context.Context, req *requ
 		Failures:      make([]SessionImportJobFailure, 0),
 	}
 	s.AnalyticsStore.sessionImportJobs[job.ID] = job
-	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
 		ProjectID: project.ID,
 		Type:      "session_import_job.created",
 		Message:   "session import job created by local collector",
 		Result:    "success",
 		Reason:    "collector started an async session import job",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 	logSessionImportJobEvent(slog.LevelInfo, "created", job)
@@ -1086,7 +1173,9 @@ func (s *AnalyticsService) AppendSessionImportJobChunk(ctx context.Context, jobI
 		s.upsertSessionImportJobSession(job, prepared)
 	}
 	s.touchSessionImportJob(job, time.Now().UTC())
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+	}); err != nil {
 		return nil, err
 	}
 	logSessionImportJobEvent(slog.LevelInfo, "chunk_appended", job, "chunk_sessions", len(req.Sessions))
@@ -1121,7 +1210,9 @@ func (s *AnalyticsService) CompleteSessionImportJob(ctx context.Context, jobID s
 
 	job.Status = sessionImportJobStatusQueued
 	s.touchSessionImportJob(job, time.Now().UTC())
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+	}); err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return nil, err
 	}
@@ -1159,14 +1250,19 @@ func (s *AnalyticsService) CancelSessionImportJob(ctx context.Context, jobID str
 	job.CompletedAt = cloneTime(&now)
 	job.Sessions = nil
 	s.touchSessionImportJob(job, now)
-	s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, project.OrgID, auditEventInput{
 		ProjectID: project.ID,
 		Type:      "session_import_job.canceled",
 		Message:   "session import job canceled",
 		Result:    "success",
 		Reason:    "collector canceled the async session import job",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 	logSessionImportJobEvent(slog.LevelWarn, "canceled", job, "cancel_source", "collector")
@@ -1425,11 +1521,12 @@ func logSessionImportJobEvent(level slog.Level, event string, job *SessionImport
 }
 
 func (s *AnalyticsService) cleanupExpiredSessionImportJobsLocked(now time.Time) error {
-	changed := false
+	upsertIDs := make([]string, 0)
+	deleteIDs := make([]string, 0)
 	for id, job := range s.AnalyticsStore.sessionImportJobs {
 		if job == nil {
 			delete(s.AnalyticsStore.sessionImportJobs, id)
-			changed = true
+			deleteIDs = append(deleteIDs, id)
 			continue
 		}
 		lastActivity := job.UpdatedAt
@@ -1443,19 +1540,31 @@ func (s *AnalyticsService) cleanupExpiredSessionImportJobsLocked(now time.Time) 
 			job.Sessions = nil
 			s.touchSessionImportJob(job, now)
 			logSessionImportJobEvent(slog.LevelWarn, "expired", job, "ttl_hours", int(sessionImportJobActiveTTL/time.Hour))
-			changed = true
+			upsertIDs = append(upsertIDs, id)
 			continue
 		}
 		if job.CompletedAt != nil && now.Sub(job.CompletedAt.UTC()) >= sessionImportJobRetentionTTL {
 			logSessionImportJobEvent(slog.LevelInfo, "deleted", job, "retention_ttl_hours", int(sessionImportJobRetentionTTL/time.Hour))
 			delete(s.AnalyticsStore.sessionImportJobs, id)
-			changed = true
+			deleteIDs = append(deleteIDs, id)
 		}
 	}
-	if !changed {
+	if len(upsertIDs) == 0 && len(deleteIDs) == 0 {
 		return nil
 	}
-	return s.AnalyticsStore.persistLocked()
+	return s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		for _, id := range upsertIDs {
+			if err := s.AnalyticsStore.persistSessionImportJobLocked(tx, id); err != nil {
+				return err
+			}
+		}
+		for _, id := range deleteIDs {
+			if err := s.AnalyticsStore.deleteSessionImportJobLocked(tx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *AnalyticsService) buildSessionImportJobMetricsLocked(orgID string) *response.SessionImportJobMetricsResp {
@@ -1634,7 +1743,9 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 		completedAt := time.Now().UTC()
 		job.CompletedAt = cloneTime(&completedAt)
 		s.touchSessionImportJob(job, completedAt)
-		_ = s.AnalyticsStore.persistLocked()
+		_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+		})
 		s.AnalyticsStore.mu.Unlock()
 		return
 	}
@@ -1646,7 +1757,9 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 	sessions := append([]SessionImportJobSession(nil), job.Sessions...)
 	projectID := project.ID
 	previousSessionCount := len(s.AnalyticsStore.sessionSummaries[project.ID])
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+	}); err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return
 	}
@@ -1665,7 +1778,9 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 		if strings.TrimSpace(job.Status) == sessionImportJobStatusCanceled {
 			job.Sessions = nil
 			s.touchSessionImportJob(job, time.Now().UTC())
-			_ = s.AnalyticsStore.persistLocked()
+			_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+				return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+			})
 			s.AnalyticsStore.mu.Unlock()
 			return
 		}
@@ -1677,7 +1792,9 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 			job.CompletedAt = cloneTime(&completedAt)
 			s.touchSessionImportJob(job, completedAt)
 			logSessionImportJobEvent(slog.LevelError, "failed", job, "reason", "workspace_missing")
-			_ = s.AnalyticsStore.persistLocked()
+			_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+				return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+			})
 			s.AnalyticsStore.mu.Unlock()
 			return
 		}
@@ -1691,7 +1808,9 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 				job.CompletedAt = cloneTime(&completedAt)
 				s.touchSessionImportJob(job, completedAt)
 				logSessionImportJobEvent(slog.LevelError, "failed", job, "reason", "internal_ingest_error", "http_status", ecode.HttpCode(err), "api_error_code", ecode.Code(err))
-				_ = s.AnalyticsStore.persistLocked()
+				_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+					return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+				})
 				s.AnalyticsStore.mu.Unlock()
 				return
 			}
@@ -1705,6 +1824,12 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 			})
 			s.touchSessionImportJob(job, time.Now().UTC())
 			logSessionImportJobEvent(slog.LevelWarn, "session_failed", job, "session_id", strings.TrimSpace(req.SessionID), "http_status", ecode.HttpCode(err), "api_error_code", ecode.Code(err))
+			if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+				return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+			}); err != nil {
+				s.AnalyticsStore.mu.Unlock()
+				return
+			}
 			s.AnalyticsStore.mu.Unlock()
 			continue
 		}
@@ -1719,6 +1844,18 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 			job.UploadedSessions++
 		}
 		s.touchSessionImportJob(job, time.Now().UTC())
+		if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			if err := s.AnalyticsStore.persistSessionSummaryLocked(tx, project.ID, resp.SessionID); err != nil {
+				return err
+			}
+			if err := s.AnalyticsStore.persistProjectLocked(tx, project.ID); err != nil {
+				return err
+			}
+			return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+		}); err != nil {
+			s.AnalyticsStore.mu.Unlock()
+			return
+		}
 		s.AnalyticsStore.mu.Unlock()
 	}
 
@@ -1732,7 +1869,9 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 		job.Sessions = nil
 		s.touchSessionImportJob(job, time.Now().UTC())
 		logSessionImportJobEvent(slog.LevelWarn, "canceled", job, "cancel_source", "runtime")
-		_ = s.AnalyticsStore.persistLocked()
+		_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+		})
 		s.AnalyticsStore.mu.Unlock()
 		return
 	}
@@ -1744,16 +1883,19 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 		job.CompletedAt = cloneTime(&completedAt)
 		s.touchSessionImportJob(job, completedAt)
 		logSessionImportJobEvent(slog.LevelError, "failed", job, "reason", "workspace_missing")
-		_ = s.AnalyticsStore.persistLocked()
+		_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID)
+		})
 		s.AnalyticsStore.mu.Unlock()
 		return
 	}
 
 	reports := s.currentReportsLocked(project.ID)
 	var refreshJob *reportRefreshJob
+	var audit *AuditEvent
 	if successCount > 0 {
 		reports, refreshJob = s.prepareReportRefreshLocked(project, lastSuccessfulSessionID, previousSessionCount)
-		s.appendAuditLocked(context.Background(), project.OrgID, auditEventInput{
+		audit = s.appendAuditLocked(context.Background(), project.OrgID, auditEventInput{
 			ProjectID: project.ID,
 			Type:      "session_import_job.completed",
 			Message:   fmt.Sprintf("session import job processed %d session summaries", successCount),
@@ -1777,7 +1919,22 @@ func (s *AnalyticsService) runSessionImportJob(jobID string) {
 	} else {
 		logSessionImportJobEvent(slog.LevelInfo, "completed", job, "result", "succeeded")
 	}
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistSessionImportJobLocked(tx, job.ID); err != nil {
+			return err
+		}
+		if successCount > 0 {
+			if err := s.AnalyticsStore.persistReportResearchLocked(tx, project.ID); err != nil {
+				return err
+			}
+		}
+		if audit != nil {
+			if err := s.AnalyticsStore.persistAuditLocked(tx, audit.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		s.AnalyticsStore.mu.Unlock()
 		return
 	}
@@ -1796,14 +1953,16 @@ func (s *AnalyticsService) appendSessionImportAuditAsync(orgID, projectID, event
 	go func() {
 		s.AnalyticsStore.mu.Lock()
 		defer s.AnalyticsStore.mu.Unlock()
-		s.appendAuditLocked(context.Background(), orgID, auditEventInput{
+		audit := s.appendAuditLocked(context.Background(), orgID, auditEventInput{
 			ProjectID: projectID,
 			Type:      eventType,
 			Message:   message,
 			Result:    "success",
 			Reason:    reason,
 		})
-		_ = s.AnalyticsStore.persistLocked()
+		_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+		})
 	}()
 }
 
@@ -2648,14 +2807,23 @@ func (s *AnalyticsService) DeactivateAdminUser(ctx context.Context, req *request
 	user.Status = userStatusDisabled
 	user.DisabledAt = cloneTime(&now)
 	s.AnalyticsStore.revokeUserTokensLocked(user.ID, now)
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
+	tokenIDs := s.AnalyticsStore.accessTokenIDsForUserLocked(user.ID)
+	audit := s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
 		Type:         "admin.user_deactivated",
 		Message:      "admin deactivated a user",
 		TargetUserID: user.ID,
 		Result:       "success",
 		Reason:       "organization user disabled and sessions revoked",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistUserLocked(tx, user.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistAccessTokensLocked(tx, tokenIDs...); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -2689,14 +2857,23 @@ func (s *AnalyticsService) DeleteAdminUser(ctx context.Context, req *request.Adm
 		user.DisabledAt = cloneTime(&now)
 	}
 	s.AnalyticsStore.revokeUserTokensLocked(user.ID, now)
-	s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
+	tokenIDs := s.AnalyticsStore.accessTokenIDsForUserLocked(user.ID)
+	audit := s.appendAuditLocked(ctx, identity.OrgID, auditEventInput{
 		Type:         "admin.user_deleted",
 		Message:      "admin deleted a user",
 		TargetUserID: user.ID,
 		Result:       "success",
 		Reason:       "organization user soft-deleted and sessions revoked",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistUserLocked(tx, user.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistAccessTokensLocked(tx, tokenIDs...); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -2886,11 +3063,14 @@ func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 		status.Summary = fmt.Sprintf("Feedback analysis failed after %s while waiting for %s.", humanizeDurationMS(status.LastDurationMS), s.researchAgent.Provider)
 		status.LastError = err.Error()
 		s.setReportResearchStatusLocked(job.project.ID, status)
-		_ = s.AnalyticsStore.persistLocked()
+		_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+			return s.AnalyticsStore.persistReportResearchLocked(tx, job.project.ID)
+		})
 		return
 	}
 
 	previousIDs := append([]string(nil), s.AnalyticsStore.projectReports[job.project.ID]...)
+	previousSkillSetVersionIDs := skillSetVersionIDs(s.AnalyticsStore.skillSetVersions[job.project.ID])
 	for _, id := range previousIDs {
 		if rec, ok := s.AnalyticsStore.reports[id]; ok && rec.Status == "active" {
 			rec.Status = "superseded"
@@ -2927,7 +3107,18 @@ func (s *AnalyticsService) runReportRefresh(job *reportRefreshJob) {
 		s.ensureLatestSkillSetVersionLocked(job.project, bundle, s.activeSkillSetReportsLocked(job.project.ID))
 	}
 	s.setReportResearchStatusLocked(job.project.ID, status)
-	_ = s.AnalyticsStore.persistLocked()
+	_ = s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistReportsLocked(tx, append(ids, previousIDs...)...); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistProjectReportsLocked(tx, job.project.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistReportResearchLocked(tx, job.project.ID); err != nil {
+			return err
+		}
+		return s.syncSkillSetVersionHistoryLocked(tx, job.project.ID, previousSkillSetVersionIDs)
+	})
 }
 
 func reportRefreshMatchesRun(current *ReportResearchStatus, triggeredAt time.Time) bool {
@@ -3059,7 +3250,7 @@ func countDevicesByOrg(devices map[string]*Agent, orgID string) int {
 	return total
 }
 
-func (s *AnalyticsService) appendAuditLocked(ctx context.Context, orgID string, input auditEventInput) {
+func (s *AnalyticsService) appendAuditLocked(ctx context.Context, orgID string, input auditEventInput) *AuditEvent {
 	metadata, _ := RequestMetadataFromContext(ctx)
 	identity, hasIdentity := AuthIdentityFromContext(ctx)
 
@@ -3083,7 +3274,7 @@ func (s *AnalyticsService) appendAuditLocked(ctx context.Context, orgID string, 
 		result = "success"
 	}
 
-	s.AnalyticsStore.audits = append(s.AnalyticsStore.audits, &AuditEvent{
+	event := &AuditEvent{
 		ID:           s.AnalyticsStore.nextID("audit"),
 		OrgID:        orgID,
 		ProjectID:    strings.TrimSpace(input.ProjectID),
@@ -3097,7 +3288,9 @@ func (s *AnalyticsService) appendAuditLocked(ctx context.Context, orgID string, 
 		Result:       result,
 		Reason:       strings.TrimSpace(input.Reason),
 		CreatedAt:    time.Now().UTC(),
-	})
+	}
+	s.AnalyticsStore.audits = append(s.AnalyticsStore.audits, event)
+	return event
 }
 
 func (s *AnalyticsService) findAdminUserLocked(orgID, userID string) (*User, error) {

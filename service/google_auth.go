@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -104,7 +105,7 @@ func (s *AnalyticsService) CompleteGoogleAuth(ctx context.Context, redirectURL, 
 	}
 
 	user.LastLoginAt = cloneTime(&now)
-	s.appendAuditLocked(ctx, user.OrgID, auditEventInput{
+	audit := s.appendAuditLocked(ctx, user.OrgID, auditEventInput{
 		Type:        "auth.login",
 		Message:     "dashboard session created",
 		ActorUserID: user.ID,
@@ -112,7 +113,18 @@ func (s *AnalyticsService) CompleteGoogleAuth(ctx context.Context, redirectURL, 
 		Result:      "success",
 		Reason:      "user authenticated with Google OAuth",
 	})
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistOrganizationLocked(tx, org.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistUserLocked(tx, user.ID); err != nil {
+			return err
+		}
+		if err := s.AnalyticsStore.persistAccessTokenLocked(tx, tokenRecord.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAuditLocked(tx, audit.ID)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -152,7 +164,12 @@ func (s *AnalyticsService) DevLogin() (*response.LoginResp, error) {
 	}
 
 	user.LastLoginAt = cloneTime(&now)
-	if err := s.AnalyticsStore.persistLocked(); err != nil {
+	if err := s.AnalyticsStore.withTxLocked(func(tx *sql.Tx) error {
+		if err := s.AnalyticsStore.persistUserLocked(tx, user.ID); err != nil {
+			return err
+		}
+		return s.AnalyticsStore.persistAccessTokenLocked(tx, tokenRecord.ID)
+	}); err != nil {
 		return nil, err
 	}
 
