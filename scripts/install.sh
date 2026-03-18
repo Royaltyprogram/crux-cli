@@ -4,7 +4,7 @@ set -eu
 
 usage() {
   cat <<'EOF'
-crux install script
+autoskills install script
 
 Usage:
   sh install.sh [--version <tag>] [--install-root <dir>] [--bin-dir <dir>]
@@ -13,25 +13,25 @@ Release installs use a prebuilt binary. Go is not required.
 When Node.js is missing or too old, the installer can provision a local runtime automatically.
 
 Environment overrides:
-  CRUX_VERSION           release tag to install (default: newest published release)
-  CRUX_REPO              GitHub repo in owner/name form (default: Royaltyprogram/crux-cli)
-  CRUX_RELEASE_BASE_URL  release download base URL (default: https://github.com/<repo>/releases/download)
-  CRUX_RELEASES_API_URL  releases API URL used when CRUX_VERSION is unset
-  CRUX_GITHUB_TOKEN      optional token used for GitHub API requests
-  CRUX_INSTALL_ROOT      install root (default: $HOME/.local/share/crux)
-  CRUX_BIN_DIR           wrapper script directory (default: $HOME/.local/bin)
-  CRUX_INSTALL_NODE      Node.js install mode: auto, always, never (default: auto)
-  CRUX_NODE_VERSION      Node.js version used for local runtime install (default: 20.11.1)
-  CRUX_NODE_DIST_BASE_URL  Node.js distribution base URL (default: https://nodejs.org/dist)
+  AUTOSKILLS_VERSION           release tag to install (default: newest published release)
+  AUTOSKILLS_REPO              GitHub repo in owner/name form (default: Royaltyprogram/autoskills-cli)
+  AUTOSKILLS_RELEASE_BASE_URL  release download base URL (default: https://github.com/<repo>/releases/download)
+  AUTOSKILLS_RELEASES_API_URL  releases API URL used when AUTOSKILLS_VERSION is unset
+  AUTOSKILLS_GITHUB_TOKEN      optional token used for GitHub API requests
+  AUTOSKILLS_INSTALL_ROOT      install root (default: $HOME/.local/share/autoskills)
+  AUTOSKILLS_BIN_DIR           wrapper script directory (default: $HOME/.local/bin)
+  AUTOSKILLS_INSTALL_NODE      Node.js install mode: auto, always, never (default: auto)
+  AUTOSKILLS_NODE_VERSION      Node.js version used for local runtime install (default: 20.11.1)
+  AUTOSKILLS_NODE_DIST_BASE_URL  Node.js distribution base URL (default: https://nodejs.org/dist)
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
-  CRUX_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+  AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 EOF
 }
 
 say() {
-  printf 'crux-install: %s\n' "$*" >&2
+  printf 'autoskills-install: %s\n' "$*" >&2
 }
 
 die() {
@@ -61,16 +61,16 @@ fetch_to_file() {
   url="$1"
   dest="$2"
   if command -v curl >/dev/null 2>&1; then
-    if [ -n "${CRUX_GITHUB_TOKEN:-}" ]; then
-      curl -fsSL -H "Authorization: Bearer ${CRUX_GITHUB_TOKEN}" "$url" -o "$dest"
+    if [ -n "${AUTOSKILLS_GITHUB_TOKEN:-}" ]; then
+      curl -fsSL -H "Authorization: Bearer ${AUTOSKILLS_GITHUB_TOKEN}" "$url" -o "$dest"
     else
       curl -fsSL "$url" -o "$dest"
     fi
     return
   fi
   if command -v wget >/dev/null 2>&1; then
-    if [ -n "${CRUX_GITHUB_TOKEN:-}" ]; then
-      wget -q --header="Authorization: Bearer ${CRUX_GITHUB_TOKEN}" -O "$dest" "$url"
+    if [ -n "${AUTOSKILLS_GITHUB_TOKEN:-}" ]; then
+      wget -q --header="Authorization: Bearer ${AUTOSKILLS_GITHUB_TOKEN}" -O "$dest" "$url"
     else
       wget -q -O "$dest" "$url"
     fi
@@ -82,16 +82,16 @@ fetch_to_file() {
 fetch_to_stdout() {
   url="$1"
   if command -v curl >/dev/null 2>&1; then
-    if [ -n "${CRUX_GITHUB_TOKEN:-}" ]; then
-      curl -fsSL -H "Authorization: Bearer ${CRUX_GITHUB_TOKEN}" "$url"
+    if [ -n "${AUTOSKILLS_GITHUB_TOKEN:-}" ]; then
+      curl -fsSL -H "Authorization: Bearer ${AUTOSKILLS_GITHUB_TOKEN}" "$url"
     else
       curl -fsSL "$url"
     fi
     return
   fi
   if command -v wget >/dev/null 2>&1; then
-    if [ -n "${CRUX_GITHUB_TOKEN:-}" ]; then
-      wget -q --header="Authorization: Bearer ${CRUX_GITHUB_TOKEN}" -O - "$url"
+    if [ -n "${AUTOSKILLS_GITHUB_TOKEN:-}" ]; then
+      wget -q --header="Authorization: Bearer ${AUTOSKILLS_GITHUB_TOKEN}" -O - "$url"
     else
       wget -q -O - "$url"
     fi
@@ -229,11 +229,11 @@ install_node_runtime() {
 
   case "$install_mode" in
     auto|always|never) ;;
-    *) die "invalid CRUX_INSTALL_NODE value: $install_mode" ;;
+    *) die "invalid AUTOSKILLS_INSTALL_NODE value: $install_mode" ;;
   esac
 
   if [ "$install_mode" = "never" ]; then
-    say "skipping Node.js install because CRUX_INSTALL_NODE=never"
+    say "skipping Node.js install because AUTOSKILLS_INSTALL_NODE=never"
     return
   fi
 
@@ -276,15 +276,15 @@ install_node_runtime() {
   say "installed local Node.js runtime to $version_dir"
 }
 
-VERSION="${CRUX_VERSION:-}"
-INSTALL_ROOT="${CRUX_INSTALL_ROOT:-$HOME/.local/share/crux}"
-BIN_DIR="${CRUX_BIN_DIR:-$HOME/.local/bin}"
-REPO="${CRUX_REPO:-Royaltyprogram/crux-cli}"
-RELEASE_BASE_URL="${CRUX_RELEASE_BASE_URL:-https://github.com/$REPO/releases/download}"
-RELEASES_API_URL="${CRUX_RELEASES_API_URL:-https://api.github.com/repos/$REPO/releases?per_page=20}"
-INSTALL_NODE="${CRUX_INSTALL_NODE:-auto}"
-NODE_VERSION="${CRUX_NODE_VERSION:-20.11.1}"
-NODE_DIST_BASE_URL="${CRUX_NODE_DIST_BASE_URL:-https://nodejs.org/dist}"
+VERSION="${AUTOSKILLS_VERSION:-}"
+INSTALL_ROOT="${AUTOSKILLS_INSTALL_ROOT:-$HOME/.local/share/autoskills}"
+BIN_DIR="${AUTOSKILLS_BIN_DIR:-$HOME/.local/bin}"
+REPO="${AUTOSKILLS_REPO:-Royaltyprogram/autoskills-cli}"
+RELEASE_BASE_URL="${AUTOSKILLS_RELEASE_BASE_URL:-https://github.com/$REPO/releases/download}"
+RELEASES_API_URL="${AUTOSKILLS_RELEASES_API_URL:-https://api.github.com/repos/$REPO/releases?per_page=20}"
+INSTALL_NODE="${AUTOSKILLS_INSTALL_NODE:-auto}"
+NODE_VERSION="${AUTOSKILLS_NODE_VERSION:-20.11.1}"
+NODE_DIST_BASE_URL="${AUTOSKILLS_NODE_DIST_BASE_URL:-https://nodejs.org/dist}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -340,7 +340,7 @@ esac
 NODE_PLATFORM="$GOOS"
 
 TMPDIR_ROOT="${TMPDIR:-/tmp}"
-TMPDIR_WORK="$(mktemp -d "$TMPDIR_ROOT/crux-install.XXXXXX")"
+TMPDIR_WORK="$(mktemp -d "$TMPDIR_ROOT/autoskills-install.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_WORK"
 }
@@ -351,7 +351,7 @@ if [ -z "$VERSION" ]; then
   VERSION="$(latest_version "$RELEASES_API_URL" "$TMPDIR_WORK")"
 fi
 
-BUNDLE_NAME="crux-$VERSION-$GOOS-$GOARCH"
+BUNDLE_NAME="autoskills-$VERSION-$GOOS-$GOARCH"
 ARCHIVE_NAME="$BUNDLE_NAME.tar.gz"
 CHECKSUM_NAME="$ARCHIVE_NAME.sha256"
 ARCHIVE_URL="$RELEASE_BASE_URL/$VERSION/$ARCHIVE_NAME"
@@ -370,11 +370,11 @@ ACTUAL_SHA="$(sha256_file "$ARCHIVE_PATH")"
 EXTRACT_DIR="$TMPDIR_WORK/extract"
 mkdir -p "$EXTRACT_DIR"
 BUNDLE_DIR="$(extract_archive_dir "$ARCHIVE_PATH" "$EXTRACT_DIR")"
-[ -x "$BUNDLE_DIR/crux" ] || die "bundle is missing crux executable"
+[ -x "$BUNDLE_DIR/autoskills" ] || die "bundle is missing autoskills executable"
 
 VERSION_DIR="$INSTALL_ROOT/$VERSION"
 CURRENT_LINK="$INSTALL_ROOT/current"
-BIN_PATH="$BIN_DIR/crux"
+BIN_PATH="$BIN_DIR/autoskills"
 STAGE_DIR="$INSTALL_ROOT/.install-$VERSION.$$"
 LOCAL_NODE_BIN="$INSTALL_ROOT/node/current/bin"
 
@@ -385,24 +385,24 @@ cp -R "$BUNDLE_DIR" "$STAGE_DIR"
 rm -rf "$VERSION_DIR"
 mv "$STAGE_DIR" "$VERSION_DIR"
 ln -sfn "$VERSION_DIR" "$CURRENT_LINK"
-create_wrapper "$BIN_PATH" "$CURRENT_LINK/crux" "$LOCAL_NODE_BIN"
+create_wrapper "$BIN_PATH" "$CURRENT_LINK/autoskills" "$LOCAL_NODE_BIN"
 
 say "installed $VERSION to $VERSION_DIR"
 say "wrapper created at $BIN_PATH"
-say "release install uses a prebuilt crux binary; Go is not required"
-say "next step: crux setup"
+say "release install uses a prebuilt autoskills binary; Go is not required"
+say "next step: autoskills setup"
 if [ -x "$LOCAL_NODE_BIN/node" ]; then
-  say "crux will use local Node.js from $LOCAL_NODE_BIN when needed"
+  say "autoskills will use local Node.js from $LOCAL_NODE_BIN when needed"
 elif command -v node >/dev/null 2>&1; then
-  say "crux will use system Node.js $(node --version)"
+  say "autoskills will use system Node.js $(node --version)"
 else
   say "node runtime not found; install it manually only if you need other Node-based tooling"
 fi
-if ! command -v crux >/dev/null 2>&1; then
+if ! command -v autoskills >/dev/null 2>&1; then
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) say "add $BIN_DIR to PATH to run crux directly" ;;
+    *) say "add $BIN_DIR to PATH to run autoskills directly" ;;
   esac
 fi
 
-printf 'crux %s installed\n' "$VERSION"
+printf 'autoskills %s installed\n' "$VERSION"

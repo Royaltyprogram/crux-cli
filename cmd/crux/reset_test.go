@@ -12,7 +12,7 @@ import (
 
 func TestRunResetRemovesStateAndLogs(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	require.NoError(t, saveState(state{
 		ServerURL:   "https://example.com",
@@ -48,18 +48,18 @@ func TestRunResetRemovesStateAndLogs(t *testing.T) {
 func TestRunResetUnloadsAndRemovesBackgroundCollector(t *testing.T) {
 	root := t.TempDir()
 	homeDir := filepath.Join(root, "home")
-	cruxHome := filepath.Join(root, "crux-home")
+	cruxHome := filepath.Join(root, "autoskills-home")
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 	require.NoError(t, os.MkdirAll(launchAgentsDir, 0o755))
 	require.NoError(t, os.MkdirAll(cruxHome, 0o755))
 	t.Setenv("HOME", homeDir)
-	t.Setenv("CRUX_HOME", cruxHome)
+	t.Setenv("AUTOSKILLS_HOME", cruxHome)
 
 	launchctlLog := filepath.Join(root, "launchctl.log")
 	launchctlPath := filepath.Join(root, "launchctl")
 	require.NoError(t, os.WriteFile(launchctlPath, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$LAUNCHCTL_LOG\"\nexit 0\n"), 0o755))
 	t.Setenv("LAUNCHCTL_LOG", launchctlLog)
-	t.Setenv("CRUX_LAUNCHCTL_BIN", launchctlPath)
+	t.Setenv("AUTOSKILLS_LAUNCHCTL_BIN", launchctlPath)
 
 	require.NoError(t, saveState(state{
 		ServerURL:   "https://example.com",

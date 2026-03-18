@@ -32,8 +32,8 @@ type realDataFunctionCallOutputStats struct {
 }
 
 func TestAnalyzeRealCodexSessions(t *testing.T) {
-	if os.Getenv("CRUX_REALDATA_ANALYZE") != "1" {
-		t.Skip("set CRUX_REALDATA_ANALYZE=1 to scan the real local Codex session archive")
+	if os.Getenv("AUTOSKILLS_REALDATA_ANALYZE") != "1" {
+		t.Skip("set AUTOSKILLS_REALDATA_ANALYZE=1 to scan the real local Codex session archive")
 	}
 
 	files, err := listCodexSessionFiles("")

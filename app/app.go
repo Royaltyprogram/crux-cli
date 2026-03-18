@@ -57,7 +57,7 @@ func (a *App) Run() error {
 		return err
 	}
 
-	fmt.Println("Server Started at", a.Http.Conf.App.Addr, buildinfo.Summary("crux-server"))
+	fmt.Println("Server Started at", a.Http.Conf.App.Addr, buildinfo.Summary("autoskills-server"))
 
 	select {
 	case <-signalCtx.Done():

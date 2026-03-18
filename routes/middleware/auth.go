@@ -10,7 +10,7 @@ import (
 	"github.com/Royaltyprogram/aiops/service"
 )
 
-const APIAuthHeader = "X-Crux-Token"
+const APIAuthHeader = "X-AutoSkills-Token"
 
 func RequireAPIToken(configuredToken string, staticTokenEnabled bool, store *service.AnalyticsStore) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {

@@ -8,7 +8,7 @@ GOARCH_VALUE="${GOARCH:-$(go env GOARCH)}"
 VERSION_LABEL="${VERSION_LABEL:-$(git -C "$ROOT_DIR" describe --tags --always --dirty 2>/dev/null || echo beta)}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 GIT_COMMIT="${GIT_COMMIT:-$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
-BUNDLE_NAME="crux-server-${VERSION_LABEL}-${GOOS_VALUE}-${GOARCH_VALUE}"
+BUNDLE_NAME="autoskills-server-${VERSION_LABEL}-${GOOS_VALUE}-${GOARCH_VALUE}"
 RELEASE_DIR="${RELEASE_DIR:-$ROOT_DIR/output/release}"
 STAGE_DIR="$RELEASE_DIR/$BUNDLE_NAME"
 ARCHIVE_PATH="$RELEASE_DIR/$BUNDLE_NAME.tar.gz"
@@ -24,9 +24,9 @@ mkdir -p "$STAGE_DIR"
   -o "$STAGE_DIR/server" main.go wire_gen.go)
 
 cat > "$STAGE_DIR/README.md" <<EOF
-# Crux Server $VERSION_LABEL
+# AutoSkills Server $VERSION_LABEL
 
-This archive contains the prebuilt Crux backend server for $GOOS_VALUE/$GOARCH_VALUE.
+This archive contains the prebuilt AutoSkills backend server for $GOOS_VALUE/$GOARCH_VALUE.
 
 Quick start:
 

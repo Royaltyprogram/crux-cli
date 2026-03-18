@@ -24,7 +24,7 @@ import (
 
 func TestRunCollectEndToEndManagedSkillSetReflectsInDashboardAPI(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	repoPath := filepath.Join(root, "workspace")
 	require.NoError(t, os.MkdirAll(repoPath, 0o755))
@@ -74,7 +74,7 @@ func TestRunCollectEndToEndManagedSkillSetReflectsInDashboardAPI(t *testing.T) {
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
 	skillIndex, err := os.ReadFile(filepath.Join(liveBundlePath, "SKILL.md"))
 	require.NoError(t, err)
-	require.Contains(t, string(skillIndex), "Crux Personal Skill Set")
+	require.Contains(t, string(skillIndex), "AutoSkills Personal Skill Set")
 
 	currentState, _, err := loadSkillSetState()
 	require.NoError(t, err)
@@ -104,12 +104,12 @@ func TestRunCollectEndToEndManagedSkillSetReflectsInDashboardAPI(t *testing.T) {
 	require.NotNil(t, conflictCollect.SkillSet)
 	require.Equal(t, "conflict", conflictCollect.SkillSet.Status)
 	require.Contains(t, conflictCollect.SkillSet.Error, "modified locally")
-	require.Contains(t, conflictCollect.SkillSet.Error, "crux skills resolve")
+	require.Contains(t, conflictCollect.SkillSet.Error, "autoskills skills resolve")
 
 	currentState, _, err = loadSkillSetState()
 	require.NoError(t, err)
 	require.Equal(t, "conflict", currentState.LastSyncStatus)
-	require.Contains(t, currentState.LastError, "crux skills resolve")
+	require.Contains(t, currentState.LastError, "autoskills skills resolve")
 
 	bundleAfterConflict := fetchManagedSkillSetBundle(t, client, projectResp.ProjectID)
 	require.NotNil(t, bundleAfterConflict.ClientState)

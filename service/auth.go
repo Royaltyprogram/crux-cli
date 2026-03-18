@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	WebSessionCookieName = "crux_web_session"
+	WebSessionCookieName = "autoskills_web_session"
 
 	TokenKindCLI           = "cli"
 	TokenKindCLIEnrollment = "cli_enrollment"

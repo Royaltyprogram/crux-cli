@@ -52,7 +52,7 @@ func ensureLaunchdPlatform() error {
 	if runtime.GOOS == "darwin" {
 		return nil
 	}
-	if strings.TrimSpace(os.Getenv("CRUX_LAUNCHCTL_BIN")) != "" {
+	if strings.TrimSpace(os.Getenv("AUTOSKILLS_LAUNCHCTL_BIN")) != "" {
 		return nil
 	}
 	return errors.New("daemon is currently supported on macOS launchd only")
@@ -63,7 +63,7 @@ func launchdLoaded(label string) bool {
 }
 
 func runLaunchctl(args ...string) error {
-	bin := strings.TrimSpace(os.Getenv("CRUX_LAUNCHCTL_BIN"))
+	bin := strings.TrimSpace(os.Getenv("AUTOSKILLS_LAUNCHCTL_BIN"))
 	if bin == "" {
 		bin = "launchctl"
 	}
@@ -84,7 +84,7 @@ func resolveBackgroundBaseCommand() (backgroundBaseCommand, error) {
 	if err == nil && shouldUseStableExecutable(executable) {
 		return backgroundBaseCommand{Program: executable}, nil
 	}
-	if installed, ok := findInstalledCrux(); ok {
+	if installed, ok := findInstalledAutoSkills(); ok {
 		return backgroundBaseCommand{Program: installed}, nil
 	}
 
@@ -104,7 +104,7 @@ func resolveBackgroundBaseCommand() (backgroundBaseCommand, error) {
 			Workdir: repoRoot,
 		}, nil
 	}
-	return backgroundBaseCommand{}, errors.New("unable to infer a stable crux command for daemon; run from the repo root or use a built crux binary")
+	return backgroundBaseCommand{}, errors.New("unable to infer a stable autoskills command for daemon; run from the repo root or use a built autoskills binary")
 }
 
 func ensureBackgroundCollection(opts backgroundSetupOptions) backgroundSetupResp {
@@ -136,7 +136,7 @@ func ensureBackgroundCollection(opts backgroundSetupOptions) backgroundSetupResp
 	if !backgroundCommandIsStable(base) {
 		return backgroundSetupResp{
 			Status:   "manual_only",
-			Reason:   "automatic background setup is only enabled for installed or built crux binaries",
+			Reason:   "automatic background setup is only enabled for installed or built autoskills binaries",
 			Command:  command,
 			Interval: opts.Interval.String(),
 		}
@@ -210,8 +210,8 @@ func installLaunchdCollector(base backgroundBaseCommand, opts backgroundSetupOpt
 
 func backgroundEnvironment() map[string]string {
 	env := map[string]string{}
-	if value := strings.TrimSpace(os.Getenv("CRUX_HOME")); value != "" {
-		env["CRUX_HOME"] = value
+	if value := strings.TrimSpace(os.Getenv("AUTOSKILLS_HOME")); value != "" {
+		env["AUTOSKILLS_HOME"] = value
 	}
 	if value := strings.TrimSpace(os.Getenv("PATH")); value != "" {
 		env["PATH"] = value
@@ -243,14 +243,14 @@ func collectWatchArgs(codexHome string, recent int, interval time.Duration) []st
 }
 
 func manualBackgroundCollectCommand(codexHome string, recent int, interval time.Duration) string {
-	args := append([]string{"crux"}, collectWatchArgs(codexHome, recent, interval)...)
+	args := append([]string{"autoskills"}, collectWatchArgs(codexHome, recent, interval)...)
 	return joinShellArgs(args)
 }
 
 func backgroundLaunchdLabel(homeDir string) string {
 	hasher := fnv.New32a()
 	_, _ = hasher.Write([]byte(filepath.Clean(homeDir)))
-	return fmt.Sprintf("io.crux.collect.%08x", hasher.Sum32())
+	return fmt.Sprintf("io.autoskills.collect.%08x", hasher.Sum32())
 }
 
 func renderLaunchdPlist(label string, arguments []string, workdir, stdoutPath, stderrPath string, env map[string]string) string {
@@ -293,17 +293,17 @@ func renderLaunchdPlist(label string, arguments []string, workdir, stdoutPath, s
 	return builder.String()
 }
 
-func findInstalledCrux() (string, bool) {
-	if resolved, err := exec.LookPath("crux"); err == nil && shouldUseStableExecutable(resolved) {
+func findInstalledAutoSkills() (string, bool) {
+	if resolved, err := exec.LookPath("autoskills"); err == nil && shouldUseStableExecutable(resolved) {
 		return filepath.Clean(resolved), true
 	}
 
 	var candidates []string
-	if binDir := strings.TrimSpace(os.Getenv("CRUX_BIN_DIR")); binDir != "" {
-		candidates = append(candidates, filepath.Join(binDir, "crux"))
+	if binDir := strings.TrimSpace(os.Getenv("AUTOSKILLS_BIN_DIR")); binDir != "" {
+		candidates = append(candidates, filepath.Join(binDir, "autoskills"))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".local", "bin", "crux"))
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", "autoskills"))
 	}
 	for _, candidate := range candidates {
 		if shouldUseStableExecutable(candidate) && fileExists(candidate) {
@@ -333,7 +333,7 @@ func shouldUseStableExecutable(path string) bool {
 	}
 	cleaned := filepath.Clean(path)
 	base := strings.ToLower(filepath.Base(cleaned))
-	if !strings.Contains(base, "crux") {
+	if !strings.Contains(base, "autoskills") {
 		return false
 	}
 	tempRoot := filepath.Clean(os.TempDir())
@@ -389,7 +389,7 @@ func resetBackgroundCollection(homeDir string) backgroundResetResp {
 
 	if fileExists(plistPath) {
 		resp.Status = "removed"
-		if runtime.GOOS == "darwin" || strings.TrimSpace(os.Getenv("CRUX_LAUNCHCTL_BIN")) != "" {
+		if runtime.GOOS == "darwin" || strings.TrimSpace(os.Getenv("AUTOSKILLS_LAUNCHCTL_BIN")) != "" {
 			resp.UnloadAttempted = true
 			if err := runLaunchctl("unload", plistPath); err != nil {
 				resp.Warnings = append(resp.Warnings, fmt.Sprintf("failed to unload background collector: %v", err))

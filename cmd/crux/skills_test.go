@@ -21,7 +21,7 @@ import (
 
 func TestRunCollectAutoSyncsManagedSkillBundle(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	writeCodexSessionFixture(t, filepath.Join(codexHome, "sessions", "2026", "03", "14", "latest.jsonl"), time.Date(2026, 3, 14, 8, 0, 0, 0, time.UTC), []string{
@@ -122,8 +122,8 @@ func TestRunCollectAutoSyncsManagedSkillBundle(t *testing.T) {
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
 	skillIndex, err := os.ReadFile(filepath.Join(liveBundlePath, "SKILL.md"))
 	require.NoError(t, err)
-	require.Contains(t, string(skillIndex), "name: crux-personal-skillset")
-	require.Contains(t, string(skillIndex), "Crux Personal Skill Set")
+	require.Contains(t, string(skillIndex), "name: autoskills-personal-skillset")
+	require.Contains(t, string(skillIndex), "AutoSkills Personal Skill Set")
 	openAIYAML, err := os.ReadFile(filepath.Join(liveBundlePath, "agents", "openai.yaml"))
 	require.NoError(t, err)
 	require.Contains(t, string(openAIYAML), "allow_implicit_invocation: true")
@@ -137,7 +137,7 @@ func TestRunCollectAutoSyncsManagedSkillBundle(t *testing.T) {
 
 func TestRunSkillsPauseResumeAndRollback(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -183,7 +183,7 @@ func TestRunSkillsPauseResumeAndRollback(t *testing.T) {
 	require.Contains(t, string(skillIndex), "previous bundle")
 	openAIYAML, err := os.ReadFile(filepath.Join(liveBundlePath, "agents", "openai.yaml"))
 	require.NoError(t, err)
-	require.Contains(t, string(openAIYAML), "display_name: \"Crux Personal Skill Set\"")
+	require.Contains(t, string(openAIYAML), "display_name: \"AutoSkills Personal Skill Set\"")
 
 	currentState, _, err := loadSkillSetState()
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestRunSkillsPauseResumeAndRollback(t *testing.T) {
 
 func TestRunCollectSyncsManagedSkillBundleRegardlessOfShadowDecision(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	writeCodexSessionFixture(t, filepath.Join(codexHome, "sessions", "2026", "03", "14", "latest.jsonl"), time.Date(2026, 3, 14, 8, 0, 0, 0, time.UTC), []string{
@@ -313,11 +313,11 @@ func testSkillSetBundleResp(projectID, version, compiledHash, marker string) res
 		"name: " + managedSkillBundleName + "\n" +
 		"description: Use as the default operating skill set for this user across coding sessions to preserve recurring clarification, planning, validation, and collaboration rules learned from prior sessions.\n" +
 		"---\n\n" +
-		"# Crux Personal Skill Set\n\n" + marker + "\n"
+		"# AutoSkills Personal Skill Set\n\n" + marker + "\n"
 	openAIYAML := "interface:\n" +
-		"  display_name: \"Crux Personal Skill Set\"\n" +
-		"  short_description: \"Auto-synced personal operating rules from Crux\"\n" +
-		"  default_prompt: \"Use $crux-personal-skillset as the default operating skill set for this user, then follow the relevant category documents before responding.\"\n\n" +
+		"  display_name: \"AutoSkills Personal Skill Set\"\n" +
+		"  short_description: \"Auto-synced personal operating rules from AutoSkills\"\n" +
+		"  default_prompt: \"Use $autoskills-personal-skillset as the default operating skill set for this user, then follow the relevant category documents before responding.\"\n\n" +
 		"policy:\n" +
 		"  allow_implicit_invocation: true\n"
 	return response.SkillSetBundleResp{
@@ -410,7 +410,7 @@ func TestEnsureAgentsMDSkillSetSection_Idempotent(t *testing.T) {
 
 func TestDiffManagedSkillBundle_DetectsModifiedFiles(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -453,7 +453,7 @@ func TestDiffManagedSkillBundle_DetectsModifiedFiles(t *testing.T) {
 
 func TestDiffManagedSkillBundle_DetectsAddedAndRemovedFiles(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -490,7 +490,7 @@ func TestDiffManagedSkillBundle_DetectsAddedAndRemovedFiles(t *testing.T) {
 
 func TestRunSkillsResolveKeepLocal(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -527,7 +527,7 @@ func TestRunSkillsResolveKeepLocal(t *testing.T) {
 
 func TestRunSkillsResolveAcceptRemote(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -572,7 +572,7 @@ func TestRunSkillsResolveAcceptRemote(t *testing.T) {
 
 func TestRunSkillsResolveNoConflict(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -599,7 +599,7 @@ func TestRunSkillsResolveNoConflict(t *testing.T) {
 
 func TestRunSkillsResolveShowsDiffWhenNoAction(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -638,7 +638,7 @@ func TestRunSkillsResolveShowsDiffWhenNoAction(t *testing.T) {
 
 func TestRunSkillsStatusShowsConflictDiff(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -670,12 +670,12 @@ func TestRunSkillsStatusShowsConflictDiff(t *testing.T) {
 	require.Contains(t, output, `"conflict_diff"`)
 	require.Contains(t, output, `"has_conflict": true`)
 	require.Contains(t, output, `"resolve_hint"`)
-	require.Contains(t, output, "crux skills resolve")
+	require.Contains(t, output, "autoskills skills resolve")
 }
 
 func TestRunSkillsResolveBackupAndSync(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -774,7 +774,7 @@ func TestRunSkillsResolveBackupAndSync(t *testing.T) {
 
 func TestRunSkillsResolveAcceptRemoteWithoutBackup(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	codexHome := filepath.Join(root, ".codex")
 	liveBundlePath := filepath.Join(codexHome, "skills", managedSkillBundleName)
@@ -964,7 +964,7 @@ func TestHashManagedSkillBundleIgnoresVersionLine(t *testing.T) {
 
 func TestAssertManagedSkillBundleUntouchedMigratesLegacyAppliedHash(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("CRUX_HOME", root)
+	t.Setenv("AUTOSKILLS_HOME", root)
 
 	livePath := t.TempDir()
 	skillWithVersion := "---\nname: test\n---\n\n# Title\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `v-abc123def456`\n\n## Workflow\n"
@@ -1006,9 +1006,9 @@ func TestEndToEndServerBuildDeployConflictCheck(t *testing.T) {
 	// These are the file contents the server would generate.
 	categoryContent := "# Clarify Before Building\n\nConfidence: `0.85`\n\n## Rules\n\n- Ask for missing constraints before touching code.\n\n## Anti-patterns\n\n- Starts implementation before confirming missing requirements.\n\n"
 	evidenceContent := "# Evidence Summary\n\nNo evidence recorded.\n"
-	agentContent := "interface:\n  display_name: \"Crux Personal Skill Set\"\n  short_description: \"Auto-synced personal operating rules from Crux\"\n  default_prompt: \"Use $crux-personal-skillset\"\n\npolicy:\n  allow_implicit_invocation: true\n"
+	agentContent := "interface:\n  display_name: \"AutoSkills Personal Skill Set\"\n  short_description: \"Auto-synced personal operating rules from AutoSkills\"\n  default_prompt: \"Use $autoskills-personal-skillset\"\n\npolicy:\n  allow_implicit_invocation: true\n"
 
-	skillWithoutVersion := "---\nname: crux-personal-skillset\ndescription: Use as the default operating skill set for this user across coding sessions\n---\n\n# Crux Personal Skill Set\n\nThis skill is managed automatically by Crux and should be treated as the user's standing policy layer.\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n\n1. Treat the documents below as cumulative standing instructions for this user.\n2. Load only the category documents that are relevant to the current request.\n\n## Included documents\n\n- [`01-clarification.md`](01-clarification.md) - Clarify Before Building\n\n## References\n\n- [`references/evidence-summary.md`](references/evidence-summary.md)\n"
+	skillWithoutVersion := "---\nname: autoskills-personal-skillset\ndescription: Use as the default operating skill set for this user across coding sessions\n---\n\n# AutoSkills Personal Skill Set\n\nThis skill is managed automatically by AutoSkills and should be treated as the user's standing policy layer.\n\nGenerated at: `2026-03-17T00:00:00Z`\n\n## Workflow\n\n1. Treat the documents below as cumulative standing instructions for this user.\n2. Load only the category documents that are relevant to the current request.\n\n## Included documents\n\n- [`01-clarification.md`](01-clarification.md) - Clarify Before Building\n\n## References\n\n- [`references/evidence-summary.md`](references/evidence-summary.md)\n"
 
 	// Compute the compiled hash the same way the server does
 	// (SKILL.md without version, no manifest).
@@ -1037,14 +1037,14 @@ func TestEndToEndServerBuildDeployConflictCheck(t *testing.T) {
 	serverVersion := "v" + serverCompiledHash[:12]
 
 	// SKILL.md that actually gets written to disk includes the version.
-	skillWithVersion := "---\nname: crux-personal-skillset\ndescription: Use as the default operating skill set for this user across coding sessions\n---\n\n# Crux Personal Skill Set\n\nThis skill is managed automatically by Crux and should be treated as the user's standing policy layer.\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `" + serverVersion + "`\n\n## Workflow\n\n1. Treat the documents below as cumulative standing instructions for this user.\n2. Load only the category documents that are relevant to the current request.\n\n## Included documents\n\n- [`01-clarification.md`](01-clarification.md) - Clarify Before Building\n\n## References\n\n- [`references/evidence-summary.md`](references/evidence-summary.md)\n"
+	skillWithVersion := "---\nname: autoskills-personal-skillset\ndescription: Use as the default operating skill set for this user across coding sessions\n---\n\n# AutoSkills Personal Skill Set\n\nThis skill is managed automatically by AutoSkills and should be treated as the user's standing policy layer.\n\nGenerated at: `2026-03-17T00:00:00Z`\n\nVersion: `" + serverVersion + "`\n\n## Workflow\n\n1. Treat the documents below as cumulative standing instructions for this user.\n2. Load only the category documents that are relevant to the current request.\n\n## Included documents\n\n- [`01-clarification.md`](01-clarification.md) - Clarify Before Building\n\n## References\n\n- [`references/evidence-summary.md`](references/evidence-summary.md)\n"
 
 	// Build a bundle response (what the server returns to the client).
 	bundle := response.SkillSetBundleResp{
-		SchemaVersion: "crux-skillset.v1",
+		SchemaVersion: "autoskills-skillset.v1",
 		ProjectID:     "project-1",
 		Status:        "ready",
-		BundleName:    "crux-personal-skillset",
+		BundleName:    "autoskills-personal-skillset",
 		Version:       serverVersion,
 		CompiledHash:  serverCompiledHash,
 		Files: []response.SkillSetFileResp{
@@ -1052,7 +1052,7 @@ func TestEndToEndServerBuildDeployConflictCheck(t *testing.T) {
 			{Path: "agents/openai.yaml", Content: agentContent},
 			{Path: "references/evidence-summary.md", Content: evidenceContent},
 			{Path: "SKILL.md", Content: skillWithVersion},
-			{Path: "00-manifest.json", Content: `{"schema_version":"crux-skillset.v1"}` + "\n"},
+			{Path: "00-manifest.json", Content: `{"schema_version":"autoskills-skillset.v1"}` + "\n"},
 		},
 	}
 

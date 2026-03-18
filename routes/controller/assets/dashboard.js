@@ -1,10 +1,10 @@
 const STORAGE_KEYS = {
-  sessionUser: "crux_session_user",
-  sessionOrg: "crux_session_org",
-  activeTab: "crux_dashboard_tab",
-  activeReportPanel: "crux_dashboard_report_panel",
-  activeReportID: "crux_dashboard_report_id",
-  onboardingDone: "crux_onboarding_done",
+  sessionUser: "autoskills_session_user",
+  sessionOrg: "autoskills_session_org",
+  activeTab: "autoskills_dashboard_tab",
+  activeReportPanel: "autoskills_dashboard_report_panel",
+  activeReportID: "autoskills_dashboard_report_id",
+  onboardingDone: "autoskills_onboarding_done",
 };
 const TAB_IDS = ["overview", "autoskills", "trends", "sessions", "cli"];
 const REPORT_PANEL_IDS = ["actions", "history", "all"];
@@ -126,9 +126,9 @@ function normalizeOrigin(value) {
 function buildSetupCommand(origin = window.location.origin || "") {
   const normalizedOrigin = normalizeOrigin(origin);
   if (!normalizedOrigin || normalizedOrigin === DEFAULT_SERVER_ORIGIN) {
-    return "crux setup";
+    return "autoskills setup";
   }
-  return `crux setup --server ${normalizedOrigin}`;
+  return `autoskills setup --server ${normalizedOrigin}`;
 }
 
 function updateWizardCommands() {
@@ -275,7 +275,7 @@ function renderAgentStatus(overview, reports) {
   } else if (totalSessions === 0) {
     bar.dataset.state = "";
     text.textContent =
-      "Waiting for sessions \u2014 run `crux setup` to register the repo and upload local Codex sessions";
+      "Waiting for sessions \u2014 run `autoskills setup` to register the repo and upload local Codex sessions";
   } else {
     bar.dataset.state = "";
     text.textContent = `Observing \u2014 analyzed ${totalSessions} session${totalSessions > 1 ? "s" : ""}, researching usage patterns`;
@@ -369,7 +369,7 @@ function redirectToLanding(message) {
   clearSession();
   if (message) {
     try {
-      window.sessionStorage.setItem("crux_redirect_notice", message);
+      window.sessionStorage.setItem("autoskills_redirect_notice", message);
     } catch (error) {
       // Ignore sessionStorage failures and continue the redirect.
     }
@@ -1453,7 +1453,7 @@ function renderAutoSkillsTab(skillSet, reports) {
       <div class="skill-banner" data-tone="empty">
         <div class="skill-banner-content">
           <div class="skill-banner-headline">No connected workspace</div>
-          <div class="skill-banner-copy">Run <code>crux setup</code> in a repository and upload sessions. The first managed bundle will appear after reports are generated.</div>
+          <div class="skill-banner-copy">Run <code>autoskills setup</code> in a repository and upload sessions. The first managed bundle will appear after reports are generated.</div>
         </div>
       </div>`;
     changeEl.innerHTML = "";
@@ -1474,10 +1474,10 @@ function renderAutoSkillsTab(skillSet, reports) {
           : "The managed bundle will appear after enough reports are available.";
     const copy =
       status === "no_candidate"
-        ? "Crux has report evidence, but the latest analysis pass has not produced a stable multi-file bundle yet."
+        ? "AutoSkills has report evidence, but the latest analysis pass has not produced a stable multi-file bundle yet."
         : status === "unsupported"
           ? "Update the deployed server/dashboard pair before relying on automatic bundle visibility in the UI."
-          : "Keep uploading Codex sessions. Once recent workflow reports accumulate, Crux will compile a canonical bundle here.";
+          : "Keep uploading Codex sessions. Once recent workflow reports accumulate, AutoSkills will compile a canonical bundle here.";
 
     bannerEl.innerHTML = `
       <div class="skill-banner" data-tone="${escapeAttr(statusTone)}">
@@ -1488,7 +1488,7 @@ function renderAutoSkillsTab(skillSet, reports) {
         </div>
       </div>`;
     if (descEl) {
-      descEl.textContent = "Crux will explain every automatic update once the first managed bundle is compiled.";
+      descEl.textContent = "AutoSkills will explain every automatic update once the first managed bundle is compiled.";
     }
     changeEl.innerHTML = `
       <div class="action-lane-group">
@@ -1512,28 +1512,28 @@ function renderAutoSkillsTab(skillSet, reports) {
         id: "skillResolveInspectCmd",
         title: "Inspect the conflict",
         note: "Review the local diff and available actions before changing anything.",
-        command: "crux skills resolve",
+        command: "autoskills skills resolve",
         copyLabel: "inspect conflict command",
       },
       {
         id: "skillResolveAcceptCmd",
         title: "Accept remote",
         note: "Discard local edits and restore the managed bundle from the server.",
-        command: "crux skills resolve --action accept-remote",
+        command: "autoskills skills resolve --action accept-remote",
         copyLabel: "accept remote command",
       },
       {
         id: "skillResolveKeepLocalCmd",
         title: "Keep local",
         note: "Pause auto-sync and keep the local edits on this machine.",
-        command: "crux skills resolve --action keep-local",
+        command: "autoskills skills resolve --action keep-local",
         copyLabel: "keep local command",
       },
       {
         id: "skillResolveBackupCmd",
         title: "Backup and sync",
         note: "Back up the local edits first, then replace them with the remote bundle.",
-        command: "crux skills resolve --action backup-and-sync",
+        command: "autoskills skills resolve --action backup-and-sync",
         copyLabel: "backup and sync command",
       },
     ];
@@ -1591,7 +1591,7 @@ function renderAutoSkillsTab(skillSet, reports) {
         </div>
       </div>
       <div class="skill-banner-aside">
-        <div class="skill-banner-cli-note">Manage via CLI: <code>crux skills status</code> · <code>crux skills pause</code> · <code>crux skills rollback</code></div>
+        <div class="skill-banner-cli-note">Manage via CLI: <code>autoskills skills status</code> · <code>autoskills skills pause</code> · <code>autoskills skills rollback</code></div>
       </div>
     </div>`;
   }
@@ -1602,7 +1602,7 @@ function renderAutoSkillsTab(skillSet, reports) {
       ? syncError
       : summaryItems[0]
         ? summaryItems[0]
-        : "Crux merged the latest workflow evidence into a canonical skill bundle for this workspace.";
+        : "AutoSkills merged the latest workflow evidence into a canonical skill bundle for this workspace.";
   }
 
   changeEl.innerHTML = `
@@ -1753,7 +1753,7 @@ function workloadNarrative(overview) {
   const combined = `${importProgress} ${importMetrics} ${action} ${outcome} ${research}${tokenRead}`.trim();
   return (
     combined ||
-    "Crux is collecting enough Codex session traces to produce its first analysis report."
+    "AutoSkills is collecting enough Codex session traces to produce its first analysis report."
   );
 }
 
@@ -3765,7 +3765,7 @@ function renderOptimizationLoop(overview, reports) {
   if (reportCount === 0) {
     $("loopSummary").textContent =
       totalSessions > 0
-        ? "The loop is in observation mode. Crux is digesting recent raw queries and response patterns before publishing the next report."
+        ? "The loop is in observation mode. AutoSkills is digesting recent raw queries and response patterns before publishing the next report."
         : "The loop starts after the CLI uploads sessions and snapshots from your coding-agent workspace.";
     $("loopFocusCard").innerHTML = `
       <div class="loop-focus-empty">
@@ -4019,7 +4019,7 @@ function renderLifecycle(overview) {
     const emptySummary =
       lifecycleNarrative ||
       (totalSessions > 0
-        ? "Keep uploading Codex sessions so Crux can compare user intent, model interpretation, and repeated friction."
+        ? "Keep uploading Codex sessions so AutoSkills can compare user intent, model interpretation, and repeated friction."
         : "Connect the CLI and upload sessions from a workspace to start the analysis cycle.");
     const phaseLabel =
       researchState === "running"
@@ -4070,7 +4070,7 @@ function renderLifecycle(overview) {
       <article class="lifecycle-panel">
         <div class="lifecycle-panel-head">
           <div>
-            <div class="lifecycle-panel-kicker">What Crux needs</div>
+            <div class="lifecycle-panel-kicker">What AutoSkills needs</div>
             <div class="lifecycle-panel-title">Grounded evidence, not generic advice</div>
           </div>
           ${pill("Evidence first", "warn")}
@@ -4490,7 +4490,7 @@ function renderSessionSummaries(items) {
   if (!items.length) {
     $("sessionSummaryList").innerHTML = emptyState(
       "No sessions uploaded yet",
-      "Run `crux session --recent 5` from the CLI to upload your recent AI usage sessions.",
+      "Run `autoskills session --recent 5` from the CLI to upload your recent AI usage sessions.",
     );
     return;
   }
@@ -4588,7 +4588,7 @@ function renderImportJobs(overview, items) {
   if (!items.length) {
     $("importHistoryList").innerHTML = emptyState(
       "No import jobs yet",
-      "Run `crux collect --reset-sessions` when you want to backfill local Codex sessions.",
+      "Run `autoskills collect --reset-sessions` when you want to backfill local Codex sessions.",
     );
     return;
   }

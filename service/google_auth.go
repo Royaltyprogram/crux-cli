@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	GoogleOAuthStateCookieName = "crux_google_oauth_state"
+	GoogleOAuthStateCookieName = "autoskills_google_oauth_state"
 
 	googleOAuthStateTTL = 10 * time.Minute
 
