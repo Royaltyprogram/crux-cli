@@ -11,7 +11,7 @@ import (
 )
 
 func TestDefaultAnalyticsStoreDSNUsesSQLiteFallback(t *testing.T) {
-	require.Equal(t, "file:crux-store?mode=memory&cache=shared&_fk=1", defaultAnalyticsStoreDSN(""))
+	require.Equal(t, "file:autoskills-store?mode=memory&cache=shared&_fk=1", defaultAnalyticsStoreDSN(""))
 	require.Equal(t, "data/crux-store.db", defaultAnalyticsStoreDSN("data/crux-store.json"))
 	require.Equal(t, "data/crux-store.db", defaultAnalyticsStoreDSN("data/crux-store"))
 	require.Equal(t, "data/crux-local.db?_fk=1", defaultAnalyticsStoreDSN("data/crux-local.db?_fk=1"))

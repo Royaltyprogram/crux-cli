@@ -6,6 +6,25 @@ const STORAGE_KEYS = {
   activeReportID: "autoskills_dashboard_report_id",
   onboardingDone: "autoskills_onboarding_done",
 };
+(function migrateStorageKeys() {
+  const migrations = [
+    ["crux_session_user", "autoskills_session_user"],
+    ["crux_session_org", "autoskills_session_org"],
+    ["crux_dashboard_tab", "autoskills_dashboard_tab"],
+    ["crux_dashboard_report_panel", "autoskills_dashboard_report_panel"],
+    ["crux_dashboard_report_id", "autoskills_dashboard_report_id"],
+    ["crux_onboarding_done", "autoskills_onboarding_done"],
+  ];
+  for (const [oldKey, newKey] of migrations) {
+    try {
+      const val = localStorage.getItem(oldKey);
+      if (val !== null && localStorage.getItem(newKey) === null) {
+        localStorage.setItem(newKey, val);
+        localStorage.removeItem(oldKey);
+      }
+    } catch (_) {}
+  }
+})();
 const TAB_IDS = ["overview", "autoskills", "trends", "sessions", "cli"];
 const REPORT_PANEL_IDS = ["actions", "history", "all"];
 const WIZARD_STEPS = 4;
@@ -13,7 +32,7 @@ const DEFAULT_SERVER_ORIGIN = "https://useautoskills.com";
 
 const state = {
   busy: false,
-  activeTab: "overview",
+  activeTab: "autoskills",
   activeReportPanel: "actions",
   activeReportID: "",
   failedImportJobItems: [],
@@ -1477,7 +1496,7 @@ function renderAutoSkillsTab(skillSet, reports) {
         ? "AutoSkills has report evidence, but the latest analysis pass has not produced a stable multi-file bundle yet."
         : status === "unsupported"
           ? "Update the deployed server/dashboard pair before relying on automatic bundle visibility in the UI."
-          : "Keep uploading Codex sessions. Once recent workflow reports accumulate, AutoSkills will compile a canonical bundle here.";
+          : "Keep uploading sessions. Once recent workflow reports accumulate, AutoSkills will compile a canonical bundle here.";
 
     bannerEl.innerHTML = `
       <div class="skill-banner" data-tone="${escapeAttr(statusTone)}">
@@ -1753,7 +1772,7 @@ function workloadNarrative(overview) {
   const combined = `${importProgress} ${importMetrics} ${action} ${outcome} ${research}${tokenRead}`.trim();
   return (
     combined ||
-    "AutoSkills is collecting enough Codex session traces to produce its first analysis report."
+    "AutoSkills is collecting enough session traces to produce its first analysis report."
   );
 }
 
@@ -4019,7 +4038,7 @@ function renderLifecycle(overview) {
     const emptySummary =
       lifecycleNarrative ||
       (totalSessions > 0
-        ? "Keep uploading Codex sessions so AutoSkills can compare user intent, model interpretation, and repeated friction."
+        ? "Keep uploading sessions so AutoSkills can compare user intent, model interpretation, and repeated friction."
         : "Connect the CLI and upload sessions from a workspace to start the analysis cycle.");
     const phaseLabel =
       researchState === "running"

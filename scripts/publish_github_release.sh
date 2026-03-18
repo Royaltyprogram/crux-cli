@@ -16,7 +16,7 @@ GH_BIN="${CRUX_GH_BIN:-gh}"
 
 usage() {
   cat <<'EOF'
-Publish Crux release assets to GitHub Releases.
+Publish AutoSkills release assets to GitHub Releases.
 
 Usage:
   ./scripts/publish_github_release.sh [options]
@@ -124,7 +124,7 @@ collect_assets() {
 
 default_title() {
   local version="$1"
-  printf 'Crux %s\n' "$version"
+  printf 'AutoSkills %s\n' "$version"
 }
 
 default_prerelease_for_version() {
@@ -143,7 +143,7 @@ generate_default_notes() {
   local raw_url="https://raw.githubusercontent.com/$REPO/$version/scripts/install.sh"
 
   cat <<EOF
-# Crux $version
+# AutoSkills $version
 
 One-command install:
 

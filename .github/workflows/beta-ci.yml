@@ -55,8 +55,8 @@ jobs:
 
       - name: Start local closed beta server
         run: |
-          APP_MODE=local ./output/server > /tmp/crux-server.log 2>&1 &
-          echo $! > /tmp/crux-server.pid
+          APP_MODE=local ./output/server > /tmp/autoskills-server.log 2>&1 &
+          echo $! > /tmp/autoskills-server.pid
 
       - name: Wait for liveness
         run: |
@@ -71,7 +71,7 @@ jobs:
 
       - name: Run closed beta smoke
         env:
-          BETA_SMOKE_API_TOKEN: crux-dev-token
+          BETA_SMOKE_API_TOKEN: autoskills-dev-token
         run: ./scripts/closed_beta_smoke.sh
 
       - name: Run closed beta prod smoke
@@ -85,7 +85,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: crux-beta-binaries-${{ github.sha }}
+          name: autoskills-beta-binaries-${{ github.sha }}
           path: |
             output/server
             output/crux
@@ -94,30 +94,30 @@ jobs:
       - name: Stop local server
         if: always()
         run: |
-          if [ -f /tmp/crux-server.pid ]; then
-            kill "$(cat /tmp/crux-server.pid)" || true
+          if [ -f /tmp/autoskills-server.pid ]; then
+            kill "$(cat /tmp/autoskills-server.pid)" || true
           fi
 
       - name: Upload server log
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: crux-beta-server-log-${{ github.sha }}
-          path: /tmp/crux-server.log
+          name: autoskills-beta-server-log-${{ github.sha }}
+          path: /tmp/autoskills-server.log
           if-no-files-found: ignore
 
       - name: Upload prod server log
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: crux-beta-prod-server-log-${{ github.sha }}
+          name: autoskills-beta-prod-server-log-${{ github.sha }}
           path: /tmp/crux-prod-server.log
           if-no-files-found: ignore
 
       - name: Dump server log on failure
         if: failure()
         run: |
-          cat /tmp/crux-server.log || true
+          cat /tmp/autoskills-server.log || true
           cat /tmp/crux-prod-server.log || true
 
   bundle:
@@ -157,7 +157,7 @@ jobs:
       - name: Upload beta bundle artifact
         uses: actions/upload-artifact@v6
         with:
-          name: crux-beta-bundle-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
+          name: autoskills-beta-bundle-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
           path: |
             output/release/*.tar.gz
             output/release/*.tar.gz.sha256
@@ -177,7 +177,7 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: output/release
-          pattern: crux-beta-bundle-*-${{ github.sha }}
+          pattern: autoskills-beta-bundle-*-${{ github.sha }}
           merge-multiple: true
 
       - name: Build release index
@@ -188,7 +188,7 @@ jobs:
       - name: Upload release index artifact
         uses: actions/upload-artifact@v6
         with:
-          name: crux-beta-release-index-${{ github.sha }}
+          name: autoskills-beta-release-index-${{ github.sha }}
           path: |
             output/release/*.release-index.json
             output/release/*.release-index.json.sha256
@@ -208,21 +208,21 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: output/release
-          pattern: crux-beta-bundle-*-${{ github.sha }}
+          pattern: autoskills-beta-bundle-*-${{ github.sha }}
           merge-multiple: true
 
       - name: Download release index artifact
         uses: actions/download-artifact@v7
         with:
           path: output/release
-          pattern: crux-beta-release-index-${{ github.sha }}
+          pattern: autoskills-beta-release-index-${{ github.sha }}
           merge-multiple: true
 
       - name: Publish GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION_LABEL: ${{ env.RELEASE_VERSION_LABEL }}
-          RELEASE_TITLE: ${{ github.ref == 'refs/heads/main' && 'Crux beta' || '' }}
+          RELEASE_TITLE: ${{ github.ref == 'refs/heads/main' && 'AutoSkills beta' || '' }}
           TARGET_COMMITISH: ${{ github.sha }}
           DRAFT: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.draft == 'true' && '1' || '0') || '0' }}
           PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.prerelease == 'true' && '1' || '0') || (github.ref == 'refs/heads/main' && '1' || '0') }}

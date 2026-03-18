@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoSkills — Understand What Your Codex Agent Actually Did</title>
+  <title>AutoSkills — Your AI Agent Gets Smarter Automatically</title>
   <link rel="icon" href="/assets/logo.ico" type="image/x-icon">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -393,7 +393,7 @@
       </a>
       <ul class="nav-links">
         <li><a href="#how-it-works" class="nav-link-text">How It Works</a></li>
-        <li><a href="#configures" class="nav-link-text">What It Analyzes</a></li>
+        <li><a href="#configures" class="nav-link-text">What It Tunes</a></li>
         <li><a href="/docs" class="nav-link-text">Docs</a></li>
         <li><a href="/login" class="nav-cta">Login / Sign Up</a></li>
       </ul>
@@ -402,10 +402,10 @@
 
   <!-- ── HERO ── -->
   <section class="hero wrap">
-    <h1>See what your Codex agent <em>actually understood</em>.</h1>
+    <h1>Your AI coding agent gets <em>smarter automatically</em>.</h1>
     <p class="hero-sub">
-      AutoSkills reads your Codex session traces and tells you <strong>what you asked for, how the model interpreted it, and where it went wrong</strong>.
-      No guessing. No black box.
+      AutoSkills analyzes your coding sessions, builds <strong>personalized skill rules</strong>, and deploys them automatically &mdash;
+      with shadow evaluation, rollback, and full transparency.
     </p>
     <div class="hero-actions">
       <a href="/login" class="btn btn-primary">Get Started</a>
@@ -414,56 +414,64 @@
     <div class="tool-strip">
       <span>Built for</span>
       <div class="tool-pill"><span class="dot dot--codex"></span>OpenAI Codex</div>
+      <div class="tool-pill"><span class="dot dot--claude"></span>Claude Code</div>
     </div>
 
     <!-- MOCK: Shows the actual product experience -->
     <div class="hero-visual">
       <div class="hero-visual-bar">
         <span class="hv-dot"></span><span class="hv-dot"></span><span class="hv-dot"></span>
-        <span class="hv-title">AutoSkills &mdash; Trace Analysis</span>
+        <span class="hv-title">AutoSkills &mdash; Skill Update Preview</span>
       </div>
       <div class="hero-visual-body">
         <div class="mock-agent-status">
           <span class="status-dot"></span>
-          12 Codex sessions analyzed &mdash; 2 misalignment patterns found
+          3 new skills proposed &mdash; 1 auto-deployed, 2 in shadow evaluation
         </div>
 
         <div class="mock-report">
           <div class="mock-report-header">
-            <span class="mock-report-title">Model refactored instead of fixing the bug</span>
-            <span class="mock-pill mock-pill--risk">High confidence</span>
+            <span class="mock-report-title">Always specify file scope when requesting bug fixes</span>
+            <span class="mock-pill mock-pill--risk">Auto-deployed</span>
           </div>
           <div class="mock-impact">
             <div class="mock-impact-card">
-              <div class="mock-impact-label">What you asked</div>
-              <div class="mock-text">"Fix the failing test in auth_test.go"</div>
+              <div class="mock-impact-label">Skill rule</div>
+              <div class="mock-text">"When fixing a bug, constrain scope to the affected file unless explicitly told otherwise."</div>
             </div>
             <div class="mock-impact-card">
-              <div class="mock-impact-label">What the model did</div>
-              <div class="mock-text mock-text--muted">Rewrote the auth middleware and updated 4 files instead of patching the test assertion.</div>
+              <div class="mock-impact-label">Evidence</div>
+              <div class="mock-text mock-text--muted">Detected in 5 sessions: agent expanded scope beyond the target file, causing unnecessary rewrites.</div>
             </div>
           </div>
           <div class="mock-diff">
-            <span class="line-ctx">  Why it happened</span><br>
-            <span class="line-add">+ The prompt lacked scope constraint &mdash; no "only touch this file".</span><br>
-            <span class="line-add">+ Model defaulted to a structural rewrite when the fix was a one-liner.</span>
+            <span class="line-ctx">  Shadow evaluation</span><br>
+            <span class="line-add">+ Score: 0.91 &mdash; passed confidence threshold</span><br>
+            <span class="line-add">+ Guardrail: passed &mdash; low churn, high evidence support</span>
           </div>
         </div>
 
         <div class="mock-history">
           <div class="mock-history-item">
             <div class="mock-history-left">
-              <span class="mock-pill mock-pill--measuring">Misalignment</span>
-              <span class="mock-history-title">Scope expanded without constraint</span>
+              <span class="mock-pill mock-pill--improved">Auto-deployed</span>
+              <span class="mock-history-title">Scope constraint rule &mdash; v13</span>
             </div>
-            <span class="mock-history-meta">3 sessions</span>
+            <span class="mock-history-meta">2h ago</span>
           </div>
           <div class="mock-history-item">
             <div class="mock-history-left">
-              <span class="mock-pill mock-pill--improved">Aligned</span>
-              <span class="mock-history-title">Clear file-scoped fix requests</span>
+              <span class="mock-pill mock-pill--measuring">Shadow evaluating</span>
+              <span class="mock-history-title">Clarify ambiguous requirements first</span>
             </div>
-            <span class="mock-history-meta">9 sessions</span>
+            <span class="mock-history-meta">in progress</span>
+          </div>
+          <div class="mock-history-item">
+            <div class="mock-history-left">
+              <span class="mock-pill mock-pill--rolledback">Rolled back</span>
+              <span class="mock-history-title">Enforce test plan before implementation</span>
+            </div>
+            <span class="mock-history-meta">yesterday</span>
           </div>
         </div>
       </div>
@@ -474,7 +482,7 @@
   <section class="section wrap" id="how-it-works">
     <div class="section-header">
       <div class="section-kicker">How It Works</div>
-      <h2 class="section-title">From raw traces to clear explanations</h2>
+      <h2 class="section-title">From sessions to auto-managed skills</h2>
     </div>
 
     <div class="loop-container">
@@ -482,43 +490,43 @@
         <div class="loop-step">
           <div class="loop-step-num loop-step-num--auto">1</div>
           <div class="loop-step-body">
-            <h3>Collect traces</h3>
-            <p>The CLI captures your Codex sessions &mdash; prompts, responses, reasoning, tool calls.</p>
+            <h3>Collect sessions</h3>
+            <p>The CLI captures your AI coding sessions in the background &mdash; prompts, responses, tool calls.</p>
           </div>
         </div>
         <div class="loop-step">
           <div class="loop-step-num loop-step-num--auto">2</div>
           <div class="loop-step-body">
-            <h3>Analyze intent vs. outcome</h3>
-            <p>Compares what you asked for against what the model actually did and why.</p>
+            <h3>Analyze patterns</h3>
+            <p>System identifies recurring friction points &mdash; scope creep, missing constraints, repeated mistakes.</p>
           </div>
         </div>
         <div class="loop-step">
-          <div class="loop-step-num loop-step-num--danger">3</div>
+          <div class="loop-step-num loop-step-num--agent">3</div>
           <div class="loop-step-body">
-            <h3>Find misalignment</h3>
-            <p>Identifies where the model misunderstood scope, misread context, or chose the wrong approach.</p>
+            <h3>Build skills</h3>
+            <p>Personalized skill rules are compiled into a managed bundle &mdash; categorized, versioned, explainable.</p>
           </div>
         </div>
         <div class="loop-step">
-          <div class="loop-step-num loop-step-num--auto">4</div>
+          <div class="loop-step-num loop-step-num--danger">4</div>
           <div class="loop-step-body">
-            <h3>Explain what happened</h3>
-            <p>Produces a readable report: what you intended, what the model understood, what confused it.</p>
+            <h3>Shadow evaluate</h3>
+            <p>New skills are verified against recent sessions before deployment. Low-confidence rules are held back.</p>
           </div>
         </div>
         <div class="loop-step">
           <div class="loop-step-num loop-step-num--user">5</div>
           <div class="loop-step-body">
-            <h3>You adjust</h3>
-            <p>Use the insights to prompt better, scope tighter, or catch patterns before they recur.</p>
+            <h3>Auto-deploy</h3>
+            <p>Proven skills deploy to your agent automatically. You see what changed, why, and the measured impact.</p>
           </div>
         </div>
       </div>
 
       <div class="loop-feedback">
         <p class="loop-feedback-text">
-          <strong>Every session teaches something.</strong> AutoSkills finds the lesson so you don't have to re-read logs.
+          <strong>The cycle repeats automatically.</strong> Every session makes your agent smarter &mdash; no manual tuning required.
         </p>
       </div>
     </div>
@@ -526,11 +534,11 @@
 
   <div class="wrap divider"><hr></div>
 
-  <!-- ── WHAT IT ANALYZES ── -->
+  <!-- ── WHAT IT TUNES ── -->
   <section class="section wrap" id="configures">
     <div class="section-header">
-      <div class="section-kicker">What It Analyzes</div>
-      <h2 class="section-title">Every trace tells a story</h2>
+      <div class="section-kicker">What It Tunes</div>
+      <h2 class="section-title">Every session refines your agent</h2>
     </div>
 
     <div class="config-row">
@@ -539,8 +547,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1H5a2 2 0 00-2 2v14l3.5-2.5L10 17l3.5-2.5L17 17V3a2 2 0 00-2-2z"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Your intent</h3>
-          <p>What you actually wanted the agent to do</p>
+          <h3>Session patterns</h3>
+          <p>Recurring friction points across your coding sessions</p>
         </div>
       </div>
       <div class="config-item">
@@ -548,8 +556,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 1L1 6l9 4.5L19 6 10-1z"/><path d="M1 14l9 4.5L19 14"/><path d="M1 10l9 4.5L19 10"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Model interpretation</h3>
-          <p>How the agent framed and understood it</p>
+          <h3>Skill rules</h3>
+          <p>Personalized behavior guidelines compiled into a managed bundle</p>
         </div>
       </div>
       <div class="config-item">
@@ -557,8 +565,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="8"/><path d="M9 5v4M9 13h.01"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Confusion points</h3>
-          <p>Where the model went off track and why</p>
+          <h3>Safety guardrails</h3>
+          <p>Shadow evaluation, confidence checks, and automatic rollback</p>
         </div>
       </div>
       <div class="config-item">
@@ -566,8 +574,8 @@
           <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12l4 4L15 4"/></svg>
         </div>
         <div class="config-item-text">
-          <h3>Actionable advice</h3>
-          <p>Specific changes to prompt or scope better</p>
+          <h3>Change reports</h3>
+          <p>What updated, why, and the measured before/after impact</p>
         </div>
       </div>
     </div>
@@ -575,55 +583,55 @@
 
   <div class="wrap divider"><hr></div>
 
-  <!-- ── EXAMPLE ANALYSIS ── -->
+  <!-- ── EXAMPLE: SKILL AUTO-UPDATE ── -->
   <section class="section wrap" id="before-after">
     <div class="section-header">
-      <div class="section-kicker">Example Analysis</div>
-      <h2 class="section-title">What a trace analysis looks like</h2>
+      <div class="section-kicker">In Practice</div>
+      <h2 class="section-title">How a skill gets auto-deployed</h2>
     </div>
 
     <div class="ba-container">
       <div class="ba-card">
         <div class="ba-header">
-          <span class="ba-header-title">Session: "Add retry logic to the API client"</span>
-          <span class="mock-pill mock-pill--measuring">Misaligned</span>
+          <span class="ba-header-title">Skill: "Constrain scope to target files"</span>
+          <span class="mock-pill mock-pill--improved">Auto-deployed</span>
         </div>
         <div class="ba-body">
           <div class="ba-timeline">
             <div class="ba-step">
               <div class="ba-step-marker ba-step-marker--before">?</div>
               <div class="ba-step-content">
-                <h4>Your intent</h4>
-                <p>Add exponential backoff retry to the existing HTTP client in <code>pkg/api/client.go</code>.</p>
+                <h4>Pattern detected</h4>
+                <p>Agent expanded scope beyond the target file in 5 out of 8 recent sessions, causing unnecessary rewrites and broken tests.</p>
               </div>
             </div>
             <div class="ba-step">
               <div class="ba-step-marker ba-step-marker--suggest">!</div>
               <div class="ba-step-content">
-                <h4>What the model did</h4>
-                <p>Replaced the entire HTTP client with a new abstraction layer, added 3 new files, and changed the call signature used by 12 other files.</p>
+                <h4>Skill proposed</h4>
+                <p>"When fixing a bug, constrain changes to the affected file unless explicitly told otherwise. Always confirm scope before modifying additional files."</p>
               </div>
             </div>
             <div class="ba-step">
               <div class="ba-step-marker ba-step-marker--after">&rarr;</div>
               <div class="ba-step-content">
-                <h4>What confused the model</h4>
-                <p>The prompt said "add retry logic" without specifying <span class="highlight">where to add it</span> or <span class="highlight">what to leave unchanged</span>. The model interpreted "add" as "redesign."</p>
+                <h4>Result after deployment</h4>
+                <p>Agent correctly <span class="highlight">constrains scope</span> in subsequent sessions. Scope-creep incidents <span class="highlight">dropped 72%</span> within the first week.</p>
               </div>
             </div>
           </div>
           <div class="ba-metrics">
             <div class="ba-metric">
-              <div class="ba-metric-value">15 files</div>
-              <div class="ba-metric-label">Changed (expected: 1)</div>
+              <div class="ba-metric-value">0.91</div>
+              <div class="ba-metric-label">Shadow score</div>
             </div>
             <div class="ba-metric">
-              <div class="ba-metric-value">Scope</div>
-              <div class="ba-metric-label">Primary confusion source</div>
+              <div class="ba-metric-value">-72%</div>
+              <div class="ba-metric-label">Scope-creep incidents</div>
             </div>
             <div class="ba-metric">
-              <div class="ba-metric-value">High</div>
-              <div class="ba-metric-label">Confidence</div>
+              <div class="ba-metric-value">v13</div>
+              <div class="ba-metric-label">Bundle version</div>
             </div>
           </div>
         </div>
@@ -633,7 +641,7 @@
 
   <footer class="footer">
     <div class="footer-inner">
-      <span class="footer-copy">AutoSkills &middot; Understand What Your Codex Agent Actually Did</span>
+      <span class="footer-copy">AutoSkills &middot; Your AI Agent Gets Smarter Automatically</span>
       <ul class="footer-links">
         <li><a href="https://github.com/Royaltyprogram/aiops" target="_blank" rel="noopener">GitHub</a></li>
         <li><a href="/healthz">Status</a></li>

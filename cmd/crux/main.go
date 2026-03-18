@@ -303,7 +303,7 @@ func versionString() string {
 func runLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	server := fs.String("server", defaultServerURL, "server base URL")
-	token := fs.String("token", os.Getenv("AUTOSKILLS_TOKEN"), "CLI token issued from the dashboard")
+	token := fs.String("token", envOrFallback("AUTOSKILLS_TOKEN", "CRUX_TOKEN"), "CLI token issued from the dashboard")
 	device := fs.String("device", "", "device name")
 	hostname := fs.String("hostname", "", "hostname")
 	tools := fs.String("tools", "codex,claude-code", "comma separated tool names")
@@ -360,7 +360,7 @@ func runSetup(args []string) error {
 	serverExplicit := flagProvided(args, "server")
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	server := fs.String("server", defaultServerURL, "server base URL")
-	token := fs.String("token", os.Getenv("AUTOSKILLS_TOKEN"), "CLI token issued from the dashboard")
+	token := fs.String("token", envOrFallback("AUTOSKILLS_TOKEN", "CRUX_TOKEN"), "CLI token issued from the dashboard")
 	repoPath := fs.String("repo-path", ".", "repo path to connect")
 	device := fs.String("device", "", "device name")
 	codexHome := fs.String("codex-home", "", "override Codex home used for initial session collection")
@@ -1362,8 +1362,15 @@ func (c *apiClient) doJSONOnce(method, path string, body any, out any, token str
 	return json.Unmarshal(env.Data, out)
 }
 
+func envOrFallback(primary, legacy string) string {
+	if v := os.Getenv(primary); v != "" {
+		return v
+	}
+	return os.Getenv(legacy)
+}
+
 func cruxDebugHTTPEnabled() bool {
-	value := strings.TrimSpace(os.Getenv("AUTOSKILLS_DEBUG_HTTP"))
+	value := strings.TrimSpace(envOrFallback("AUTOSKILLS_DEBUG_HTTP", "CRUX_DEBUG_HTTP"))
 	if value == "" {
 		return false
 	}
@@ -1573,7 +1580,7 @@ func saveState(st state) error {
 }
 
 func stateFilePath() (string, error) {
-	if root := os.Getenv("AUTOSKILLS_HOME"); root != "" {
+	if root := envOrFallback("AUTOSKILLS_HOME", "CRUX_HOME"); root != "" {
 		return filepath.Join(root, "state.json"), nil
 	}
 	home, err := os.UserHomeDir()

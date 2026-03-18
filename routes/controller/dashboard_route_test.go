@@ -33,10 +33,10 @@ func TestLandingRouteServesLandingPage(t *testing.T) {
 	echo.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), "actually understood")
+	require.Contains(t, rec.Body.String(), "smarter automatically")
 	require.Contains(t, rec.Body.String(), "Login / Sign Up")
 	require.Contains(t, rec.Body.String(), `href="/login"`)
-	require.Contains(t, rec.Body.String(), "No guessing. No black box.")
+	require.Contains(t, rec.Body.String(), "personalized skill rules")
 	require.NotContains(t, rec.Body.String(), "demo@example.com")
 }
 

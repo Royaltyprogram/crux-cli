@@ -2,6 +2,21 @@ const ADMIN_STORAGE_KEYS = {
   sessionUser: "autoskills_session_user",
   sessionOrg: "autoskills_session_org",
 };
+(function migrateAdminStorageKeys() {
+  const migrations = [
+    ["crux_session_user", "autoskills_session_user"],
+    ["crux_session_org", "autoskills_session_org"],
+  ];
+  for (const [oldKey, newKey] of migrations) {
+    try {
+      const val = localStorage.getItem(oldKey);
+      if (val !== null && localStorage.getItem(newKey) === null) {
+        localStorage.setItem(newKey, val);
+        localStorage.removeItem(oldKey);
+      }
+    } catch (_) {}
+  }
+})();
 
 const adminState = {
   busy: false,

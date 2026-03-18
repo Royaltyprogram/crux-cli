@@ -11,6 +11,7 @@ import (
 )
 
 const APIAuthHeader = "X-AutoSkills-Token"
+const apiAuthHeaderLegacy = "X-Crux-Token"
 
 func RequireAPIToken(configuredToken string, staticTokenEnabled bool, store *service.AnalyticsStore) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -24,6 +25,9 @@ func RequireAPIToken(configuredToken string, staticTokenEnabled bool, store *ser
 			}
 
 			token := strings.TrimSpace(c.Request().Header.Get(APIAuthHeader))
+			if token == "" {
+				token = strings.TrimSpace(c.Request().Header.Get(apiAuthHeaderLegacy))
+			}
 			if token == "" {
 				if cookie, err := c.Cookie(service.WebSessionCookieName); err == nil {
 					token = strings.TrimSpace(cookie.Value)

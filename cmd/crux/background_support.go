@@ -210,7 +210,7 @@ func installLaunchdCollector(base backgroundBaseCommand, opts backgroundSetupOpt
 
 func backgroundEnvironment() map[string]string {
 	env := map[string]string{}
-	if value := strings.TrimSpace(os.Getenv("AUTOSKILLS_HOME")); value != "" {
+	if value := strings.TrimSpace(envOrFallback("AUTOSKILLS_HOME", "CRUX_HOME")); value != "" {
 		env["AUTOSKILLS_HOME"] = value
 	}
 	if value := strings.TrimSpace(os.Getenv("PATH")); value != "" {

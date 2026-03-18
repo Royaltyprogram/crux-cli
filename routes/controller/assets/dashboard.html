@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoSkills Workspace Dashboard</title>
+  <title>AutoSkills Dashboard</title>
   <link rel="icon" href="/assets/logo.ico" type="image/x-icon">
   <link rel="stylesheet" href="/assets/dashboard.css">
 
@@ -26,7 +26,7 @@
 
       <div class="wizard-step wizard-step-center is-active" data-wizard-step="0">
         <div class="wizard-title">Welcome to AutoSkills</div>
-        <div class="wizard-desc">AutoSkills reads your Codex session traces and explains what the model understood, where it went wrong, and what confused it. Clear analysis instead of a black box.</div>
+        <div class="wizard-desc">AutoSkills automatically builds personalized skill rules for your AI coding agent. Sessions are analyzed, skills are compiled, and your agent improves — all without manual intervention.</div>
         <div class="wizard-actions">
           <button class="primary-button" type="button" data-action="wizard-next">Get started</button>
         </div>
@@ -69,7 +69,7 @@
 
       <div class="wizard-step" data-wizard-step="3">
         <div class="wizard-title">Run setup</div>
-        <div class="wizard-desc">Open a terminal in the repository you want to analyze, then run setup. AutoSkills will prompt for the token, register this device, connect the repo, and upload your local Codex sessions right away.</div>
+        <div class="wizard-desc">Open a terminal in the repository you want to analyze, then run setup. The CLI will prompt for the token, register this device, connect the repo, and upload your local sessions right away.</div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Setup command</span>
@@ -113,14 +113,14 @@
 
       <div class="agent-status-bar" id="agentStatusBar">
         <div class="agent-status-dot"></div>
-        <span id="agentStatusText">AutoSkills is analyzing your Codex session traces...</span>
+        <span id="agentStatusText">AutoSkills is optimizing your skill set...</span>
       </div>
 
       <div class="loop-section" id="optimizationLoopSection">
         <div class="section-header">
-          <div class="section-kicker">Trace analysis</div>
-          <div class="section-title">Collect - Analyze - Explain - Improve</div>
-          <div class="section-desc" id="loopSummary">AutoSkills reads your Codex session traces to explain what the model understood, where it went wrong, and what confused it.</div>
+          <div class="section-kicker">Auto-skill loop</div>
+          <div class="section-title">Collect - Analyze - Build - Evaluate - Deploy</div>
+          <div class="section-desc" id="loopSummary">AutoSkills analyzes your coding sessions, builds personalized skill rules, and deploys them automatically with full transparency.</div>
         </div>
         <div class="loop-stage-grid" id="loopStageGrid"></div>
         <div class="loop-focus-card" id="loopFocusCard"></div>
@@ -156,8 +156,8 @@
       </div>
 
       <nav class="dashboard-nav" aria-label="Dashboard views">
-        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="overview">Reports</button>
-        <button class="tab-button" type="button" data-action="switch-tab" data-tab="autoskills">Auto Skills</button>
+        <button class="tab-button" type="button" data-action="switch-tab" data-tab="overview">Reports</button>
+        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="autoskills">Auto Skills</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="trends">Usage Analytics</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="sessions">Sessions</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="cli">Settings</button>
@@ -165,7 +165,7 @@
 
       <!-- ── Change History (was Overview) ── -->
 
-      <section class="tab-panel is-active" data-tab-panel="overview">
+      <section class="tab-panel" data-tab-panel="overview">
         <div class="report-workspace">
           <div class="report-subnav" aria-label="Report views">
             <button id="reportPanelToggleBtn" class="report-subtab-button" type="button" data-action="toggle-report-panel">History</button>
@@ -248,7 +248,7 @@
 
       <!-- ── Auto Skills ── -->
 
-      <section class="tab-panel" data-tab-panel="autoskills" hidden>
+      <section class="tab-panel is-active" data-tab-panel="autoskills">
         <div class="skill-report-banner" id="skillReportBanner"></div>
 
         <div class="section">
