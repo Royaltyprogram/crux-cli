@@ -177,7 +177,7 @@ func TestDashboardRouteServesFavicon(t *testing.T) {
 	route := controller.NewDashboardRoute(controller.Options{})
 	route.RegisterRoute(echo.Group(""))
 
-	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	req := httptest.NewRequest(http.MethodGet, "/logo.ico", nil)
 	rec := httptest.NewRecorder()
 
 	echo.ServeHTTP(rec, req)

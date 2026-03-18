@@ -18,10 +18,10 @@ Assumptions:
 ## 1. Start Clean
 
 ```bash
-rm -rf .crux-dev .crux-live-daemon .crux-live-test .codex
-rm -f data/crux.db data/crux-local.db data/crux-store.json
+rm -rf .autoskills-dev .autoskills-live-daemon .autoskills-live-test .codex
+rm -f data/autoskills.db data/autoskills-local.db data/autoskills-store.json
 find secrets -maxdepth 1 -type f ! -name '.gitignore' ! -name '*.example' -delete
-rm -rf ~/.crux
+rm -rf ~/.autoskills
 ```
 
 Do not remove `~/.codex/sessions` if you still need older real Codex sessions for upload.
@@ -29,32 +29,32 @@ Do not remove `~/.codex/sessions` if you still need older real Codex sessions fo
 ## 2. Recreate Local Secrets
 
 ```bash
-cp secrets/crux-jwt-secret.example secrets/crux-jwt-secret
-cp secrets/crux-beta-users.json.example secrets/crux-beta-users.json
-cp secrets/crux-google-client-id.example secrets/crux-google-client-id
-cp secrets/crux-google-client-secret.example secrets/crux-google-client-secret
-cp secrets/crux-openai-api-key.example secrets/crux-openai-api-key
+cp secrets/autoskills-jwt-secret.example secrets/autoskills-jwt-secret
+cp secrets/autoskills-beta-users.json.example secrets/autoskills-beta-users.json
+cp secrets/autoskills-google-client-id.example secrets/autoskills-google-client-id
+cp secrets/autoskills-google-client-secret.example secrets/autoskills-google-client-secret
+cp secrets/autoskills-openai-api-key.example secrets/autoskills-openai-api-key
 ```
 
 Required contents:
 
-- `secrets/crux-jwt-secret`: one strong random string
-- `secrets/crux-beta-users.json`: optional, for pre-seeding org membership and roles by Google email
-- `secrets/crux-google-client-id`: one Google OAuth client id
-- `secrets/crux-google-client-secret`: one Google OAuth client secret
-- `secrets/crux-openai-api-key`: one real OpenAI API key if you want report generation
+- `secrets/autoskills-jwt-secret`: one strong random string
+- `secrets/autoskills-beta-users.json`: optional, for pre-seeding org membership and roles by Google email
+- `secrets/autoskills-google-client-id`: one Google OAuth client id
+- `secrets/autoskills-google-client-secret`: one Google OAuth client secret
+- `secrets/autoskills-openai-api-key`: one real OpenAI API key if you want report generation
 
 ## 3. Start The Server
 
 ```bash
 source myenv/bin/activate
 APP_MODE=local \
-JWT_SECRET_FILE=secrets/crux-jwt-secret \
-AUTH_GOOGLE_CLIENT_ID_FILE=secrets/crux-google-client-id \
-AUTH_GOOGLE_CLIENT_SECRET_FILE=secrets/crux-google-client-secret \
-AUTH_BOOTSTRAP_USERS_FILE=secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE=secrets/crux-openai-api-key \
-DB_DSN='data/crux-local.db?_fk=1' \
+JWT_SECRET_FILE=secrets/autoskills-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=secrets/autoskills-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=secrets/autoskills-google-client-secret \
+AUTH_BOOTSTRAP_USERS_FILE=secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE=secrets/autoskills-openai-api-key \
+DB_DSN='data/autoskills-local.db?_fk=1' \
 DB_DIALECT=sqlite3 \
 go run .
 ```
@@ -77,7 +77,7 @@ Open `http://127.0.0.1:8082/`.
 
 Click `Continue with Google`.
 
-If you kept `secrets/crux-beta-users.json`, sign in with a Google account whose email matches a seeded user to land in that org and role. Otherwise the first Google sign-in creates a fresh admin workspace.
+If you kept `secrets/autoskills-beta-users.json`, sign in with a Google account whose email matches a seeded user to land in that org and role. Otherwise the first Google sign-in creates a fresh admin workspace.
 
 Issue a CLI token from the dashboard.
 
@@ -91,15 +91,15 @@ go run ./cmd/crux setup --server http://127.0.0.1:8082 --token <CLI_TOKEN_FROM_D
 go run ./cmd/crux workspace
 ```
 
-If you need the installed `crux` command to test the current repository build rather than the latest published release, run this once before setup:
+If you need the installed `autoskills` command to test the current repository build rather than the latest published release, run this once before setup:
 
 ```bash
 ./scripts/install_local_dev.sh
-crux reset
-crux version
+autoskills reset
+autoskills version
 ```
 
-The expected `crux version` should match the current repo `git describe`, not the latest GitHub release version.
+The expected `autoskills version` should match the current repo `git describe`, not the latest GitHub release version.
 
 ## 6. Upload A Snapshot
 
@@ -177,8 +177,8 @@ This mode watches Codex session files directly, uses `--interval` only as a fall
 ## 11. Clean Up After The Run
 
 ```bash
-rm -rf .crux-dev .crux-live-daemon .crux-live-test .codex
-rm -f data/crux.db data/crux-local.db data/crux-store.json
+rm -rf .autoskills-dev .autoskills-live-daemon .autoskills-live-test .codex
+rm -f data/autoskills.db data/autoskills-local.db data/autoskills-store.json
 find secrets -maxdepth 1 -type f ! -name '.gitignore' ! -name '*.example' -delete
-rm -rf ~/.crux
+rm -rf ~/.autoskills
 ```

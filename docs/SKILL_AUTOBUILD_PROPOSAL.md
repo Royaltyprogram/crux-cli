@@ -36,10 +36,10 @@
 
 예시 경로:
 
-- `$CODEX_HOME/skills/crux-personal-skillset/SKILL.md`
-- `$CODEX_HOME/skills/crux-personal-skillset/01-clarification.md`
-- `$CODEX_HOME/skills/crux-personal-skillset/02-planning.md`
-- `$CODEX_HOME/skills/crux-personal-skillset/03-validation.md`
+- `$CODEX_HOME/skills/autoskills-personal-skillset/SKILL.md`
+- `$CODEX_HOME/skills/autoskills-personal-skillset/01-clarification.md`
+- `$CODEX_HOME/skills/autoskills-personal-skillset/02-planning.md`
+- `$CODEX_HOME/skills/autoskills-personal-skillset/03-validation.md`
 
 여기서 `SKILL.md`는 엔트리포인트이자 인덱스 역할만 맡고, 실제 행동 규칙은 카테고리별 md 파일에 분리합니다. 이렇게 해야 diff 가독성, 충돌 제어, 부분 롤백, 카테고리별 품질 측정이 쉬워집니다.
 
@@ -116,7 +116,7 @@
 - `Pending update: none`
 - `Applied version: v13`
 
-CLI는 별도 설치 명령 없이 `crux setup`, `crux collect`, 백그라운드 워처 시점에 최신 skill set manifest를 pull해서 동기화합니다.
+CLI는 별도 설치 명령 없이 `autoskills setup`, `autoskills collect`, 백그라운드 워처 시점에 최신 skill set manifest를 pull해서 동기화합니다.
 
 ## 5) 실패 경험 UX
 
@@ -193,7 +193,7 @@ CLI는 별도 설치 명령 없이 `crux setup`, `crux collect`, 백그라운드
 권장 구조 예시:
 
 ```text
-crux-personal-skillset/
+autoskills-personal-skillset/
   SKILL.md
   00-manifest.json
   01-clarification.md
@@ -213,26 +213,26 @@ crux-personal-skillset/
 
 신규 동작 제안:
 
-- `crux setup`
+- `autoskills setup`
   - 초기 skill set bootstrap 수행
-- `crux collect`
+- `autoskills collect`
   - 업로드 후 최신 manifest 확인
-- `crux collect --watch`
+- `autoskills collect --watch`
   - 백그라운드에서 주기적 sync
-- `crux skills status`
+- `autoskills skills status`
   - 현재 적용 버전, 마지막 sync, 롤백 가능 버전 표시
-- `crux skills rollback --version <n>`
+- `autoskills skills rollback --version <n>`
   - 이전 배포본 복구
-- `crux skills pause`
+- `autoskills skills pause`
   - 자동 갱신 중지
-- `crux skills resume`
+- `autoskills skills resume`
   - 자동 갱신 재개
 
 로컬 저장 방식:
 
-- 현재 활성 버전: `~/.codex/skills/crux-personal-skillset/`
-- 이전 버전 백업: `~/.crux/skillsets/<version>/`
-- 로컬 메타데이터: `~/.crux/skillset-state.json`
+- 현재 활성 버전: `~/.codex/skills/autoskills-personal-skillset/`
+- 이전 버전 백업: `~/.autoskills/skillsets/<version>/`
+- 로컬 메타데이터: `~/.autoskills/skillset-state.json`
 
 ### D. Shadow Evaluation + Guarded Deployment
 

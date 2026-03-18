@@ -18,7 +18,7 @@ Start the local development server:
 
 ```bash
 make generate
-OPENAI_API_KEY_FILE=secrets/crux-openai-api-key make run-local-google-stub
+OPENAI_API_KEY_FILE=secrets/autoskills-openai-api-key make run-local-google-stub
 ```
 
 Open `http://127.0.0.1:8082/` and sign in with Google. In this local-dev path the Google round-trip is served by the local OAuth stub, so you do not need real GCP credentials.
@@ -26,7 +26,7 @@ Open `http://127.0.0.1:8082/` and sign in with Google. In this local-dev path th
 If you want to test against a real Google app instead, use:
 
 ```bash
-OPENAI_API_KEY_FILE=secrets/crux-openai-api-key make run
+OPENAI_API_KEY_FILE=secrets/autoskills-openai-api-key make run
 ```
 
 Required runtime auth envs for the web flow:
@@ -54,32 +54,32 @@ go run ./cmd/crux audit
 Notes:
 
 - In the MVP, every connected repository rolls into one shared workspace per organization.
-- `crux setup` is the shortest onboarding path and includes the initial workspace connection and first local session upload automatically.
+- `autoskills setup` is the shortest onboarding path and includes the initial workspace connection and first local session upload automatically.
 - installed macOS beta machines also get background collection automatically when setup can register a launchd agent
-- `crux connect` remains available when you need to reconnect a different repo manually.
-- `crux collect --watch` keeps session and snapshot uploads flowing while the shared workspace is being observed by reacting to session file changes and using the interval as a fallback scan.
+- `autoskills connect` remains available when you need to reconnect a different repo manually.
+- `autoskills collect --watch` keeps session and snapshot uploads flowing while the shared workspace is being observed by reacting to session file changes and using the interval as a fallback scan.
 - Reports are now read-only feedback reports for the user; nothing is auto-applied.
 
 If you want a beta machine to keep uploading usage data without repeated manual CLI runs, keep a long-lived collector running:
 
 ```bash
-crux collect --watch --recent 1 --interval 30m
+autoskills collect --watch --recent 1 --interval 30m
 ```
 
 Notes:
 
-- Prefer the installed `crux` command for long-lived beta machine setup. On supported installed macOS environments, `crux setup --server ...` now enrolls that background collector automatically.
+- Prefer the installed `autoskills` command for long-lived beta machine setup. On supported installed macOS environments, `autoskills setup --server ...` now enrolls that background collector automatically.
 - The collector stores a session cursor locally and uploads every new logical session after that cursor, so `--recent 1` only limits the initial backfill when no cursor exists yet.
-- Keep `crux collect` without `--watch` for one-off manual uploads.
+- Keep `autoskills collect` without `--watch` for one-off manual uploads.
 
 For beta users who should install from GitHub Releases instead of an unpacked bundle:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
-CRUX_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 ```
 
-The installer downloads the matching release bundle, installs it under `~/.local/share/crux/<version>`, and writes a wrapper to `~/.local/bin/crux`.
+The installer downloads the matching release bundle, installs it under `~/.local/share/autoskills/<version>`, and writes a wrapper to `~/.local/bin/autoskills`.
 That release install uses a prebuilt binary, so Go is not required on the beta machine.
 
 ## 2. Local Verification
@@ -105,9 +105,9 @@ make closed-beta-prod-smoke
 Run the same smoke against the ignored local secret files under `secrets/` and require the research agent to use the live OpenAI path:
 
 ```bash
-JWT_SECRET_FILE_OVERRIDE=secrets/crux-jwt-secret \
-AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE_OVERRIDE=secrets/crux-openai-api-key \
+JWT_SECRET_FILE_OVERRIDE=secrets/autoskills-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE_OVERRIDE=secrets/autoskills-openai-api-key \
 EXPECT_RESEARCH_MODE=openai_responses_api \
 make closed-beta-prod-smoke
 ```
@@ -156,11 +156,11 @@ Run the server in `prod` mode with secret files:
 
 ```bash
 APP_MODE=prod \
-JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
-AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
-AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE=/run/secrets/crux-openai-api-key \
+JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/autoskills-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/autoskills-google-client-secret \
+AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE=/run/secrets/autoskills-openai-api-key \
 go run .
 ```
 
@@ -173,10 +173,10 @@ If you want to lock access down in-app during closed beta:
 
 ```bash
 APP_MODE=prod \
-JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
-AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
-AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
+JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/autoskills-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/autoskills-google-client-secret \
+AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
 HTTP_ALLOWED_CIDRS='203.0.113.10/32,198.51.100.0/24' \
 HTTP_ADMIN_ALLOWED_CIDRS='203.0.113.10/32' \
 HTTP_TRUSTED_PROXY_CIDRS='10.0.0.0/8' \
@@ -188,21 +188,21 @@ go run .
 Build the container:
 
 ```bash
-docker build -t crux-beta .
+docker build -t autoskills-beta .
 ```
 
 Run with MySQL-backed beta state override:
 
 ```bash
 docker run --rm -p 8082:8082 \
-  -e JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
+  -e JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
   -e DB_DIALECT=mysql \
-  -e DB_DSN_FILE=/run/secrets/crux-db-dsn \
-  -v "$PWD/secrets/crux-jwt-secret:/run/secrets/crux-jwt-secret:ro" \
-  -v "$PWD/secrets/crux-beta-users.json:/run/secrets/crux-beta-users.json:ro" \
-  -v "$PWD/secrets/crux-db-dsn:/run/secrets/crux-db-dsn:ro" \
-  crux-beta
+  -e DB_DSN_FILE=/run/secrets/autoskills-db-dsn \
+  -v "$PWD/secrets/autoskills-jwt-secret:/run/secrets/autoskills-jwt-secret:ro" \
+  -v "$PWD/secrets/autoskills-beta-users.json:/run/secrets/autoskills-beta-users.json:ro" \
+  -v "$PWD/secrets/autoskills-db-dsn:/run/secrets/autoskills-db-dsn:ro" \
+  autoskills-beta
 ```
 
 Run with MySQL-backed beta state override:
@@ -210,13 +210,13 @@ Run with MySQL-backed beta state override:
 ```bash
 docker run --rm -p 8082:8082 \
   -e DB_DIALECT=mysql \
-  -e DB_DSN_FILE=/run/secrets/crux-db-dsn \
-  -e JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
-  -v "$PWD/secrets/crux-db-dsn:/run/secrets/crux-db-dsn:ro" \
-  -v "$PWD/secrets/crux-jwt-secret:/run/secrets/crux-jwt-secret:ro" \
-  -v "$PWD/secrets/crux-beta-users.json:/run/secrets/crux-beta-users.json:ro" \
-  crux-beta
+  -e DB_DSN_FILE=/run/secrets/autoskills-db-dsn \
+  -e JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
+  -v "$PWD/secrets/autoskills-db-dsn:/run/secrets/autoskills-db-dsn:ro" \
+  -v "$PWD/secrets/autoskills-jwt-secret:/run/secrets/autoskills-jwt-secret:ro" \
+  -v "$PWD/secrets/autoskills-beta-users.json:/run/secrets/autoskills-beta-users.json:ro" \
+  autoskills-beta
 ```
 
 ## 6. Release Candidate Build
@@ -233,11 +233,11 @@ VERSION_LABEL=0.1.0-beta.1 make publish-github-release
 
 Output:
 
-- `output/release/crux-<version>-<os>-<arch>.tar.gz`
-- `output/release/crux-<version>-<os>-<arch>.tar.gz.sha256`
-- `output/release/crux-<version>-<os>-<arch>.json`
-- `output/release/crux-<version>.release-index.json`
-- `output/release/crux-<version>.release-index.json.sha256`
+- `output/release/autoskills-<version>-<os>-<arch>.tar.gz`
+- `output/release/autoskills-<version>-<os>-<arch>.tar.gz.sha256`
+- `output/release/autoskills-<version>-<os>-<arch>.json`
+- `output/release/autoskills-<version>.release-index.json`
+- `output/release/autoskills-<version>.release-index.json.sha256`
 
 `publish-github-release` expects the `gh` CLI to be authenticated and uploads those assets to the matching GitHub Release tag.
 
@@ -248,7 +248,7 @@ For manual GitHub Actions runs, `workflow_dispatch` now accepts `version`, `draf
 If your working tree is dirty but you want a clean release candidate from `HEAD`, use a temporary worktree:
 
 ```bash
-tmpdir=$(mktemp -d /tmp/crux-release.XXXXXX)
+tmpdir=$(mktemp -d /tmp/autoskills-release.XXXXXX)
 git worktree add --detach "$tmpdir" HEAD
 cd "$tmpdir"
 make closed-beta-prod-smoke
@@ -282,9 +282,9 @@ Run this before handing the build to beta users:
 3. The dashboard shows workflow feedback reports instead of approval actions.
 4. `make closed-beta-prod-smoke` passes.
 5. `make beta-cli-bundle`, `make verify-beta-bundle`, and `make verify-install-script` pass.
-6. The release bundle contains `crux` and the generated `README.md`.
+6. The release bundle contains `autoskills` and the generated `README.md`.
 7. Runtime secrets are mounted from files, not hardcoded.
 8. `GET /healthz` and `GET /readyz` respond successfully in the target environment.
 9. A seeded beta user can log in on the dashboard and issue a CLI token.
-10. A beta machine can complete `crux setup` and `crux collect`.
-11. If background collection is part of the beta flow, `crux collect --watch --recent 1 --interval 30m` succeeds on the target machine.
+10. A beta machine can complete `autoskills setup` and `autoskills collect`.
+11. If background collection is part of the beta flow, `autoskills collect --watch --recent 1 --interval 30m` succeeds on the target machine.

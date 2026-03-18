@@ -26,7 +26,8 @@
 
       <div class="wizard-step wizard-step-center is-active" data-wizard-step="0">
         <div class="wizard-title">Welcome to AutoSkills</div>
-        <div class="wizard-desc">AutoSkills automatically builds personalized skill rules for your AI coding agent. Sessions are analyzed, skills are compiled, and your agent improves — all without manual intervention.</div>
+        <div class="wizard-desc">AutoSkills automatically builds personalized skill rules for your AI coding agent.
+          Sessions are analyzed, skills are compiled, and your agent improves — all without manual intervention.</div>
         <div class="wizard-actions">
           <button class="primary-button" type="button" data-action="wizard-next">Get started</button>
         </div>
@@ -34,13 +35,16 @@
 
       <div class="wizard-step" data-wizard-step="1">
         <div class="wizard-title">Install the CLI</div>
-        <div class="wizard-desc">Install the CLI on the machine you want to connect. It collects session data in the background.</div>
+        <div class="wizard-desc">Install the CLI on the machine you want to connect. It collects session data in the
+          background.</div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Install command</span>
-            <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="wizInstallCmd" data-copy-label="install command">Copy</button>
+            <button class="secondary-button small-btn" type="button" data-action="copy-command"
+              data-copy-target="wizInstallCmd" data-copy-label="install command">Copy</button>
           </div>
-          <div class="command-shell" id="wizInstallCmd">curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh</div>
+          <div class="command-shell" id="wizInstallCmd">curl -fsSL
+            https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh</div>
         </div>
         <div class="wizard-actions">
           <button class="secondary-button" type="button" data-action="wizard-back">Back</button>
@@ -50,16 +54,20 @@
 
       <div class="wizard-step" data-wizard-step="2">
         <div class="wizard-title">Create a CLI token</div>
-        <div class="wizard-desc">Generate a token here. In the next step, you'll run setup in the repository you want to analyze.</div>
+        <div class="wizard-desc">Generate a token here. In the next step, you'll run setup in the repository you want to
+          analyze.</div>
         <div class="stack-gap-lg">
-          <button id="wizIssueTokenBtn" class="primary-button button-full" type="button" data-action="wizard-issue-token">Create CLI token</button>
+          <button id="wizIssueTokenBtn" class="primary-button button-full" type="button"
+            data-action="wizard-issue-token">Create CLI token</button>
         </div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Your CLI token</span>
-            <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="wizTokenOutput" data-copy-label="CLI token">Copy</button>
+            <button class="secondary-button small-btn" type="button" data-action="copy-command"
+              data-copy-target="wizTokenOutput" data-copy-label="CLI token">Copy</button>
           </div>
-          <div class="command-shell token-output" id="wizTokenOutput">Click "Create CLI token" above to generate one.</div>
+          <div class="command-shell token-output" id="wizTokenOutput">Click "Create CLI token" above to generate one.
+          </div>
         </div>
         <div class="wizard-actions">
           <button class="secondary-button" type="button" data-action="wizard-back">Back</button>
@@ -69,11 +77,13 @@
 
       <div class="wizard-step" data-wizard-step="3">
         <div class="wizard-title">Run setup</div>
-        <div class="wizard-desc">Open a terminal in the repository you want to analyze, then run setup. The CLI will prompt for the token, register this device, connect the repo, and upload your local sessions right away.</div>
+        <div class="wizard-desc">Open a terminal in the repository you want to analyze, then run setup. The CLI will
+          prompt for the token, register this device, connect the repo, and upload your local sessions right away.</div>
         <div class="command-block">
           <div class="command-block-head">
             <span class="command-label">Setup command</span>
-            <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="wizSetupCmd" data-copy-label="setup command">Copy</button>
+            <button class="secondary-button small-btn" type="button" data-action="copy-command"
+              data-copy-target="wizSetupCmd" data-copy-label="setup command">Copy</button>
           </div>
           <div class="command-shell" id="wizSetupCmd">autoskills setup</div>
         </div>
@@ -101,7 +111,8 @@
       <div class="top-bar-right">
         <a class="secondary-button top-bar-btn" href="/docs" target="_blank">Docs</a>
         <a id="adminLink" class="secondary-button top-bar-btn" href="/admin" hidden>Admin</a>
-        <button id="loadBtn" class="secondary-button top-bar-btn" type="button" data-action="refresh-dashboard">Refresh</button>
+        <button id="loadBtn" class="secondary-button top-bar-btn" type="button"
+          data-action="refresh-dashboard">Refresh</button>
         <button id="signOutBtn" class="ghost-button top-bar-btn" type="button" data-action="sign-out">Sign out</button>
       </div>
     </header>
@@ -120,7 +131,8 @@
         <div class="section-header">
           <div class="section-kicker">Auto-skill loop</div>
           <div class="section-title">Collect - Analyze - Build - Evaluate - Deploy</div>
-          <div class="section-desc" id="loopSummary">AutoSkills analyzes your coding sessions, builds personalized skill rules, and deploys them automatically with full transparency.</div>
+          <div class="section-desc" id="loopSummary">AutoSkills analyzes your coding sessions, builds personalized skill
+            rules, and deploys them automatically with full transparency.</div>
         </div>
         <div class="loop-stage-grid" id="loopStageGrid"></div>
         <div class="loop-focus-card" id="loopFocusCard"></div>
@@ -132,7 +144,8 @@
         <div class="signal-cell">
           <div class="signal-cell-label">Analysis reports</div>
           <div class="signal-cell-value" id="activeReports">0</div>
-          <div class="signal-cell-meta" id="activeReportsMeta">Trace analysis reports generated from your Codex sessions.</div>
+          <div class="signal-cell-meta" id="activeReportsMeta">Trace analysis reports generated from your Codex
+            sessions.</div>
         </div>
         <div class="signal-cell">
           <div class="signal-cell-label">Codex sessions</div>
@@ -157,7 +170,8 @@
 
       <nav class="dashboard-nav" aria-label="Dashboard views">
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="overview">Reports</button>
-        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="autoskills">Auto Skills</button>
+        <button class="tab-button is-active" type="button" data-action="switch-tab" data-tab="autoskills">Auto
+          Skills</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="trends">Usage Analytics</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="sessions">Sessions</button>
         <button class="tab-button" type="button" data-action="switch-tab" data-tab="cli">Settings</button>
@@ -168,8 +182,10 @@
       <section class="tab-panel" data-tab-panel="overview">
         <div class="report-workspace">
           <div class="report-subnav" aria-label="Report views">
-            <button id="reportPanelToggleBtn" class="report-subtab-button" type="button" data-action="toggle-report-panel">History</button>
-            <button id="reportPanelAllBtn" class="report-subtab-button" type="button" data-action="switch-report-panel" data-report-panel="all">All</button>
+            <button id="reportPanelToggleBtn" class="report-subtab-button" type="button"
+              data-action="toggle-report-panel">History</button>
+            <button id="reportPanelAllBtn" class="report-subtab-button" type="button" data-action="switch-report-panel"
+              data-report-panel="all">All</button>
           </div>
 
           <section class="report-panel is-active" data-report-panel="actions">
@@ -181,7 +197,8 @@
               <div class="section-header">
                 <div class="section-kicker">Analysis timeline</div>
                 <div class="section-title">Latest trace analysis</div>
-                <div class="section-desc">Recent reports in chronological order, so you can scan changes without opening the full archive first.</div>
+                <div class="section-desc">Recent reports in chronological order, so you can scan changes without opening
+                  the full archive first.</div>
               </div>
               <div class="list" id="impactTimelineList"></div>
             </div>
@@ -190,7 +207,8 @@
               <div class="section-header">
                 <div class="section-kicker">Report archive</div>
                 <div class="section-title">What happened in your Codex sessions</div>
-                <div class="section-desc">Open individual reports only when you need the full explanation, evidence, and detailed rationale.</div>
+                <div class="section-desc">Open individual reports only when you need the full explanation, evidence, and
+                  detailed rationale.</div>
               </div>
               <div class="list" id="actionItemList"></div>
             </div>
@@ -206,11 +224,22 @@
               <div class="report-list-toolbar">
                 <span class="report-list-count" id="allReportCount">0 reports</span>
                 <div class="report-list-views">
-                  <button class="report-view-btn is-active" type="button" data-action="switch-report-view" data-view="list" aria-label="List view">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="2.5" rx="0.5" fill="currentColor"/><rect x="1" y="6.75" width="14" height="2.5" rx="0.5" fill="currentColor"/><rect x="1" y="11.5" width="14" height="2.5" rx="0.5" fill="currentColor"/></svg>
+                  <button class="report-view-btn is-active" type="button" data-action="switch-report-view"
+                    data-view="list" aria-label="List view">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <rect x="1" y="2" width="14" height="2.5" rx="0.5" fill="currentColor" />
+                      <rect x="1" y="6.75" width="14" height="2.5" rx="0.5" fill="currentColor" />
+                      <rect x="1" y="11.5" width="14" height="2.5" rx="0.5" fill="currentColor" />
+                    </svg>
                   </button>
-                  <button class="report-view-btn" type="button" data-action="switch-report-view" data-view="grid" aria-label="Grid view">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor"/><rect x="9" y="1" width="6" height="6" rx="1" fill="currentColor"/><rect x="1" y="9" width="6" height="6" rx="1" fill="currentColor"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/></svg>
+                  <button class="report-view-btn" type="button" data-action="switch-report-view" data-view="grid"
+                    aria-label="Grid view">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor" />
+                      <rect x="9" y="1" width="6" height="6" rx="1" fill="currentColor" />
+                      <rect x="1" y="9" width="6" height="6" rx="1" fill="currentColor" />
+                      <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" />
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -223,7 +252,8 @@
           <div class="section-header">
             <div class="section-kicker">Import history</div>
             <div class="section-title">Backfill jobs and failure drill-down</div>
-            <div class="section-desc" id="importHistorySummary">Recent async import jobs and the latest failure summaries for this workspace.</div>
+            <div class="section-desc" id="importHistorySummary">Recent async import jobs and the latest failure
+              summaries for this workspace.</div>
           </div>
           <div class="insight-grid">
             <div class="insight-card">
@@ -238,7 +268,8 @@
               <div class="section-header compact">
                 <div class="section-kicker">Failure drill-down</div>
                 <div class="section-title">Recent failed imports</div>
-                <div class="section-desc" id="importFailureSummary">Latest degraded import jobs and the failed sessions inside them.</div>
+                <div class="section-desc" id="importFailureSummary">Latest degraded import jobs and the failed sessions
+                  inside them.</div>
               </div>
               <div class="list compact-list" id="importFailureList"></div>
             </div>
@@ -255,7 +286,8 @@
           <div class="section-header">
             <div class="section-kicker">Latest update</div>
             <div class="section-title">Why your skill set changed</div>
-            <div class="section-desc" id="skillChangeDesc">AutoSkills explains every automatic update to your personal skill bundle so you always know what changed and why.</div>
+            <div class="section-desc" id="skillChangeDesc">AutoSkills explains every automatic update to your personal
+              skill bundle so you always know what changed and why.</div>
           </div>
           <div id="skillChangeReport"></div>
         </div>
@@ -282,7 +314,8 @@
           <div class="section-header">
             <div class="section-kicker">Evaluation metrics</div>
             <div class="section-title">Shadow score &amp; quality signals</div>
-            <div class="section-desc">Confidence, rule churn, and guardrail checks that decide whether a candidate bundle gets deployed.</div>
+            <div class="section-desc">Confidence, rule churn, and guardrail checks that decide whether a candidate
+              bundle gets deployed.</div>
           </div>
           <div id="skillMetaGrid"></div>
         </div>
@@ -295,7 +328,8 @@
           <div class="section-header">
             <div class="section-kicker">Usage trend</div>
             <div class="section-title">Daily token flow</div>
-            <div class="section-desc" id="usageTrendSummary">Daily token flow will appear after sessions are uploaded from the CLI.</div>
+            <div class="section-desc" id="usageTrendSummary">Daily token flow will appear after sessions are uploaded
+              from the CLI.</div>
           </div>
           <div class="trend-badges" id="trendCoverageStrip"></div>
           <div class="chart-surface">
@@ -309,7 +343,8 @@
         </div>
 
         <div class="section collapsible" id="trendsCoverageSection">
-          <div class="section-header section-toggle" data-action="toggle-section" data-target="trendsCoverageSection" role="button" tabindex="0">
+          <div class="section-header section-toggle" data-action="toggle-section" data-target="trendsCoverageSection"
+            role="button" tabindex="0">
             <div class="section-kicker">Signal coverage</div>
             <div class="section-title">Models, providers & data gaps <span class="toggle-chevron"></span></div>
             <div class="section-desc">Which models and providers are captured, and where data gaps still exist.</div>
@@ -320,7 +355,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Model coverage</div>
                   <div class="section-title">Captured models</div>
-                  <div class="section-desc" id="modelCoverageSummary">Model capture coverage appears after the collector uploads model context.</div>
+                  <div class="section-desc" id="modelCoverageSummary">Model capture coverage appears after the collector
+                    uploads model context.</div>
                 </div>
                 <div class="model-bars" id="modelCoverageList"></div>
               </div>
@@ -329,7 +365,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Provider mix</div>
                   <div class="section-title">Captured providers</div>
-                  <div class="section-desc" id="providerCoverageSummary">Provider coverage appears after the collector uploads session provider context.</div>
+                  <div class="section-desc" id="providerCoverageSummary">Provider coverage appears after the collector
+                    uploads session provider context.</div>
                 </div>
                 <div class="model-bars" id="providerCoverageList"></div>
               </div>
@@ -339,28 +376,35 @@
               <div class="section-header compact">
                 <div class="section-kicker">Data coverage</div>
                 <div class="section-title">Fill missing model and latency signals</div>
-                <div class="section-desc" id="coverageActionSummary">If setup did not enroll background collection, run the collector in watch mode to keep session and snapshot coverage current for the next report refresh.</div>
+                <div class="section-desc" id="coverageActionSummary">If setup did not enroll background collection, run
+                  the collector in watch mode to keep session and snapshot coverage current for the next report refresh.
+                </div>
               </div>
               <div class="command-block">
                 <div class="command-block-head">
                   <span class="command-label">One-time manual backfill</span>
-                  <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="coverageBackfillCmd" data-copy-label="backfill command">Copy</button>
+                  <button class="secondary-button small-btn" type="button" data-action="copy-command"
+                    data-copy-target="coverageBackfillCmd" data-copy-label="backfill command">Copy</button>
                 </div>
-                <div class="command-shell" id="coverageBackfillCmd">autoskills collect --recent 30 --snapshot-mode skip</div>
+                <div class="command-shell" id="coverageBackfillCmd">autoskills collect --recent 30 --snapshot-mode skip
+                </div>
               </div>
               <div class="command-block">
                 <div class="command-block-head">
                   <span class="command-label">Manual background fallback</span>
-                  <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="coverageDaemonCmd" data-copy-label="daemon command">Copy</button>
+                  <button class="secondary-button small-btn" type="button" data-action="copy-command"
+                    data-copy-target="coverageDaemonCmd" data-copy-label="daemon command">Copy</button>
                 </div>
-                <div class="command-shell" id="coverageDaemonCmd">autoskills collect --watch --recent 1 --interval 30m</div>
+                <div class="command-shell" id="coverageDaemonCmd">autoskills collect --watch --recent 1 --interval 30m
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <div class="section collapsible is-collapsed" id="trendsResponsivenessSection">
-          <div class="section-header section-toggle" data-action="toggle-section" data-target="trendsResponsivenessSection" role="button" tabindex="0">
+          <div class="section-header section-toggle" data-action="toggle-section"
+            data-target="trendsResponsivenessSection" role="button" tabindex="0">
             <div class="section-kicker">Responsiveness</div>
             <div class="section-title">Latency & session pressure <span class="toggle-chevron"></span></div>
             <div class="section-desc">First response latency and the most token-heavy recent sessions.</div>
@@ -371,7 +415,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">First reply</div>
                   <div class="section-title">Response latency</div>
-                  <div class="section-desc" id="latencySummary">First response latency appears after the collector records the first prompt and first assistant reply timestamps.</div>
+                  <div class="section-desc" id="latencySummary">First response latency appears after the collector
+                    records the first prompt and first assistant reply timestamps.</div>
                 </div>
                 <div class="latency-list" id="latencyList"></div>
               </div>
@@ -388,10 +433,12 @@
         </div>
 
         <div class="section collapsible is-collapsed" id="trendsToolSection">
-          <div class="section-header section-toggle" data-action="toggle-section" data-target="trendsToolSection" role="button" tabindex="0">
+          <div class="section-header section-toggle" data-action="toggle-section" data-target="trendsToolSection"
+            role="button" tabindex="0">
             <div class="section-kicker">Deep dive</div>
             <div class="section-title">Token breakdown & tool performance <span class="toggle-chevron"></span></div>
-            <div class="section-desc">Cached tokens, reasoning signals, function-call patterns, and session timing.</div>
+            <div class="section-desc">Cached tokens, reasoning signals, function-call patterns, and session timing.
+            </div>
           </div>
           <div class="section-body">
             <div class="insight-grid">
@@ -399,7 +446,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Token anatomy</div>
                   <div class="section-title">Cached and reasoning signals</div>
-                  <div class="section-desc" id="tokenDetailSummary">Cached input and reasoning output details appear after the collector uploads raw token breakdowns.</div>
+                  <div class="section-desc" id="tokenDetailSummary">Cached input and reasoning output details appear
+                    after the collector uploads raw token breakdowns.</div>
                 </div>
                 <div class="trend-badges signal-badges" id="tokenDetailList"></div>
               </div>
@@ -408,7 +456,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Tool activity</div>
                   <div class="section-title">Function calls and session span</div>
-                  <div class="section-desc" id="toolExecutionSummary">Function call counts, tool failures, and session duration appear after local sessions are re-collected with the expanded collector.</div>
+                  <div class="section-desc" id="toolExecutionSummary">Function call counts, tool failures, and session
+                    duration appear after local sessions are re-collected with the expanded collector.</div>
                 </div>
                 <div class="trend-badges signal-badges" id="toolExecutionList"></div>
                 <div class="model-bars" id="toolMixList"></div>
@@ -420,7 +469,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Time composition</div>
                   <div class="section-title">Tool time inside session span</div>
-                  <div class="section-desc" id="timeCompositionSummary">Tool wall time will be compared against captured session span after expanded session summaries are uploaded from the CLI.</div>
+                  <div class="section-desc" id="timeCompositionSummary">Tool wall time will be compared against captured
+                    session span after expanded session summaries are uploaded from the CLI.</div>
                 </div>
                 <div class="time-balance" id="timeCompositionList"></div>
               </div>
@@ -429,7 +479,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Tool hotspots</div>
                   <div class="section-title">Slow and noisy tools</div>
-                  <div class="section-desc" id="toolHotspotSummary">Tools will be ranked by runtime, error rate, and usage share once local sessions include named function calls.</div>
+                  <div class="section-desc" id="toolHotspotSummary">Tools will be ranked by runtime, error rate, and
+                    usage share once local sessions include named function calls.</div>
                 </div>
                 <div class="hotspot-list" id="toolHotspotList"></div>
               </div>
@@ -440,7 +491,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Tool cadence</div>
                   <div class="section-title">Daily function-call flow</div>
-                  <div class="section-desc" id="toolTrendSummary">Daily tool activity appears after the collector uploads function-call and tool-output events.</div>
+                  <div class="section-desc" id="toolTrendSummary">Daily tool activity appears after the collector
+                    uploads function-call and tool-output events.</div>
                 </div>
                 <div class="latency-list" id="toolTrendList"></div>
               </div>
@@ -449,7 +501,8 @@
                 <div class="section-header compact">
                   <div class="section-kicker">Session span</div>
                   <div class="section-title">Average duration by day</div>
-                  <div class="section-desc" id="durationTrendSummary">Session span appears after the collector uploads first and last event timestamps for local sessions.</div>
+                  <div class="section-desc" id="durationTrendSummary">Session span appears after the collector uploads
+                    first and last event timestamps for local sessions.</div>
                 </div>
                 <div class="latency-list" id="durationTrendList"></div>
               </div>
@@ -465,7 +518,8 @@
           <div class="section-header">
             <div class="section-kicker">Codex sessions</div>
             <div class="section-title">Collected session traces</div>
-            <div class="section-desc">Raw Codex session traces collected from your CLI. These feed into the analysis engine.</div>
+            <div class="section-desc">Raw Codex session traces collected from your CLI. These feed into the analysis
+              engine.</div>
           </div>
           <div class="list" id="sessionSummaryList"></div>
         </div>
@@ -480,16 +534,19 @@
             <div class="section-title">Create CLI token</div>
           </div>
           <div class="stack-gap-md">
-            <button id="issueTokenBtn" class="primary-button button-full" type="button" data-action="issue-cli-token">Create CLI token</button>
+            <button id="issueTokenBtn" class="primary-button button-full" type="button"
+              data-action="issue-cli-token">Create CLI token</button>
           </div>
           <div class="command-block">
             <div class="command-block-head">
               <span class="command-label">Latest CLI token</span>
-              <button class="secondary-button small-btn" type="button" data-action="copy-command" data-copy-target="issuedCliToken" data-copy-label="CLI token">Copy</button>
+              <button class="secondary-button small-btn" type="button" data-action="copy-command"
+                data-copy-target="issuedCliToken" data-copy-label="CLI token">Copy</button>
             </div>
             <div class="command-shell token-output" id="issuedCliToken">Issue a CLI token from this dashboard.</div>
           </div>
-          <div class="form-note" id="cliTokenMeta">CLI tokens are shown once, scoped to your account, and expire after 30 days.</div>
+          <div class="form-note" id="cliTokenMeta">CLI tokens are shown once, scoped to your account, and expire after
+            30 days.</div>
         </div>
 
         <div class="section">

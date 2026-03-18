@@ -1,7 +1,7 @@
-# Crux Test Commands
+# AutoSkills Test Commands
 
 아래 커맨드들은 `/Users/doyechan/Desktop/codes/aiops` 기준이다.
-배포 머신에서는 릴리스 설치 후 `crux ...`를 직접 사용하고, 여기의 `go run` 예시는 로컬 개발/테스트용이다.
+배포 머신에서는 릴리스 설치 후 `autoskills ...`를 직접 사용하고, 여기의 `go run` 예시는 로컬 개발/테스트용이다.
 
 ## 1. 서버 실행
 
@@ -28,9 +28,9 @@ prod-like secret-file 실행:
 ```bash
 cd /Users/doyechan/Desktop/codes/aiops
 APP_MODE=prod \
-JWT_SECRET_FILE=secrets/crux-jwt-secret \
-AUTH_BOOTSTRAP_USERS_FILE=secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE=secrets/crux-openai-api-key \
+JWT_SECRET_FILE=secrets/autoskills-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE=secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE=secrets/autoskills-openai-api-key \
 go run main.go wire_gen.go
 ```
 
@@ -38,7 +38,7 @@ go run main.go wire_gen.go
 
 ```bash
 cd /Users/doyechan/Desktop/codes/aiops
-export CRUX_HOME=$PWD/.crux-dev
+export AUTOSKILLS_HOME=$PWD/.autoskills-dev
 ```
 
 ## 3. 대시보드에서 CLI 토큰 발급 후 로그인
@@ -75,7 +75,7 @@ go run ./cmd/crux status
 `session --recent 1`이 안 되면 JSON 파일로 직접 업로드:
 
 ```bash
-cat > /tmp/crux-session.json <<'EOF'
+cat > /tmp/autoskills-session.json <<'EOF'
 {
   "tool": "codex",
   "token_in": 1800,
@@ -87,7 +87,7 @@ cat > /tmp/crux-session.json <<'EOF'
 }
 EOF
 
-go run ./cmd/crux session --file /tmp/crux-session.json
+go run ./cmd/crux session --file /tmp/autoskills-session.json
 ```
 
 ## 6. 보고서 확인
@@ -144,9 +144,9 @@ ignored local secret files를 사용해서 closed beta prod 경로를 실제로 
 
 ```bash
 cd /Users/doyechan/Desktop/codes/aiops
-JWT_SECRET_FILE_OVERRIDE=secrets/crux-jwt-secret \
-AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE_OVERRIDE=secrets/crux-openai-api-key \
+JWT_SECRET_FILE_OVERRIDE=secrets/autoskills-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE_OVERRIDE=secrets/autoskills-openai-api-key \
 EXPECT_RESEARCH_MODE=openai_responses_api \
 make closed-beta-prod-smoke
 ```
@@ -156,7 +156,7 @@ make closed-beta-prod-smoke
 현재 CLI가 shared workspace에 연결되어 있는지 확인:
 
 ```bash
-cat $CRUX_HOME/state.json
+cat $AUTOSKILLS_HOME/state.json
 go run ./cmd/crux workspace
 ```
 

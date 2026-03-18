@@ -31,7 +31,7 @@ func (r *DashboardRoute) RegisterRoute(router *echo.Group) {
 	router.GET("/docs", r.docs)
 	router.GET("/dashboard", r.dashboard)
 	router.GET("/admin", r.admin)
-	router.GET("/favicon.ico", r.favicon)
+	router.GET("/logo.ico", r.favicon)
 	router.GET("/assets/:name", r.asset)
 }
 

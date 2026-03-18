@@ -28,11 +28,11 @@ Detailed codebase documentation:
 - Reports are now read-only feedback reports instead of local patch plans
 - The dashboard now favors a user-facing report surface instead of an approval console
 - Session summaries now focus on token usage and raw query history for MVP research analysis
-- `crux setup` now compresses onboarding into one command: login, workspace connect, initial local upload, and background collection enrollment when supported
-- `crux session` auto-collects the latest local Codex session from `~/.codex/sessions` when `--file` is omitted
-- `crux session --recent N` uploads the most recent `N` local Codex sessions in chronological order
-- `crux collect` uploads session data now and can skip unchanged snapshots by default
-- `crux collect --watch` watches local Codex session files, uploads each new logical session after the saved cursor, and keeps the interval as a fallback scan
+- `autoskills setup` now compresses onboarding into one command: login, workspace connect, initial local upload, and background collection enrollment when supported
+- `autoskills session` auto-collects the latest local Codex session from `~/.codex/sessions` when `--file` is omitted
+- `autoskills session --recent N` uploads the most recent `N` local Codex sessions in chronological order
+- `autoskills collect` uploads session data now and can skip unchanged snapshots by default
+- `autoskills collect --watch` watches local Codex session files, uploads each new logical session after the saved cursor, and keeps the interval as a fallback scan
 - Feedback reports now wait until at least `10` uploaded sessions exist before the server publishes the first report
 
 ## Quickstart
@@ -69,28 +69,28 @@ go run ./cmd/crux reports
 go run ./cmd/crux audit
 ```
 
-If you want the plain `crux` command to point at the current repository build instead of the latest published release, install the local dev build explicitly:
+If you want the plain `autoskills` command to point at the current repository build instead of the latest published release, install the local dev build explicitly:
 
 ```bash
 ./scripts/install_local_dev.sh
-crux reset
-crux version
+autoskills reset
+autoskills version
 ```
 
-This path updates `~/.local/bin/crux` to the current repo build under `~/.local/share/crux/current`. Use it when validating unreleased CLI changes locally.
+This path updates `~/.local/bin/autoskills` to the current repo build under `~/.local/share/autoskills/current`. Use it when validating unreleased CLI changes locally.
 
-For beta or production user machines, install the released CLI and run `crux` directly instead of `go run`:
+For beta or production user machines, install the released CLI and run `autoskills` directly instead of `go run`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
-crux setup
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+autoskills setup
 ```
 
-Release installs use a prebuilt binary, so Go is not required. If your shell cannot find `crux`, add `~/.local/bin` to `PATH`.
-On supported installed macOS environments, `crux setup` also enrolls background collection automatically. On other environments it prints the manual fallback command, typically `crux collect --watch --recent 1 --interval 30m`.
-After setup, plain `crux` now works as the default entrypoint: it shows the setup hint when the CLI is not configured yet, and otherwise prints the current shared-workspace status.
+Release installs use a prebuilt binary, so Go is not required. If your shell cannot find `autoskills`, add `~/.local/bin` to `PATH`.
+On supported installed macOS environments, `autoskills setup` also enrolls background collection automatically. On other environments it prints the manual fallback command, typically `autoskills collect --watch --recent 1 --interval 30m`.
+After setup, plain `autoskills` now works as the default entrypoint: it shows the setup hint when the CLI is not configured yet, and otherwise prints the current shared-workspace status.
 
-For local development, set `AUTH_GOOGLE_CLIENT_ID` and `AUTH_GOOGLE_CLIENT_SECRET`, open `http://127.0.0.1:8082/`, click `Continue with Google`, issue a CLI token from the dashboard, and run `crux setup --server http://127.0.0.1:8082` on the machine you want to connect. The CLI prompts for the issued token if `--token` is omitted and automatically registers the device, connects the current repo, and uploads an initial snapshot plus local Codex session history on first setup.
+For local development, set `AUTH_GOOGLE_CLIENT_ID` and `AUTH_GOOGLE_CLIENT_SECRET`, open `http://127.0.0.1:8082/`, click `Continue with Google`, issue a CLI token from the dashboard, and run `autoskills setup --server http://127.0.0.1:8082` on the machine you want to connect. The CLI prompts for the issued token if `--token` is omitted and automatically registers the device, connects the current repo, and uploads an initial snapshot plus local Codex session history on first setup.
 
 For closed beta or production, disable the demo path and seed named beta accounts through env:
 
@@ -109,11 +109,11 @@ If you would rather mount a secret file than inline JSON in env, you can use:
 
 ```bash
 APP_MODE=prod \
-JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
-AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
-AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE=/run/secrets/crux-openai-api-key \
+JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/autoskills-google-client-id \
+AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/autoskills-google-client-secret \
+AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE=/run/secrets/autoskills-openai-api-key \
 go run .
 ```
 
@@ -122,17 +122,17 @@ Supported secret file envs now include `JWT_SECRET_FILE`, `DB_DSN_FILE`, `APP_AP
 
 Bootstrap users are now treated as pre-seeded Google-linked identities: removing a user from the bootstrap file revokes existing tokens, and Google sign-in links to the seeded record when the email matches. Seed bootstrap users when you want multiple people to land in the same org or when you need fixed `admin` or `member` roles before first sign-in.
 
-In this MVP every connected repository shares one workspace per organization. `crux setup` handles the first-time device registration, shared-workspace connection, and initial local Codex session upload, while `crux connect` remains available when you need to reconnect a different repo manually. The generated report records are now user-facing feedback reports rather than executable patch queues.
+In this MVP every connected repository shares one workspace per organization. `autoskills setup` handles the first-time device registration, shared-workspace connection, and initial local Codex session upload, while `autoskills connect` remains available when you need to reconnect a different repo manually. The generated report records are now user-facing feedback reports rather than executable patch queues.
 
 If you want to keep uploads flowing in the background, keep the collector running:
 
 ```bash
-crux collect --watch --recent 1 --interval 30m
+autoskills collect --watch --recent 1 --interval 30m
 ```
 
-Installed macOS release builds usually do this automatically during `crux setup`. The watcher reacts to session file changes and uses `--interval` only as a fallback scan, while the saved session cursor makes sure every new logical session after the cursor is uploaded. Keep the manual command for source development, Linux hosts, or any environment where setup reports `background.status` as `manual_only` or `failed`.
+Installed macOS release builds usually do this automatically during `autoskills setup`. The watcher reacts to session file changes and uses `--interval` only as a fallback scan, while the saved session cursor makes sure every new logical session after the cursor is uploaded. Keep the manual command for source development, Linux hosts, or any environment where setup reports `background.status` as `manual_only` or `failed`.
 
-If you want a one-off manual upload instead, keep using `crux collect --codex-home ~/.codex`.
+If you want a one-off manual upload instead, keep using `autoskills collect --codex-home ~/.codex`.
 
 For closed beta deployment checks, the server also exposes:
 
@@ -158,9 +158,9 @@ make closed-beta-prod-smoke
 To force that smoke test to use the ignored local secret files in `secrets/` and verify live OpenAI-backed feedback report generation:
 
 ```bash
-JWT_SECRET_FILE_OVERRIDE=secrets/crux-jwt-secret \
-AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/crux-beta-users.json \
-OPENAI_API_KEY_FILE_OVERRIDE=secrets/crux-openai-api-key \
+JWT_SECRET_FILE_OVERRIDE=secrets/autoskills-jwt-secret \
+AUTH_BOOTSTRAP_USERS_FILE_OVERRIDE=secrets/autoskills-beta-users.json \
+OPENAI_API_KEY_FILE_OVERRIDE=secrets/autoskills-openai-api-key \
 EXPECT_RESEARCH_MODE=openai_responses_api \
 make closed-beta-prod-smoke
 ```
@@ -174,9 +174,9 @@ VERSION_LABEL=0.1.0-beta.1 make beta-cli-bundle
 
 That command produces:
 
-- `output/release/crux-<version>-<os>-<arch>.tar.gz`
-- `output/release/crux-<version>-<os>-<arch>.tar.gz.sha256`
-- `output/release/crux-<version>-<os>-<arch>.json`
+- `output/release/autoskills-<version>-<os>-<arch>.tar.gz`
+- `output/release/autoskills-<version>-<os>-<arch>.tar.gz.sha256`
+- `output/release/autoskills-<version>-<os>-<arch>.json`
 
 And you can validate the latest bundle locally with:
 
@@ -207,7 +207,7 @@ cp .env.server-release.example .env
 ./scripts/build_and_publish_server_release.sh
 ```
 
-That script loads values from `.env` by default, builds `crux-server-<version>-<os>-<arch>.tar.gz`, uploads it to the matching GitHub Release, and if the release already exists it only uploads server assets without rewriting the existing release notes. Use `ENV_FILE=/path/to/file.env` if you want a different env file.
+That script loads values from `.env` by default, builds `autoskills-server-<version>-<os>-<arch>.tar.gz`, uploads it to the matching GitHub Release, and if the release already exists it only uploads server assets without rewriting the existing release notes. Use `ENV_FILE=/path/to/file.env` if you want a different env file.
 
 The GitHub Actions workflow now updates a rolling `beta` prerelease on every `main` push and still publishes a versioned release automatically when you push a tag such as `0.1.0-beta.1`.
 
@@ -224,22 +224,22 @@ make store-import INPUT=output/runtime-store-backup.json
 
 The bundle itself contains:
 
-- `crux`
+- `autoskills`
 
-The installed CLI answers `crux version`, and `make build` now embeds git version metadata into `output/crux`.
+The installed CLI answers `autoskills version`, and `make build` now embeds git version metadata into `output/autoskills`.
 
 For a one-command install from GitHub Releases:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
-CRUX_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/crux-cli/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 ```
 
-The installer downloads the matching release bundle for the current platform, installs it under `~/.local/share/crux/<version>`, writes `~/.local/bin/crux`, does not require Go on the target machine, and installs a local Node.js runtime automatically when the machine does not already have a compatible one.
+The installer downloads the matching release bundle for the current platform, installs it under `~/.local/share/autoskills/<version>`, writes `~/.local/bin/autoskills`, does not require Go on the target machine, and installs a local Node.js runtime automatically when the machine does not already have a compatible one.
 After install, the shortest onboarding path is:
 
 ```bash
-crux setup
+autoskills setup
 ```
 
 ## Container Deploy
@@ -247,25 +247,25 @@ crux setup
 The container now defaults to:
 
 - `APP_MODE=prod`
-- legacy JSON import path at `/app/data/crux-store.json`
+- legacy JSON import path at `/app/data/autoskills-store.json`
 - no runtime DB DSN; provide `DB_DSN` or `DB_DSN_FILE` for MySQL before starting the container
 - stdout request/application logs
 
 Build and run it with a seeded beta account:
 
 ```bash
-docker build -t crux-beta .
+docker build -t autoskills-beta .
 docker run --rm -p 8082:8082 \
   -v "$PWD/.runtime-data:/app/data" \
-  -e JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-  -e AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
-  -e AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
-  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
-  -v "$PWD/secrets/crux-jwt-secret:/run/secrets/crux-jwt-secret:ro" \
-  -v "$PWD/secrets/crux-google-client-id:/run/secrets/crux-google-client-id:ro" \
-  -v "$PWD/secrets/crux-google-client-secret:/run/secrets/crux-google-client-secret:ro" \
-  -v "$PWD/secrets/crux-beta-users.json:/run/secrets/crux-beta-users.json:ro" \
-  crux-beta
+  -e JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+  -e AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/autoskills-google-client-id \
+  -e AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/autoskills-google-client-secret \
+  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
+  -v "$PWD/secrets/autoskills-jwt-secret:/run/secrets/autoskills-jwt-secret:ro" \
+  -v "$PWD/secrets/autoskills-google-client-id:/run/secrets/autoskills-google-client-id:ro" \
+  -v "$PWD/secrets/autoskills-google-client-secret:/run/secrets/autoskills-google-client-secret:ro" \
+  -v "$PWD/secrets/autoskills-beta-users.json:/run/secrets/autoskills-beta-users.json:ro" \
+  autoskills-beta
 ```
 
 For MySQL-backed deployment, override the DB env at runtime:
@@ -273,17 +273,17 @@ For MySQL-backed deployment, override the DB env at runtime:
 ```bash
 docker run --rm -p 8082:8082 \
   -e DB_DIALECT=mysql \
-  -e DB_DSN_FILE=/run/secrets/crux-db-dsn \
-  -e JWT_SECRET_FILE=/run/secrets/crux-jwt-secret \
-  -e AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/crux-google-client-id \
-  -e AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/crux-google-client-secret \
-  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/crux-beta-users.json \
-  -v "$PWD/secrets/crux-db-dsn:/run/secrets/crux-db-dsn:ro" \
-  -v "$PWD/secrets/crux-jwt-secret:/run/secrets/crux-jwt-secret:ro" \
-  -v "$PWD/secrets/crux-google-client-id:/run/secrets/crux-google-client-id:ro" \
-  -v "$PWD/secrets/crux-google-client-secret:/run/secrets/crux-google-client-secret:ro" \
-  -v "$PWD/secrets/crux-beta-users.json:/run/secrets/crux-beta-users.json:ro" \
-  crux-beta
+  -e DB_DSN_FILE=/run/secrets/autoskills-db-dsn \
+  -e JWT_SECRET_FILE=/run/secrets/autoskills-jwt-secret \
+  -e AUTH_GOOGLE_CLIENT_ID_FILE=/run/secrets/autoskills-google-client-id \
+  -e AUTH_GOOGLE_CLIENT_SECRET_FILE=/run/secrets/autoskills-google-client-secret \
+  -e AUTH_BOOTSTRAP_USERS_FILE=/run/secrets/autoskills-beta-users.json \
+  -v "$PWD/secrets/autoskills-db-dsn:/run/secrets/autoskills-db-dsn:ro" \
+  -v "$PWD/secrets/autoskills-jwt-secret:/run/secrets/autoskills-jwt-secret:ro" \
+  -v "$PWD/secrets/autoskills-google-client-id:/run/secrets/autoskills-google-client-id:ro" \
+  -v "$PWD/secrets/autoskills-google-client-secret:/run/secrets/autoskills-google-client-secret:ro" \
+  -v "$PWD/secrets/autoskills-beta-users.json:/run/secrets/autoskills-beta-users.json:ro" \
+  autoskills-beta
 ```
 
 The repository also includes `.github/workflows/beta-ci.yml`, which runs `make ci-beta`, executes both the local-mode and real `APP_MODE=prod` smoke flows, uploads the verified server binaries and logs, builds beta CLI bundles for `linux/amd64`, `darwin/amd64`, and `darwin/arm64` with matching checksum and manifest artifacts, publishes a rolling `beta` prerelease from `main`, and still creates versioned releases from tags.
@@ -297,7 +297,7 @@ HTTP_TRUSTED_PROXY_CIDRS='10.0.0.0/8' \
 go run .
 ```
 
-Use `HTTP_ADMIN_ALLOWED_CIDRS` if you want `/admin` and `/api/v1/admin/*` to be stricter than the rest of the app. If `HTTP_TRUSTED_PROXY_CIDRS` is empty, Crux only trusts the direct socket remote address and ignores forwarded IP headers.
+Use `HTTP_ADMIN_ALLOWED_CIDRS` if you want `/admin` and `/api/v1/admin/*` to be stricter than the rest of the app. If `HTTP_TRUSTED_PROXY_CIDRS` is empty, AutoSkills only trusts the direct socket remote address and ignores forwarded IP headers.
 
 `APP_MODE=prod` now fails fast during startup if critical closed beta settings are unsafe or incomplete, including a missing `JWT_SECRET`, invalid CIDR values, demo-user enablement, static token bypass enablement, or malformed bootstrap users.
 

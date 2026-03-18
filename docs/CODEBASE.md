@@ -29,7 +29,7 @@ It has four runtime surfaces:
 ## High-Level Architecture
 
 ```text
-CLI crux
+CLI autoskills
   -> /api/v1/auth/cli/login
   -> /api/v1/agents/register
   -> /api/v1/projects/register
@@ -114,20 +114,20 @@ The CLI is now a collector and workspace client only. It does not apply config c
    - signs in at `/`
    - opens `/dashboard`
    - issues a scoped CLI token
-2. `crux setup`
+2. `autoskills setup`
    - authenticates a local CLI install with the issued token
    - connects the local repo to the org's shared workspace
    - uploads an initial snapshot plus local Codex session history on first setup, then resumes from the saved session cursor
-3. `crux snapshot` / `crux session` / `crux collect`
+3. `autoskills snapshot` / `autoskills session` / `autoskills collect`
    - uploads config snapshots plus usage sessions
    - `session` and `collect` can auto-read recent Codex session JSONL files
 4. Report refresh
    - starts after enough sessions and raw-query evidence exist
    - runs asynchronously on the server
-6. `crux reports` / dashboard overview
+6. `autoskills reports` / dashboard overview
    - shows report-style feedback, strengths, frictions, and next steps
 7. Ongoing usage uploads
-   - `collect --watch` reacts to session file changes, uses the interval as a fallback scan, and uploads every new logical session after the saved cursor
+   - `autoskills collect --watch` reacts to session file changes, uses the interval as a fallback scan, and uploads every new logical session after the saved cursor
 
 ## Persistence Model
 
