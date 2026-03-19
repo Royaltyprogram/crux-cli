@@ -20,6 +20,7 @@ Environment overrides:
   AUTOSKILLS_GITHUB_TOKEN      optional token used for GitHub API requests
   AUTOSKILLS_INSTALL_ROOT      install root (default: $HOME/.local/share/autoskills)
   AUTOSKILLS_BIN_DIR           wrapper script directory (default: $HOME/.local/bin)
+  AUTOSKILLS_AUTO_PATH         configure shell startup files for BIN_DIR: auto, always, never (default: auto)
   AUTOSKILLS_INSTALL_NODE      Node.js install mode: auto, always, never (default: auto)
   AUTOSKILLS_NODE_VERSION      Node.js version used for local runtime install (default: 20.11.1)
   AUTOSKILLS_NODE_DIST_BASE_URL  Node.js distribution base URL (default: https://nodejs.org/dist)
@@ -195,6 +196,147 @@ EOF
   chmod 755 "$bin_path"
 }
 
+path_expr() {
+  path_dir="$1"
+  case "$path_dir" in
+    "$HOME")
+      printf '$HOME\n'
+      ;;
+    "$HOME"/*)
+      printf '$HOME/%s\n' "${path_dir#"$HOME"/}"
+      ;;
+    *)
+      printf '%s\n' "$path_dir"
+      ;;
+  esac
+}
+
+shell_profile_paths() {
+  shell_name="${1:-}"
+  case "$shell_name" in
+    */*)
+      shell_name="${shell_name##*/}"
+      ;;
+  esac
+
+  case "$shell_name" in
+    zsh)
+      printf '%s\n%s\n' "$HOME/.zprofile" "$HOME/.zshrc"
+      ;;
+    bash)
+      printf '%s\n%s\n' "$HOME/.bash_profile" "$HOME/.bashrc"
+      ;;
+    sh|dash|ksh)
+      printf '%s\n' "$HOME/.profile"
+      ;;
+    *)
+      if [ -f "$HOME/.zprofile" ] || [ -f "$HOME/.zshrc" ]; then
+        printf '%s\n%s\n' "$HOME/.zprofile" "$HOME/.zshrc"
+      elif [ -f "$HOME/.bash_profile" ] || [ -f "$HOME/.bashrc" ]; then
+        printf '%s\n%s\n' "$HOME/.bash_profile" "$HOME/.bashrc"
+      else
+        printf '%s\n' "$HOME/.profile"
+      fi
+      ;;
+  esac
+}
+
+profile_has_bin_dir() {
+  profile_path="$1"
+  bin_dir="$2"
+  bin_dir_expr="$3"
+  [ -f "$profile_path" ] || return 1
+  grep -F "$bin_dir" "$profile_path" >/dev/null 2>&1 && return 0
+  if [ "$bin_dir_expr" != "$bin_dir" ]; then
+    grep -F "$bin_dir_expr" "$profile_path" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+append_path_snippet() {
+  profile_path="$1"
+  bin_dir_expr="$2"
+
+  mkdir -p "$(dirname "$profile_path")"
+  touch "$profile_path"
+
+  if [ -s "$profile_path" ]; then
+    printf '\n' >>"$profile_path"
+  fi
+
+  cat >>"$profile_path" <<EOF
+# Added by autoskills installer
+case ":\${PATH:-}:" in
+  *":$bin_dir_expr:"*) ;;
+  *) export PATH="$bin_dir_expr:\${PATH:-}" ;;
+esac
+EOF
+}
+
+configure_shell_path() {
+  bin_dir="$1"
+  auto_path_mode="$2"
+
+  case "$auto_path_mode" in
+    auto|always|never) ;;
+    *)
+      die "invalid AUTOSKILLS_AUTO_PATH value: $auto_path_mode"
+      ;;
+  esac
+
+  if [ "$auto_path_mode" = "never" ]; then
+    say "skipping shell PATH setup because AUTOSKILLS_AUTO_PATH=never"
+    return
+  fi
+
+  if [ "$auto_path_mode" = "auto" ]; then
+    case "$bin_dir" in
+      "$HOME"|"$HOME"/*) ;;
+      *)
+        say "skipping shell PATH setup because $bin_dir is outside HOME; add it manually if needed"
+        return
+        ;;
+    esac
+  fi
+
+  profiles_path="$TMPDIR_WORK/shell-profiles.txt"
+  shell_profile_paths "${SHELL:-}" >"$profiles_path"
+  bin_dir_expr="$(path_expr "$bin_dir")"
+  updated_profiles=""
+  existing_profiles=""
+
+  while IFS= read -r profile_path; do
+    [ -n "$profile_path" ] || continue
+    if profile_has_bin_dir "$profile_path" "$bin_dir" "$bin_dir_expr"; then
+      if [ -n "$existing_profiles" ]; then
+        existing_profiles="$existing_profiles, $profile_path"
+      else
+        existing_profiles="$profile_path"
+      fi
+      continue
+    fi
+    append_path_snippet "$profile_path" "$bin_dir_expr"
+    if [ -n "$updated_profiles" ]; then
+      updated_profiles="$updated_profiles, $profile_path"
+    else
+      updated_profiles="$profile_path"
+    fi
+  done <"$profiles_path"
+
+  if [ -n "$updated_profiles" ]; then
+    say "added $bin_dir to shell startup files: $updated_profiles"
+    say "restart your shell or run: export PATH=\"$bin_dir:\$PATH\""
+    return
+  fi
+
+  if [ -n "$existing_profiles" ]; then
+    say "shell startup files already reference $bin_dir: $existing_profiles"
+    return
+  fi
+
+  say "could not determine a shell startup file for PATH setup; add $bin_dir to PATH manually"
+}
+
 normalize_version_tag() {
   version="$1"
   case "$version" in
@@ -279,6 +421,7 @@ install_node_runtime() {
 VERSION="${AUTOSKILLS_VERSION:-}"
 INSTALL_ROOT="${AUTOSKILLS_INSTALL_ROOT:-$HOME/.local/share/autoskills}"
 BIN_DIR="${AUTOSKILLS_BIN_DIR:-$HOME/.local/bin}"
+AUTO_PATH="${AUTOSKILLS_AUTO_PATH:-auto}"
 REPO="${AUTOSKILLS_REPO:-Royaltyprogram/autoskills-cli}"
 RELEASE_BASE_URL="${AUTOSKILLS_RELEASE_BASE_URL:-https://github.com/$REPO/releases/download}"
 RELEASES_API_URL="${AUTOSKILLS_RELEASES_API_URL:-https://api.github.com/repos/$REPO/releases?per_page=20}"
@@ -386,6 +529,7 @@ rm -rf "$VERSION_DIR"
 mv "$STAGE_DIR" "$VERSION_DIR"
 ln -sfn "$VERSION_DIR" "$CURRENT_LINK"
 create_wrapper "$BIN_PATH" "$CURRENT_LINK/autoskills" "$LOCAL_NODE_BIN"
+configure_shell_path "$BIN_DIR" "$AUTO_PATH"
 
 say "installed $VERSION to $VERSION_DIR"
 say "wrapper created at $BIN_PATH"
@@ -401,7 +545,10 @@ fi
 if ! command -v autoskills >/dev/null 2>&1; then
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) say "add $BIN_DIR to PATH to run autoskills directly" ;;
+    *)
+      say "current shell PATH does not include $BIN_DIR yet"
+      say "open a new shell or run: export PATH=\"$BIN_DIR:\$PATH\""
+      ;;
   esac
 fi
 

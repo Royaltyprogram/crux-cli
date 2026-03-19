@@ -12,7 +12,7 @@ DRAFT="${DRAFT:-0}"
 PRERELEASE="${PRERELEASE:-0}"
 LATEST_MODE="${LATEST_MODE:-}"
 TARGET="${TARGET_COMMITISH:-}"
-GH_BIN="${CRUX_GH_BIN:-gh}"
+GH_BIN="${AUTOSKILLS_GH_BIN:-gh}"
 
 usage() {
   cat <<'EOF'
@@ -81,9 +81,9 @@ detect_version() {
   fi
 
   local newest_index
-  newest_index="$(find "$RELEASE_DIR" -maxdepth 1 -name 'crux-*.release-index.json' -type f | sort | tail -n 1)"
+  newest_index="$(find "$RELEASE_DIR" -maxdepth 1 -name 'autoskills-*.release-index.json' -type f | sort | tail -n 1)"
   if [[ -n "$newest_index" ]]; then
-    basename "$newest_index" .release-index.json | sed 's/^crux-//'
+    basename "$newest_index" .release-index.json | sed 's/^autoskills-//'
     return
   fi
 
@@ -97,11 +97,11 @@ collect_assets() {
 
   shopt -s nullglob
   local assets=(
-    "$RELEASE_DIR"/crux-"$version"-*.tar.gz
-    "$RELEASE_DIR"/crux-"$version"-*.tar.gz.sha256
-    "$RELEASE_DIR"/crux-"$version"-*.json
-    "$RELEASE_DIR"/crux-"$version".release-index.json
-    "$RELEASE_DIR"/crux-"$version".release-index.json.sha256
+    "$RELEASE_DIR"/autoskills-"$version"-*.tar.gz
+    "$RELEASE_DIR"/autoskills-"$version"-*.tar.gz.sha256
+    "$RELEASE_DIR"/autoskills-"$version"-*.json
+    "$RELEASE_DIR"/autoskills-"$version".release-index.json
+    "$RELEASE_DIR"/autoskills-"$version".release-index.json.sha256
   )
   shopt -u nullglob
 
@@ -149,7 +149,7 @@ One-command install:
 
 \`\`\`bash
 curl -fsSL $raw_url | sh
-CRUX_VERSION=$version curl -fsSL $raw_url | sh
+AUTOSKILLS_VERSION=$version curl -fsSL $raw_url | sh
 \`\`\`
 
 Included assets:
@@ -228,7 +228,7 @@ declare -a ASSETS=()
 collect_assets "$VERSION_LABEL"
 ASSETS=("${COLLECTED_ASSETS[@]}")
 
-TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/crux-release-notes.XXXXXX")"
+TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/autoskills-release-notes.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR"
 }

@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/
 autoskills setup
 ```
 
-Release installs use a prebuilt binary, so Go is not required. If your shell cannot find `autoskills`, add `~/.local/bin` to `PATH`.
+Release installs use a prebuilt binary, so Go is not required. The installer now adds `~/.local/bin` to common shell startup files automatically when needed; if this is the first install in your current terminal, open a new shell once before running `autoskills`.
 On supported installed macOS environments, `autoskills setup` also enrolls background collection automatically. On other environments it prints the manual fallback command, typically `autoskills collect --watch --recent 1 --interval 30m`.
 After setup, plain `autoskills` now works as the default entrypoint: it shows the setup hint when the CLI is not configured yet, and otherwise prints the current shared-workspace status.
 

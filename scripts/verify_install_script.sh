@@ -53,7 +53,7 @@ import pathlib
 import sys
 
 release_dir = pathlib.Path(sys.argv[1])
-archives = [p for p in release_dir.glob("crux-*.tar.gz") if p.is_file()]
+archives = [p for p in release_dir.glob("autoskills-*.tar.gz") if p.is_file()]
 if not archives:
     raise SystemExit("")
 archives.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -68,7 +68,7 @@ bundle_version() {
 import sys
 
 name = sys.argv[1]
-prefix = "crux-"
+prefix = "autoskills-"
 if not name.startswith(prefix):
     raise SystemExit("")
 raw = name[len(prefix):]
@@ -109,7 +109,7 @@ CHECKSUM_PATH="$BUNDLE_PATH.sha256"
   exit 1
 }
 
-TMPDIR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/crux-install-verify.XXXXXX")"
+TMPDIR_WORK="$(mktemp -d "${TMPDIR:-/tmp}/autoskills-install-verify.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_WORK"
 }
@@ -123,20 +123,21 @@ mkdir -p "$STAGED_RELEASE_DIR" "$INSTALL_ROOT" "$BIN_DIR"
 cp "$BUNDLE_PATH" "$STAGED_RELEASE_DIR/"
 cp "$CHECKSUM_PATH" "$STAGED_RELEASE_DIR/"
 
-CRUX_VERSION="$VERSION_LABEL" \
-CRUX_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
-CRUX_INSTALL_ROOT="$INSTALL_ROOT" \
-CRUX_BIN_DIR="$BIN_DIR" \
-CRUX_INSTALL_NODE=never \
+AUTOSKILLS_VERSION="$VERSION_LABEL" \
+AUTOSKILLS_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
+AUTOSKILLS_INSTALL_ROOT="$INSTALL_ROOT" \
+AUTOSKILLS_BIN_DIR="$BIN_DIR" \
+AUTOSKILLS_AUTO_PATH=never \
+AUTOSKILLS_INSTALL_NODE=never \
 sh "$ROOT_DIR/scripts/install.sh" >/dev/null
 
-[[ -x "$BIN_DIR/crux" ]] || {
-  echo "install script did not create wrapper: $BIN_DIR/crux" >&2
+[[ -x "$BIN_DIR/autoskills" ]] || {
+  echo "install script did not create wrapper: $BIN_DIR/autoskills" >&2
   exit 1
 }
 
-VERSION_OUTPUT="$("$BIN_DIR/crux" version)"
-[[ "$VERSION_OUTPUT" == crux\ "$VERSION_LABEL"* ]] || {
+VERSION_OUTPUT="$("$BIN_DIR/autoskills" version)"
+[[ "$VERSION_OUTPUT" == autoskills\ "$VERSION_LABEL"* ]] || {
   echo "unexpected version output: $VERSION_OUTPUT" >&2
   exit 1
 }
@@ -147,15 +148,16 @@ VERSION_OUTPUT="$("$BIN_DIR/crux" version)"
 }
 
 # Re-run install to verify idempotent upgrade behavior for the same version.
-CRUX_VERSION="$VERSION_LABEL" \
-CRUX_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
-CRUX_INSTALL_ROOT="$INSTALL_ROOT" \
-CRUX_BIN_DIR="$BIN_DIR" \
-CRUX_INSTALL_NODE=never \
+AUTOSKILLS_VERSION="$VERSION_LABEL" \
+AUTOSKILLS_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
+AUTOSKILLS_INSTALL_ROOT="$INSTALL_ROOT" \
+AUTOSKILLS_BIN_DIR="$BIN_DIR" \
+AUTOSKILLS_AUTO_PATH=never \
+AUTOSKILLS_INSTALL_NODE=never \
 sh "$ROOT_DIR/scripts/install.sh" >/dev/null
 
-VERSION_OUTPUT="$("$BIN_DIR/crux" version)"
-[[ "$VERSION_OUTPUT" == crux\ "$VERSION_LABEL"* ]] || {
+VERSION_OUTPUT="$("$BIN_DIR/autoskills" version)"
+[[ "$VERSION_OUTPUT" == autoskills\ "$VERSION_LABEL"* ]] || {
   echo "unexpected version output after reinstall: $VERSION_OUTPUT" >&2
   exit 1
 }
@@ -184,13 +186,14 @@ chmod 755 "$NODE_STAGE_ROOT/$NODE_ARCHIVE_BASE/bin/node"
 tar -czf "$NODE_ARCHIVE_PATH" -C "$NODE_STAGE_ROOT" "$NODE_ARCHIVE_BASE"
 printf '%s  %s\n' "$(sha256_file "$NODE_ARCHIVE_PATH")" "$(basename "$NODE_ARCHIVE_PATH")" >"$NODE_CHECKSUM_PATH"
 
-CRUX_VERSION="$VERSION_LABEL" \
-CRUX_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
-CRUX_INSTALL_ROOT="$FORCED_INSTALL_ROOT" \
-CRUX_BIN_DIR="$FORCED_BIN_DIR" \
-CRUX_INSTALL_NODE=always \
-CRUX_NODE_VERSION="$NODE_VERSION_TAG" \
-CRUX_NODE_DIST_BASE_URL="file://$NODE_DIST_ROOT" \
+AUTOSKILLS_VERSION="$VERSION_LABEL" \
+AUTOSKILLS_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
+AUTOSKILLS_INSTALL_ROOT="$FORCED_INSTALL_ROOT" \
+AUTOSKILLS_BIN_DIR="$FORCED_BIN_DIR" \
+AUTOSKILLS_AUTO_PATH=never \
+AUTOSKILLS_INSTALL_NODE=always \
+AUTOSKILLS_NODE_VERSION="$NODE_VERSION_TAG" \
+AUTOSKILLS_NODE_DIST_BASE_URL="file://$NODE_DIST_ROOT" \
 sh "$ROOT_DIR/scripts/install.sh" >/dev/null
 
 [[ -x "$FORCED_INSTALL_ROOT/node/current/bin/node" ]] || {
@@ -204,9 +207,66 @@ NODE_VERSION_OUTPUT="$("$FORCED_INSTALL_ROOT/node/current/bin/node" --version)"
   exit 1
 }
 
-grep -F "$FORCED_INSTALL_ROOT/node/current/bin" "$FORCED_BIN_DIR/crux" >/dev/null || {
-  echo "crux wrapper does not include local node path" >&2
+grep -F "$FORCED_INSTALL_ROOT/node/current/bin" "$FORCED_BIN_DIR/autoskills" >/dev/null || {
+  echo "autoskills wrapper does not include local node path" >&2
   exit 1
 }
+
+AUTO_HOME="$TMPDIR_WORK/home-zsh"
+AUTO_LOG="$TMPDIR_WORK/install-auto-path.log"
+AUTO_BIN_DIR="$AUTO_HOME/.local/bin"
+AUTO_INSTALL_ROOT="$AUTO_HOME/.local/share/autoskills"
+mkdir -p "$AUTO_HOME"
+
+HOME="$AUTO_HOME" \
+SHELL="/bin/zsh" \
+PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+AUTOSKILLS_VERSION="$VERSION_LABEL" \
+AUTOSKILLS_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
+AUTOSKILLS_INSTALL_ROOT="$AUTO_INSTALL_ROOT" \
+AUTOSKILLS_INSTALL_NODE=never \
+sh "$ROOT_DIR/scripts/install.sh" >"$AUTO_LOG" 2>&1
+
+[[ -x "$AUTO_BIN_DIR/autoskills" ]] || {
+  echo "install script did not create default wrapper under HOME: $AUTO_BIN_DIR/autoskills" >&2
+  exit 1
+}
+
+for profile in "$AUTO_HOME/.zprofile" "$AUTO_HOME/.zshrc"; do
+  [[ -f "$profile" ]] || {
+    echo "install script did not create shell profile: $profile" >&2
+    exit 1
+  }
+  grep -F 'Added by autoskills installer' "$profile" >/dev/null || {
+    echo "install script did not add autoskills PATH marker to $profile" >&2
+    exit 1
+  }
+  grep -F '$HOME/.local/bin' "$profile" >/dev/null || {
+    echo "install script did not add default HOME bin path to $profile" >&2
+    exit 1
+  }
+done
+
+grep -F 'restart your shell or run: export PATH="' "$AUTO_LOG" >/dev/null || {
+  echo "install script did not print shell reload guidance after auto PATH setup" >&2
+  exit 1
+}
+
+HOME="$AUTO_HOME" \
+SHELL="/bin/zsh" \
+PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+AUTOSKILLS_VERSION="$VERSION_LABEL" \
+AUTOSKILLS_RELEASE_BASE_URL="file://$TMPDIR_WORK/releases" \
+AUTOSKILLS_INSTALL_ROOT="$AUTO_INSTALL_ROOT" \
+AUTOSKILLS_INSTALL_NODE=never \
+sh "$ROOT_DIR/scripts/install.sh" >/dev/null 2>&1
+
+for profile in "$AUTO_HOME/.zprofile" "$AUTO_HOME/.zshrc"; do
+  count="$(grep -c 'Added by autoskills installer' "$profile")"
+  [[ "$count" -eq 1 ]] || {
+    echo "install script appended duplicate PATH snippet to $profile" >&2
+    exit 1
+  }
+done
 
 echo "verified install script: $BUNDLE_PATH"
