@@ -380,7 +380,7 @@ func (s *AnalyticsService) ensureGoogleUserLocked(info *googleUserInfo, now time
 		Source:       userSourceGoogle,
 		AuthProvider: authProviderGoogle,
 		AuthSubject:  subject,
-		Role:         userRoleAdmin,
+		Role:         userRoleMember,
 		Status:       userStatusActive,
 		CreatedAt:    now,
 	}

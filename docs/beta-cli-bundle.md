@@ -14,7 +14,7 @@ One-command install is available for GitHub Releases:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
-AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+AUTOSKILLS_VERSION=0.1.1-beta curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 ```
 
 The installer downloads the matching release bundle for the current OS and architecture, installs it under `~/.local/share/autoskills/<version>`, and writes a wrapper to `~/.local/bin/autoskills`.

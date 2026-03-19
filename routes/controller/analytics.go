@@ -52,10 +52,6 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.GET("/skill-sets/latest", r.latestSkillSet)
 	api.POST("/skill-sets/client-state", r.upsertSkillSetClientState)
 	api.GET("/audits", r.auditList)
-	api.GET("/admin/import-job-metrics", r.adminImportJobMetrics)
-	api.GET("/admin/users", r.listAdminUsers)
-	api.POST("/admin/users/deactivate", r.deactivateAdminUser)
-	api.POST("/admin/users/delete", r.deleteAdminUser)
 	api.GET("/dashboard/overview", r.dashboardOverview)
 	api.GET("/dashboard/project-insights", r.dashboardProjectInsights)
 }
@@ -294,38 +290,6 @@ func (r *AnalyticsRoute) auditList(c *echo.Context) error {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.AuditList(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) listAdminUsers(c *echo.Context) error {
-	var req request.AdminUserListReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.ListAdminUsers(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) adminImportJobMetrics(c *echo.Context) error {
-	var req request.AdminImportJobMetricsReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.AdminImportJobMetrics(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) deactivateAdminUser(c *echo.Context) error {
-	var req request.AdminUserDeactivateReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.DeactivateAdminUser(c.Request().Context(), &req))
-}
-
-func (r *AnalyticsRoute) deleteAdminUser(c *echo.Context) error {
-	var req request.AdminUserDeleteReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	return common.WrapResp(c)(r.AnalyticsService.DeleteAdminUser(c.Request().Context(), &req))
 }
 
 func (r *AnalyticsRoute) dashboardOverview(c *echo.Context) error {

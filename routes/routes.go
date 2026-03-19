@@ -56,13 +56,6 @@ func NewEcho(conf *configs.Config, logger *slog.Logger, store *service.Analytics
 	if ipAllowlist != nil {
 		middlewareChain = append(middlewareChain, ipAllowlist)
 	}
-	adminIPAllowlist, err := newAdminIPAllowlistMiddleware(conf.HTTP.AdminAllowedCIDRs)
-	if err != nil {
-		return nil, err
-	}
-	if adminIPAllowlist != nil {
-		middlewareChain = append(middlewareChain, adminIPAllowlist)
-	}
 	if len(conf.HTTP.AllowedOrigins) > 0 {
 		middlewareChain = append(middlewareChain, echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
 			AllowOrigins:     conf.HTTP.AllowedOrigins,

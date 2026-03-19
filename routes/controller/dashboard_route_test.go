@@ -89,7 +89,7 @@ func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
 	require.Contains(t, body, `data-action="refresh-dashboard"`)
 	require.NotContains(t, body, "Approve with confidence. Measure what changed.")
 	require.NotContains(t, body, `id="loginForm"`)
-	require.Contains(t, body, `id="adminLink"`)
+	require.NotContains(t, body, `id="adminLink"`)
 }
 
 func TestDashboardAssetRoutesServeSplitAssets(t *testing.T) {
@@ -141,16 +141,6 @@ func TestDashboardAssetRoutesServeSplitAssets(t *testing.T) {
 			bodySnippet: `item.applied_version`,
 		},
 		{
-			path:        "/assets/admin.js",
-			contentType: "javascript",
-			bodySnippet: `/api/v1/admin/users`,
-		},
-		{
-			path:        "/assets/admin.js",
-			contentType: "javascript",
-			bodySnippet: `/api/v1/admin/import-job-metrics?limit=6`,
-		},
-		{
 			path:        "/assets/logo.ico",
 			contentType: "image/",
 			bodySnippet: "",
@@ -169,6 +159,11 @@ func TestDashboardAssetRoutesServeSplitAssets(t *testing.T) {
 			require.Contains(t, rec.Body.String(), tc.bodySnippet, tc.path)
 		}
 	}
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/admin.js", nil)
+	rec := httptest.NewRecorder()
+	echo.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestDashboardRouteServesFavicon(t *testing.T) {
@@ -194,7 +189,7 @@ func TestDashboardRouteServesFavicon(t *testing.T) {
 	require.NotEmpty(t, rec.Body.Bytes())
 }
 
-func TestAdminRouteRedirectsWithoutWebSession(t *testing.T) {
+func TestAdminRouteIsRemoved(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
 
@@ -220,102 +215,5 @@ func TestAdminRouteRedirectsWithoutWebSession(t *testing.T) {
 
 	echo.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	require.Equal(t, "/", rec.Header().Get("Location"))
-}
-
-func TestAdminRouteServesPageForAdminSession(t *testing.T) {
-	conf := &configs.Config{}
-	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
-	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
-		Code:     "demo-login",
-		Subject:  "google-demo-subject",
-		Email:    "demo@example.com",
-		Name:     "Demo Operator",
-		Verified: true,
-	})
-	defer closeGoogle()
-
-	store, err := service.NewAnalyticsStore(conf)
-	require.NoError(t, err)
-
-	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:            conf,
-		AnalyticsStore:    store,
-		ReportMinSessions: 1,
-	})
-
-	echo, err := routes.NewEcho(conf, nil, store)
-	require.NoError(t, err)
-
-	controller.NewAnalyticsRoute(controller.Options{
-		AnalyticsService: analyticsSvc,
-	}).RegisterRoute(echo.Group(""))
-	controller.NewDashboardRoute(controller.Options{
-		AnalyticsService: analyticsSvc,
-	}).RegisterRoute(echo.Group(""))
-
-	sessionCookie := loginWithGoogleControllerTest(t, echo, "demo-login")
-
-	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	req.AddCookie(sessionCookie)
-	rec := httptest.NewRecorder()
-
-	echo.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), "User Management")
-	require.Contains(t, rec.Body.String(), "Async import telemetry")
-	require.Contains(t, rec.Body.String(), `<script src="/assets/admin.js"></script>`)
-}
-
-func TestAdminRouteRedirectsNonAdminToDashboard(t *testing.T) {
-	conf := &configs.Config{}
-	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
-	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:      "member-1",
-		OrgID:   "member-org",
-		OrgName: "Member Org",
-		Email:   "member@example.com",
-		Name:    "Member User",
-		Role:    "member",
-	}}
-	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
-		Code:     "member-login",
-		Subject:  "google-member-subject",
-		Email:    "member@example.com",
-		Name:     "Member User",
-		Verified: true,
-	})
-	defer closeGoogle()
-
-	store, err := service.NewAnalyticsStore(conf)
-	require.NoError(t, err)
-
-	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:            conf,
-		AnalyticsStore:    store,
-		ReportMinSessions: 1,
-	})
-
-	echo, err := routes.NewEcho(conf, nil, store)
-	require.NoError(t, err)
-
-	controller.NewAnalyticsRoute(controller.Options{
-		AnalyticsService: analyticsSvc,
-	}).RegisterRoute(echo.Group(""))
-	controller.NewDashboardRoute(controller.Options{
-		AnalyticsService: analyticsSvc,
-	}).RegisterRoute(echo.Group(""))
-
-	sessionCookie := loginWithGoogleControllerTest(t, echo, "member-login")
-
-	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	req.AddCookie(sessionCookie)
-	rec := httptest.NewRecorder()
-
-	echo.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	require.Equal(t, "/dashboard", rec.Header().Get("Location"))
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }

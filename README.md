@@ -73,11 +73,10 @@ If you want the plain `autoskills` command to point at the current repository bu
 
 ```bash
 ./scripts/install_local_dev.sh
-autoskills reset
 autoskills version
 ```
 
-This path updates `~/.local/bin/autoskills` to the current repo build under `~/.local/share/autoskills/current`. Use it when validating unreleased CLI changes locally.
+This path updates `~/.local/bin/autoskills` to the current repo build under `~/.local/share/autoskills/current`. It preserves the saved CLI login and shared-workspace state in `~/.autoskills/state.json`, so normal local build updates do not require `autoskills reset`.
 
 For beta or production user machines, install the released CLI and run `autoskills` directly instead of `go run`:
 
@@ -103,7 +102,7 @@ AUTH_BOOTSTRAP_USERS_JSON='[{"id":"beta-user-1","org_id":"beta-org","org_name":"
 go run .
 ```
 
-`AUTH_BOOTSTRAP_USERS_JSON` is optional. Use it when you want a Google account with a matching email to join a pre-seeded org or take a preassigned role. Without it, the first Google sign-in creates a new admin workspace automatically.
+`AUTH_BOOTSTRAP_USERS_JSON` is optional. Use it when you want a Google account with a matching email to join a pre-seeded org or take a preassigned role. Without it, the first Google sign-in creates a new workspace with a `member` user automatically.
 
 If you would rather mount a secret file than inline JSON in env, you can use:
 
@@ -169,7 +168,7 @@ To build the CLI artifact you hand to beta users:
 
 ```bash
 make beta-cli-bundle
-VERSION_LABEL=0.1.0-beta.1 make beta-cli-bundle
+VERSION_LABEL=0.1.1-beta make beta-cli-bundle
 ```
 
 That command produces:
@@ -194,7 +193,7 @@ make build-release-index
 To publish the built assets to GitHub Releases with the `gh` CLI:
 
 ```bash
-VERSION_LABEL=0.1.0-beta.1 make publish-github-release
+VERSION_LABEL=0.1.1-beta make publish-github-release
 ```
 
 `publish-github-release` uploads the versioned bundle archives, checksums, per-platform manifests, and the consolidated release-index file.
@@ -209,7 +208,7 @@ cp .env.server-release.example .env
 
 That script loads values from `.env` by default, builds `autoskills-server-<version>-<os>-<arch>.tar.gz`, uploads it to the matching GitHub Release, and if the release already exists it only uploads server assets without rewriting the existing release notes. Use `ENV_FILE=/path/to/file.env` if you want a different env file.
 
-The GitHub Actions workflow now updates a rolling `beta` prerelease on every `main` push and still publishes a versioned release automatically when you push a tag such as `0.1.0-beta.1`.
+The GitHub Actions workflow now updates a rolling `beta` prerelease on every `main` push and still publishes a versioned release automatically when you push a tag such as `0.1.1-beta`.
 
 If you use `workflow_dispatch` in GitHub Actions, you can now pass `version`, `draft`, `prerelease`, and `latest` inputs and reuse the same publish path without creating the tag first.
 
@@ -242,7 +241,7 @@ For a one-command install from GitHub Releases:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
-AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+AUTOSKILLS_VERSION=0.1.1-beta curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 ```
 
 The installer downloads the matching release bundle for the current platform, installs it under `~/.local/share/autoskills/<version>`, writes `~/.local/bin/autoskills`, does not require Go on the target machine, and installs a local Node.js runtime automatically when the machine does not already have a compatible one.

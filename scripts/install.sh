@@ -27,7 +27,7 @@ Environment overrides:
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
-  AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+  AUTOSKILLS_VERSION=0.1.1-beta curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 EOF
 }
 

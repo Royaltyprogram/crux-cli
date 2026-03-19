@@ -249,10 +249,6 @@ function renderSessionContext() {
 
   $("topBarUser").textContent = user.name || user.email || "-";
   $("topBarOrg").textContent = org.name || org.id || "-";
-  const adminLink = $("adminLink");
-  if (adminLink) {
-    adminLink.hidden = String(user.role || "").toLowerCase() !== "admin";
-  }
 }
 
 function renderAgentStatus(overview, reports) {

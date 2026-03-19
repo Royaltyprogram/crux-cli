@@ -164,23 +164,3 @@ type AuditListReq struct {
 	TargetUserID string `query:"target_user_id"`
 	Limit        int    `query:"limit"`
 }
-
-type AdminUserListReq struct {
-	Search         string `query:"search"`
-	Role           string `query:"role"`
-	Status         string `query:"status"`
-	IncludeDeleted bool   `query:"include_deleted"`
-}
-
-type AdminImportJobMetricsReq struct {
-	ProjectID string `query:"project_id"`
-	Limit     int    `query:"limit"`
-}
-
-type AdminUserDeactivateReq struct {
-	UserID string `json:"user_id" validate:"required"`
-}
-
-type AdminUserDeleteReq struct {
-	UserID string `json:"user_id" validate:"required"`
-}

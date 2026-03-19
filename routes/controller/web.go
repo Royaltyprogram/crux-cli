@@ -14,7 +14,7 @@ import (
 	"github.com/Royaltyprogram/aiops/service"
 )
 
-//go:embed assets/admin.html assets/admin.js assets/dashboard.html assets/docs.html assets/landing.html assets/login.html assets/dashboard.css assets/dashboard.js assets/logo.ico assets/logo.png assets/logo.svg
+//go:embed assets/dashboard.html assets/docs.html assets/landing.html assets/login.html assets/dashboard.css assets/dashboard.js assets/logo.ico assets/logo.png assets/logo.svg
 var uiFS embed.FS
 
 type DashboardRoute struct {
@@ -30,7 +30,6 @@ func (r *DashboardRoute) RegisterRoute(router *echo.Group) {
 	router.GET("/login", r.login)
 	router.GET("/docs", r.docs)
 	router.GET("/dashboard", r.dashboard)
-	router.GET("/admin", r.admin)
 	router.GET("/logo.ico", r.favicon)
 	router.GET("/assets/:name", r.asset)
 }
@@ -77,22 +76,6 @@ func (r *DashboardRoute) login(c *echo.Context) error {
 
 func (r *DashboardRoute) dashboard(c *echo.Context) error {
 	page, err := uiFS.ReadFile("assets/dashboard.html")
-	if err != nil {
-		return err
-	}
-	return c.HTML(http.StatusOK, string(page))
-}
-
-func (r *DashboardRoute) admin(c *echo.Context) error {
-	identity, ok := r.webSessionIdentity(c)
-	if !ok {
-		return c.Redirect(http.StatusSeeOther, "/")
-	}
-	if strings.ToLower(strings.TrimSpace(identity.UserRole)) != "admin" {
-		return c.Redirect(http.StatusSeeOther, "/dashboard")
-	}
-
-	page, err := uiFS.ReadFile("assets/admin.html")
 	if err != nil {
 		return err
 	}

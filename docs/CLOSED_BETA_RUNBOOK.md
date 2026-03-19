@@ -76,7 +76,7 @@ For beta users who should install from GitHub Releases instead of an unpacked bu
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
-AUTOSKILLS_VERSION=0.1.0-beta.1 curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
+AUTOSKILLS_VERSION=0.1.1-beta curl -fsSL https://raw.githubusercontent.com/Royaltyprogram/autoskills-cli/main/scripts/install.sh | sh
 ```
 
 The installer downloads the matching release bundle, installs it under `~/.local/share/autoskills/<version>`, and writes a wrapper to `~/.local/bin/autoskills`.
@@ -228,7 +228,7 @@ make beta-cli-bundle
 make verify-beta-bundle
 make verify-install-script
 make build-release-index
-VERSION_LABEL=0.1.0-beta.1 make publish-github-release
+VERSION_LABEL=0.1.1-beta make publish-github-release
 ```
 
 Output:

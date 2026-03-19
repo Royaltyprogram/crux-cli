@@ -1345,100 +1345,6 @@ func TestAnalyticsRouteDashboardOverviewIncludesImportJobMetrics(t *testing.T) {
 	require.NotNil(t, overview.ImportJobMetrics.LastCompletedAt)
 }
 
-func TestAnalyticsRouteAdminImportJobMetrics(t *testing.T) {
-	conf := &configs.Config{}
-	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
-	closeGoogle := configureGoogleAuthControllerTest(t, conf, googleAuthTestUser{
-		Code:     "admin-import-job-metrics-login",
-		Subject:  "google-admin-import-job-metrics-subject",
-		Email:    "demo@example.com",
-		Name:     "Demo Operator",
-		Verified: true,
-	})
-	defer closeGoogle()
-
-	store, err := service.NewAnalyticsStore(conf)
-	require.NoError(t, err)
-
-	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:            conf,
-		AnalyticsStore:    store,
-		ReportMinSessions: 10,
-	})
-
-	echo, err := routes.NewEcho(conf, nil, store)
-	require.NoError(t, err)
-
-	route := controller.NewAnalyticsRoute(controller.Options{
-		AnalyticsService: analyticsSvc,
-	})
-	route.RegisterRoute(echo.Group(""))
-
-	adminCookie := loginWithGoogleControllerTest(t, echo, "admin-import-job-metrics-login")
-	cliLoginResp := loginCLICollectorForRouteTest(t, echo, "admin-import-job-metrics-login", "admin-import-job-metrics-device")
-	deviceToken := cliLoginResp.AccessToken
-
-	projectResp := postJSON[response.ProjectRegistrationResp](t, echo, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
-		OrgID:       cliLoginResp.OrgID,
-		AgentID:     cliLoginResp.AgentID,
-		Name:        "admin-import-job-metrics-project",
-		RepoHash:    "admin-import-job-metrics-project-hash",
-		DefaultTool: "codex",
-	})
-
-	failedJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
-		ProjectID: projectResp.ProjectID,
-	})
-	failedJob = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+failedJob.JobID+"/chunks", request.SessionImportJobChunkReq{
-		Sessions: []request.SessionSummaryReq{
-			{
-				Tool: "codex",
-				RawQueries: []string{
-					"Create one valid import session for admin metrics.",
-				},
-				Timestamp: time.Now().UTC(),
-			},
-			{
-				Tool:      "",
-				Timestamp: time.Now().UTC(),
-			},
-		},
-	})
-	require.Equal(t, 2, failedJob.ReceivedSessions)
-
-	failedJob = postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+failedJob.JobID+"/complete", request.SessionImportJobCompleteReq{})
-	require.Equal(t, "queued", failedJob.Status)
-
-	waitForSessionImportJobStatus(t, echo, deviceToken, failedJob.JobID, func(item *response.SessionImportJobResp) bool {
-		return item != nil && item.Status == "partially_failed" && item.FailedSessions == 1
-	})
-
-	activeJob := postJSON[response.SessionImportJobResp](t, echo, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
-		ProjectID:     projectResp.ProjectID,
-		TotalSessions: 3,
-	})
-	require.Equal(t, "receiving_chunks", activeJob.Status)
-
-	adminMetrics := getJSON[response.AdminImportJobMetricsResp](t, echo, "", "/api/v1/admin/import-job-metrics", url.Values{
-		"project_id": []string{projectResp.ProjectID},
-		"limit":      []string{"5"},
-	}, adminCookie)
-	require.Equal(t, cliLoginResp.OrgID, adminMetrics.OrgID)
-	require.Equal(t, projectResp.ProjectID, adminMetrics.ProjectID)
-	require.NotNil(t, adminMetrics.Metrics)
-	require.Equal(t, 2, adminMetrics.Metrics.CreatedJobs)
-	require.Equal(t, 1, adminMetrics.Metrics.ReceivingJobs)
-	require.Equal(t, 1, adminMetrics.Metrics.PartiallyFailedJobs)
-	require.Equal(t, 2, adminMetrics.Metrics.ProcessedSessions)
-	require.Equal(t, 1, adminMetrics.Metrics.UploadedSessions)
-	require.Equal(t, 1, adminMetrics.Metrics.FailedSessions)
-	require.Len(t, adminMetrics.ActiveJobs, 1)
-	require.Equal(t, activeJob.JobID, adminMetrics.ActiveJobs[0].JobID)
-	require.Len(t, adminMetrics.RecentFailures, 1)
-	require.Equal(t, failedJob.JobID, adminMetrics.RecentFailures[0].JobID)
-	require.Equal(t, "partially_failed", adminMetrics.RecentFailures[0].Status)
-}
-
 func TestAnalyticsRouteListSessionImportJobsFiltersStatus(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
@@ -1958,7 +1864,7 @@ func TestAnalyticsRouteGoogleSignupFlow(t *testing.T) {
 	sessionResp := getJSON[response.AuthSessionResp](t, echo, "", "/api/v1/auth/me", nil, sessionCookie)
 	require.Equal(t, "owner@example.com", sessionResp.User.Email)
 	require.Equal(t, "Owner Example", sessionResp.User.Name)
-	require.Equal(t, "admin", sessionResp.User.Role)
+	require.Equal(t, "member", sessionResp.User.Role)
 	require.Equal(t, "active", sessionResp.User.Status)
 	require.NotEmpty(t, sessionResp.User.ID)
 	require.NotEqual(t, "demo-user", sessionResp.User.ID)
@@ -2008,126 +1914,6 @@ func TestAnalyticsRouteRegisterAgentRejectsSpoofedUserID(t *testing.T) {
 	require.NotEqual(t, 0, env.Code)
 }
 
-func TestAnalyticsRouteAdminUserLifecycle(t *testing.T) {
-	conf := &configs.Config{}
-	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
-	conf.Auth.AllowDemoUser = true
-	conf.Auth.BootstrapUsers = []configs.BootstrapUser{{
-		ID:      "member-1",
-		OrgID:   "demo-org",
-		OrgName: "Demo Org",
-		Email:   "member@example.com",
-		Name:    "Member User",
-		Role:    "member",
-	}}
-	closeGoogle := configureGoogleAuthControllerTest(
-		t,
-		conf,
-		googleAuthTestUser{
-			Code:     "demo-login",
-			Subject:  "google-demo-subject",
-			Email:    "demo@example.com",
-			Name:     "Demo Operator",
-			Verified: true,
-		},
-		googleAuthTestUser{
-			Code:     "member-login",
-			Subject:  "google-member-subject",
-			Email:    "member@example.com",
-			Name:     "Member User",
-			Verified: true,
-		},
-	)
-	defer closeGoogle()
-
-	store, err := service.NewAnalyticsStore(conf)
-	require.NoError(t, err)
-
-	analyticsSvc := service.NewAnalyticsService(service.Options{
-		Config:            conf,
-		AnalyticsStore:    store,
-		ReportMinSessions: 1,
-	})
-
-	echo, err := routes.NewEcho(conf, nil, store)
-	require.NoError(t, err)
-
-	route := controller.NewAnalyticsRoute(controller.Options{
-		AnalyticsService: analyticsSvc,
-	})
-	route.RegisterRoute(echo.Group(""))
-
-	adminCookie := loginWithGoogleControllerTest(t, echo, "demo-login")
-
-	adminList := getJSON[response.AdminUserListResp](t, echo, "", "/api/v1/admin/users", url.Values{
-		"search": []string{"member@example.com"},
-	}, adminCookie)
-	require.Len(t, adminList.Items, 1)
-	require.Equal(t, "member", adminList.Items[0].Role)
-	require.Equal(t, "active", adminList.Items[0].Status)
-	memberUserID := adminList.Items[0].ID
-
-	memberCookie := loginWithGoogleControllerTest(t, echo, "member-login")
-
-	memberAdminRec := getJSONExpectCode(t, echo, "", "/api/v1/admin/users", nil, http.StatusForbidden, memberCookie)
-	var forbidden envelope
-	require.NoError(t, json.Unmarshal(memberAdminRec.Body.Bytes(), &forbidden))
-	require.NotEqual(t, 0, forbidden.Code)
-
-	deactivateResp := postJSON[response.AdminUserDeactivateResp](t, echo, "", http.MethodPost, "/api/v1/admin/users/deactivate", request.AdminUserDeactivateReq{
-		UserID: memberUserID,
-	}, adminCookie)
-	require.Equal(t, "deactivated", deactivateResp.Status)
-
-	memberSessionAfterDeactivate := getJSONExpectCode(t, echo, "", "/api/v1/auth/me", nil, http.StatusUnauthorized, memberCookie)
-	require.Equal(t, http.StatusUnauthorized, memberSessionAfterDeactivate.Code)
-
-	deactivatedList := getJSON[response.AdminUserListResp](t, echo, "", "/api/v1/admin/users", url.Values{
-		"status": []string{"disabled"},
-	}, adminCookie)
-	require.Len(t, deactivatedList.Items, 1)
-	require.Equal(t, memberUserID, deactivatedList.Items[0].ID)
-
-	deleteResp := postJSON[response.AdminUserDeleteResp](t, echo, "", http.MethodPost, "/api/v1/admin/users/delete", request.AdminUserDeleteReq{
-		UserID: memberUserID,
-	}, adminCookie)
-	require.Equal(t, "deleted", deleteResp.Status)
-
-	defaultList := getJSON[response.AdminUserListResp](t, echo, "", "/api/v1/admin/users", url.Values{
-		"search": []string{"member@example.com"},
-	}, adminCookie)
-	require.Empty(t, defaultList.Items)
-
-	deletedList := getJSON[response.AdminUserListResp](t, echo, "", "/api/v1/admin/users", url.Values{
-		"search":          []string{"member@example.com"},
-		"include_deleted": []string{"true"},
-		"status":          []string{"deleted"},
-	}, adminCookie)
-	require.Len(t, deletedList.Items, 1)
-	require.Equal(t, "deleted", deletedList.Items[0].Status)
-	require.Equal(t, memberUserID, deletedList.Items[0].ID)
-
-	deletedLoginRec := loginWithGoogleControllerTestExpectRedirect(t, echo, "member-login")
-	require.Equal(t, http.StatusSeeOther, deletedLoginRec.Code)
-	require.Contains(t, deletedLoginRec.Header().Get("Location"), "auth_error=user+account+cannot+sign+in")
-
-	auditResp := getJSON[response.AuditListResp](t, echo, "", "/api/v1/audits", url.Values{
-		"org_id":         []string{"demo-org"},
-		"type":           []string{"admin.user_deleted"},
-		"target_user_id": []string{memberUserID},
-		"limit":          []string{"1"},
-	}, adminCookie)
-	require.Len(t, auditResp.Items, 1)
-	require.Equal(t, "admin.user_deleted", auditResp.Items[0].Type)
-	require.Equal(t, "demo-user", auditResp.Items[0].ActorUserID)
-	require.Equal(t, "admin", auditResp.Items[0].ActorRole)
-	require.Equal(t, memberUserID, auditResp.Items[0].TargetUserID)
-	require.NotEmpty(t, auditResp.Items[0].SourceIP)
-	require.Equal(t, "route-test-client", auditResp.Items[0].UserAgent)
-	require.Equal(t, "success", auditResp.Items[0].Result)
-	require.Equal(t, "organization user soft-deleted and sessions revoked", auditResp.Items[0].Reason)
-}
-
 func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
 	conf := &configs.Config{}
 	conf.App.APIToken = "route-token"
@@ -2156,8 +1942,6 @@ func TestAnalyticsRouteDoesNotExposeLegacyAliasEndpoints(t *testing.T) {
 		code   int
 	}{
 		{method: http.MethodPost, path: "/api/v1/auth/login", code: http.StatusNotFound},
-		{method: http.MethodPost, path: "/api/v1/admin/users", code: http.StatusMethodNotAllowed},
-		{method: http.MethodPost, path: "/api/v1/admin/users/reset-password", code: http.StatusNotFound},
 		{method: http.MethodPost, path: "/api/v1/devices/register", code: http.StatusNotFound},
 		{method: http.MethodPost, path: "/api/v1/projects/connect", code: http.StatusNotFound},
 		{method: http.MethodGet, path: "/api/v1/execution-queue", code: http.StatusNotFound},

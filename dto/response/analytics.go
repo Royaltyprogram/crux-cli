@@ -406,45 +406,6 @@ type AuditListResp struct {
 	Items []AuditEventResp `json:"items"`
 }
 
-type AdminUserResp struct {
-	ID          string     `json:"id"`
-	OrgID       string     `json:"org_id"`
-	Email       string     `json:"email"`
-	Name        string     `json:"name"`
-	Source      string     `json:"source"`
-	Role        string     `json:"role"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	LastLoginAt *time.Time `json:"last_login_at"`
-	DisabledAt  *time.Time `json:"disabled_at"`
-	DeletedAt   *time.Time `json:"deleted_at"`
-}
-
-type AdminUserListResp struct {
-	Items []AdminUserResp `json:"items"`
-}
-
-type AdminImportJobMetricsResp struct {
-	OrgID          string                       `json:"org_id"`
-	ProjectID      string                       `json:"project_id,omitempty"`
-	GeneratedAt    time.Time                    `json:"generated_at"`
-	Metrics        *SessionImportJobMetricsResp `json:"metrics,omitempty"`
-	ActiveJobs     []SessionImportJobResp       `json:"active_jobs"`
-	RecentFailures []SessionImportJobResp       `json:"recent_failures"`
-}
-
-type AdminUserDeactivateResp struct {
-	Status     string    `json:"status"`
-	UserID     string    `json:"user_id"`
-	DisabledAt time.Time `json:"disabled_at"`
-}
-
-type AdminUserDeleteResp struct {
-	Status    string    `json:"status"`
-	UserID    string    `json:"user_id"`
-	DeletedAt time.Time `json:"deleted_at"`
-}
-
 type ReportResearchStatusResp struct {
 	SchemaVersion    string     `json:"schema_version"`
 	State            string     `json:"state"`

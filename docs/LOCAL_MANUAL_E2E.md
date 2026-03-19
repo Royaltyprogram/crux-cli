@@ -77,7 +77,7 @@ Open `http://127.0.0.1:8082/`.
 
 Click `Continue with Google`.
 
-If you kept `secrets/autoskills-beta-users.json`, sign in with a Google account whose email matches a seeded user to land in that org and role. Otherwise the first Google sign-in creates a fresh admin workspace.
+If you kept `secrets/autoskills-beta-users.json`, sign in with a Google account whose email matches a seeded user to land in that org and role. Otherwise the first Google sign-in creates a fresh workspace with a `member` user.
 
 Issue a CLI token from the dashboard.
 

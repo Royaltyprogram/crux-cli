@@ -151,6 +151,7 @@ func TestCompleteGoogleAuthPersistsRoundTrip(t *testing.T) {
 	resp, err := svc.CompleteGoogleAuth(ctx, "https://example.com/callback", "google-code")
 	require.NoError(t, err)
 	require.Equal(t, "google-user@example.com", resp.User.Email)
+	require.Equal(t, userRoleMember, resp.User.Role)
 
 	loaded, err := NewAnalyticsStore(conf)
 	require.NoError(t, err)
@@ -167,6 +168,7 @@ func TestCompleteGoogleAuthPersistsRoundTrip(t *testing.T) {
 	}
 	require.NotNil(t, googleUser)
 	require.Equal(t, "google-subject-1", googleUser.AuthSubject)
+	require.Equal(t, userRoleMember, normalizeUserRole(googleUser.Role))
 	require.NotNil(t, googleUser.LastLoginAt)
 
 	org := loaded.organizations[googleUser.OrgID]
