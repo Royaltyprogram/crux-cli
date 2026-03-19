@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +39,11 @@ type googleAuthTestUser struct {
 	Email    string
 	Name     string
 	Verified bool
+}
+
+type routeResponsesRequest struct {
+	Model string `json:"model"`
+	Input string `json:"input"`
 }
 
 func isBenignRouteConnError(err error) bool {
@@ -831,6 +839,196 @@ func TestAnalyticsRouteSessionImportJobRefreshesWhenCrossingThreshold(t *testing
 		return item != nil && item.State == "succeeded" && item.SessionCount == 11
 	})
 	require.Equal(t, 1, status.ReportCount)
+}
+
+func TestAnalyticsRouteHTTPServerSessionImportJobBackfillsOnlyFirstHundredSessions(t *testing.T) {
+	var (
+		requestsMu sync.Mutex
+		requests   []routeResponsesRequest
+	)
+	openAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/v1/responses", r.URL.Path)
+		require.Equal(t, "Bearer test-openai-key", r.Header.Get("Authorization"))
+
+		var payload routeResponsesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		requestsMu.Lock()
+		requests = append(requests, payload)
+		requestsMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"schema_version\":\"report-feedback.v1\",\"reports\":[{\"kind\":\"llm-workflow-review\",\"title\":\"Reduce repeated workflow recap before implementation\",\"summary\":\"The uploaded raw queries show the user spending too many turns on control-flow recap and verification setup before the actual patch work starts.\",\"user_intent\":\"The user wants a small, validated fix and keeps narrowing scope before implementation.\",\"model_interpretation\":\"The model appears to understand the request as repo-orientation and verification planning first, then patching.\",\"reason\":\"Recent raw queries repeatedly ask for current behavior summaries, exact checks, and narrow patch scope before implementation begins.\",\"explanation\":\"The report should call out that the user is compensating for missing default repo discovery and verification structure.\",\"expected_benefit\":\"Less repeated steering and faster transition from orientation to implementation.\",\"risk\":\"Low. Observational feedback only.\",\"expected_impact\":\"Fewer exploratory turns and clearer first useful responses.\",\"confidence\":\"high\",\"strengths\":[\"The user consistently asks for narrow patch scope.\",\"Verification intent is explicit before risky edits.\"],\"frictions\":[\"Repo discovery is repeated across sessions.\",\"Verification setup often arrives only after extra recap turns.\"],\"next_steps\":[\"Start with concrete file discovery before summarizing control flow.\",\"List targeted verification immediately after locating the fix.\"],\"score\":0.82,\"evidence\":[\"repeated control-flow recap\",\"repeated verification prompts\"]}]}"
+        }
+      ]
+    }
+  ]
+}`))
+		if !isBenignRouteConnError(err) {
+			require.NoError(t, err)
+		}
+	}))
+	defer openAIServer.Close()
+
+	conf := &configs.Config{}
+	conf.App.APIToken = "route-token"
+	conf.App.StorePath = filepath.Join(t.TempDir(), "crux-store.json")
+	conf.OpenAI.APIKey = "test-openai-key"
+	conf.OpenAI.BaseURL = openAIServer.URL + "/v1"
+	conf.OpenAI.ResponsesModel = "gpt-5.4"
+
+	store, err := service.NewAnalyticsStore(conf)
+	require.NoError(t, err)
+
+	analyticsSvc := service.NewAnalyticsService(service.Options{
+		Config:            conf,
+		AnalyticsStore:    store,
+		ReportMinSessions: 10,
+	})
+
+	echo, err := routes.NewEcho(conf, nil, store)
+	require.NoError(t, err)
+	controller.NewAnalyticsRoute(controller.Options{
+		AnalyticsService: analyticsSvc,
+	}).RegisterRoute(echo.Group(""))
+
+	localServer := httptest.NewServer(echo)
+	defer localServer.Close()
+
+	client := localServer.Client()
+	baseURL := localServer.URL
+
+	cliTokenResp := httpPostJSON[response.CLITokenIssueResp](t, client, baseURL, "route-token", http.MethodPost, "/api/v1/auth/cli-tokens", request.IssueCLITokenReq{
+		Label: "HTTP Import Job Device",
+	})
+	require.NotEmpty(t, cliTokenResp.Token)
+
+	cliLoginResp := httpPostJSON[response.CLILoginResp](t, client, baseURL, cliTokenResp.Token, http.MethodPost, "/api/v1/auth/cli/login", request.CLILoginReq{
+		DeviceName: "http-import-job-device",
+		Hostname:   "http-import-job.local",
+		Platform:   "darwin/arm64",
+		CLIVersion: "0.1.0-dev",
+		Tools:      []string{"codex"},
+	})
+	deviceToken := cliLoginResp.AccessToken
+	require.Equal(t, "registered", cliLoginResp.Status)
+
+	projectResp := httpPostJSON[response.ProjectRegistrationResp](t, client, baseURL, deviceToken, http.MethodPost, "/api/v1/projects/register", request.RegisterProjectReq{
+		OrgID:       cliLoginResp.OrgID,
+		AgentID:     cliLoginResp.AgentID,
+		Name:        "http-import-job-project",
+		RepoHash:    "http-import-job-project-hash",
+		DefaultTool: "codex",
+	})
+
+	job := httpPostJSON[response.SessionImportJobResp](t, client, baseURL, deviceToken, http.MethodPost, "/api/v1/session-import-jobs", request.SessionImportJobCreateReq{
+		ProjectID:     projectResp.ProjectID,
+		TotalSessions: 103,
+	})
+	require.Equal(t, "receiving_chunks", job.Status)
+
+	baseTime := time.Now().UTC().Round(time.Second)
+	sessionCount := 103
+	for start := 1; start <= sessionCount; start += 25 {
+		end := start + 24
+		if end > sessionCount {
+			end = sessionCount
+		}
+		chunk := make([]request.SessionSummaryReq, 0, end-start+1)
+		for idx := start; idx <= end; idx++ {
+			chunk = append(chunk, request.SessionSummaryReq{
+				Tool: "codex",
+				RawQueries: []string{
+					fmt.Sprintf("inspect the import-job route behavior for session %03d", idx),
+				},
+				Timestamp: baseTime.Add(time.Duration(idx) * time.Minute),
+			})
+		}
+		job = httpPostJSON[response.SessionImportJobResp](t, client, baseURL, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/chunks", request.SessionImportJobChunkReq{
+			Sessions: chunk,
+		})
+	}
+	require.Equal(t, sessionCount, job.ReceivedSessions)
+
+	job = httpPostJSON[response.SessionImportJobResp](t, client, baseURL, deviceToken, http.MethodPost, "/api/v1/session-import-jobs/"+job.JobID+"/complete", request.SessionImportJobCompleteReq{})
+	require.Equal(t, "queued", job.Status)
+
+	require.Eventually(t, func() bool {
+		completed := httpGetJSON[response.SessionImportJobResp](t, client, baseURL, deviceToken, "/api/v1/session-import-jobs/"+job.JobID, nil)
+		if completed.Status != "succeeded" || completed.ProcessedSessions != sessionCount {
+			return false
+		}
+		requestsMu.Lock()
+		defer requestsMu.Unlock()
+		return len(filterReportRefreshRequests(requests)) == 10
+	}, 5*time.Second, 50*time.Millisecond)
+
+	requestsMu.Lock()
+	recordedRequests := append([]routeResponsesRequest(nil), requests...)
+	requestsMu.Unlock()
+	reportRefreshRequests := filterReportRefreshRequests(recordedRequests)
+	require.Len(t, reportRefreshRequests, 10)
+	for expected := 10; expected <= 100; expected += 10 {
+		require.Contains(t, reportRefreshRequests[(expected/10)-1].Input, fmt.Sprintf("- sessions=%d", expected))
+	}
+	for _, req := range reportRefreshRequests {
+		require.NotContains(t, req.Input, "- sessions=103")
+		require.Contains(t, req.Input, "report-feedback.v1")
+	}
+
+	reports := httpGetJSON[response.ReportListResp](t, client, baseURL, deviceToken, "/api/v1/reports", url.Values{
+		"project_id": []string{projectResp.ProjectID},
+	})
+	require.Len(t, reports.Items, 10)
+	activeReports := 0
+	for _, item := range reports.Items {
+		if item.Status == "active" {
+			activeReports++
+		}
+	}
+	require.Equal(t, 1, activeReports)
+
+	overview := httpGetJSON[response.DashboardOverviewResp](t, client, baseURL, deviceToken, "/api/v1/dashboard/overview", url.Values{
+		"org_id": []string{cliLoginResp.OrgID},
+	})
+	require.NotNil(t, overview.ResearchStatus)
+	require.Equal(t, "succeeded", overview.ResearchStatus.State)
+	require.Equal(t, 103, overview.ResearchStatus.SessionCount)
+
+	resp104 := httpPostJSON[response.SessionIngestResp](t, client, baseURL, deviceToken, http.MethodPost, "/api/v1/session-summaries", request.SessionSummaryReq{
+		ProjectID: projectResp.ProjectID,
+		Tool:      "codex",
+		RawQueries: []string{
+			"verify that the route-level backfill cap blocks post-100 report refreshes",
+		},
+		Timestamp: baseTime.Add(104 * time.Minute),
+	})
+	require.NotNil(t, resp104.ResearchStatus)
+	require.Equal(t, "capped_history_window", resp104.ResearchStatus.State)
+
+	require.Never(t, func() bool {
+		requestsMu.Lock()
+		defer requestsMu.Unlock()
+		return len(filterReportRefreshRequests(requests)) > 10
+	}, 500*time.Millisecond, 50*time.Millisecond)
+}
+
+func filterReportRefreshRequests(requests []routeResponsesRequest) []routeResponsesRequest {
+	filtered := make([]routeResponsesRequest, 0, len(requests))
+	for _, req := range requests {
+		input := req.Input
+		if strings.Contains(input, "report-feedback.v1") && strings.Contains(input, "- sessions=") {
+			filtered = append(filtered, req)
+		}
+	}
+	return filtered
 }
 
 func TestAnalyticsRouteSessionImportJobTracksPartialFailures(t *testing.T) {
@@ -2062,6 +2260,65 @@ func decodeOK[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 
 	var env envelope
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	require.Equal(t, 0, env.Code, env.Message)
+
+	var data T
+	require.NoError(t, json.Unmarshal(env.Data, &data))
+	return data
+}
+
+func httpPostJSON[T any](t *testing.T, client *http.Client, baseURL, token, method, path string, payload any) T {
+	t.Helper()
+
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), method, baseURL+path, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "route-test-client")
+	if token != "" {
+		req.Header.Set("X-AutoSkills-Token", token)
+	}
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	return decodeHTTPResponse[T](t, resp)
+}
+
+func httpGetJSON[T any](t *testing.T, client *http.Client, baseURL, token, path string, query url.Values) T {
+	t.Helper()
+
+	target := baseURL + path
+	if encoded := query.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "route-test-client")
+	if token != "" {
+		req.Header.Set("X-AutoSkills-Token", token)
+	}
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	return decodeHTTPResponse[T](t, resp)
+}
+
+func decodeHTTPResponse[T any](t *testing.T, resp *http.Response) T {
+	t.Helper()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	var env envelope
+	require.NoError(t, json.Unmarshal(body, &env))
 	require.Equal(t, 0, env.Code, env.Message)
 
 	var data T
