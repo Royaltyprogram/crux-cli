@@ -213,6 +213,16 @@ The GitHub Actions workflow now updates a rolling `beta` prerelease on every `ma
 
 If you use `workflow_dispatch` in GitHub Actions, you can now pass `version`, `draft`, `prerelease`, and `latest` inputs and reuse the same publish path without creating the tag first.
 
+To fetch the latest remote source, build it in a temporary worktree, and deploy it in place on a host that uses the default `agentopt` systemd unit and `/opt/agentopt` release layout:
+
+```bash
+make deploy-remote-main
+PUBLIC_BASE_URL=https://useautoskills.com make deploy-remote-main
+REF=release-candidate make deploy-remote-main
+```
+
+That helper keeps your dirty working tree untouched, stages a new timestamped release under `/opt/agentopt/releases`, switches the `current` symlink, restarts `agentopt`, and rolls back automatically if `/healthz` or `/readyz` fails after the switch.
+
 To export or restore the live runtime store against the same `APP_MODE` / `DB_*` / secret-file env that the server uses:
 
 ```bash

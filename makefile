@@ -53,6 +53,9 @@ publish-github-release:
 publish-server-release:
 	./scripts/build_and_publish_server_release.sh
 
+deploy-remote-main:
+	./scripts/deploy_remote_main.sh
+
 store-export: build
 	./output/autoskills store-export --output "$(OUTPUT)"
 
