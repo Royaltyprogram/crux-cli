@@ -152,6 +152,10 @@ type DashboardProjectInsightsReq struct {
 	ProjectID string `query:"project_id" validate:"required"`
 }
 
+type DashboardTokenImpactReq struct {
+	ProjectID string `query:"project_id" validate:"required"`
+}
+
 type ProjectListReq struct {
 	OrgID string `query:"org_id" validate:"required"`
 }

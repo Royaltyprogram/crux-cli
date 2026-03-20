@@ -379,6 +379,7 @@ type ProjectResp struct {
 	DefaultTool    string             `json:"default_tool"`
 	LastProfileID  string             `json:"last_profile_id"`
 	LastIngestedAt *time.Time         `json:"last_ingested_at"`
+	ConnectedAt    time.Time          `json:"connected_at"`
 	LanguageMix    map[string]float64 `json:"language_mix"`
 }
 
@@ -423,6 +424,18 @@ type ReportResearchStatusResp struct {
 	CompletedAt      *time.Time `json:"completed_at"`
 	LastSuccessfulAt *time.Time `json:"last_successful_at"`
 	LastDurationMS   int        `json:"last_duration_ms"`
+}
+
+type DashboardTokenImpactResp struct {
+	SchemaVersion             string     `json:"schema_version"`
+	ProjectID                 string     `json:"project_id"`
+	HasDeployment             bool       `json:"has_deployment"`
+	FirstDeployedAt           *time.Time `json:"first_deployed_at,omitempty"`
+	BeforeSessionCount        int        `json:"before_session_count"`
+	BeforeAvgTokensPerSession float64    `json:"before_avg_tokens_per_session"`
+	AfterSessionCount         int        `json:"after_session_count"`
+	AfterAvgTokensPerSession  float64    `json:"after_avg_tokens_per_session"`
+	ChangePercent             float64    `json:"change_percent"`
 }
 
 type DashboardOverviewResp struct {

@@ -18,9 +18,8 @@ func (s *APISuite) TestDashboardPage_OK() {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(s.T(), err)
 	require.Equal(s.T(), http.StatusOK, resp.StatusCode)
-	require.Contains(s.T(), string(body), "Analysis reports")
-	require.Contains(s.T(), string(body), "Latest trace analysis")
-	require.Contains(s.T(), string(body), "Collected session traces")
-	require.Contains(s.T(), string(body), "Usage Analytics")
-	require.Contains(s.T(), string(body), "What happened in your Codex sessions")
+	require.Contains(s.T(), string(body), "AutoSkills Dashboard")
+	require.Contains(s.T(), string(body), "Set up your workspace")
+	require.Contains(s.T(), string(body), "Why your skill set changed")
+	require.Contains(s.T(), string(body), "Version history")
 }

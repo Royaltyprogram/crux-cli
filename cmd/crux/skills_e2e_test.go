@@ -127,7 +127,7 @@ func TestRunCollectEndToEndManagedSkillSetReflectsInDashboardAPI(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Contains(t, string(body), "Auto Skills")
+	require.Contains(t, string(body), "AutoSkills")
 	require.Contains(t, string(body), "Current policy documents")
 }
 
