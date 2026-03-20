@@ -365,7 +365,7 @@ func sanitizeResearchReport(item researchReportItemPayload, rawSuggestion string
 		ExpectedBenefit:     strings.TrimSpace(item.ExpectedBenefit),
 		Risk:                strings.TrimSpace(item.Risk),
 		ExpectedImpact:      strings.TrimSpace(item.ExpectedImpact),
-		Confidence:          normalizeResearchConfidence(item.Confidence),
+		Confidence:          "",
 		Strengths:           strengths,
 		Frictions:           frictions,
 		NextSteps:           nextSteps,
@@ -385,17 +385,6 @@ func sanitizeShortList(values []string) []string {
 		out = append(out, value)
 	}
 	return out
-}
-
-func normalizeResearchConfidence(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "high":
-		return "high"
-	case "medium":
-		return "medium"
-	default:
-		return "low"
-	}
 }
 
 func formatResearchSuggestion(raw json.RawMessage) string {

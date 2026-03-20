@@ -35,7 +35,6 @@ When reasoning summaries are generic operational chatter about system instructio
 - `next_steps` should be concrete operating rules that the **model itself** should follow in future sessions to avoid the same misalignment. Write each rule as a direct instruction to the AI agent. Example: "When the user asks for a targeted fix, restrict edits to the file mentioned in the request unless explicitly told otherwise" instead of "Try scoping your requests to a single file".
 - `evidence` should contain short strings referencing specific session observations, not paragraphs.
 - `score` must be between `0.0` and `1.0` (higher = more significant finding).
-- `confidence` must be `low`, `medium`, or `high`.
 - Titles should be direct and describe the misalignment pattern, e.g. "Model expanded scope when you asked for a targeted fix" or "Agent started repo exploration instead of answering your question".
 - Do not produce patch plans, instruction edits, or file targets.
 
@@ -54,7 +53,6 @@ When reasoning summaries are generic operational chatter about system instructio
       "explanation": "string",
       "expected_benefit": "string",
       "expected_impact": "string",
-      "confidence": "low | medium | high",
       "strengths": ["string"],
       "frictions": ["string"],
       "next_steps": ["string"],

@@ -81,7 +81,7 @@ func TestDashboardRouteServesWorkspaceDashboard(t *testing.T) {
 	require.Contains(t, body, `data-action="refresh-dashboard"`)
 	require.Contains(t, body, `class="app-layout no-sidebar"`)
 	require.Contains(t, body, `class="main-area"`)
-	require.Contains(t, body, `class="hero-grid"`)
+	require.Contains(t, body, `class="hero-panel"`)
 	require.NotContains(t, body, `id="loginForm"`)
 	require.NotContains(t, body, `id="adminLink"`)
 }
@@ -122,12 +122,27 @@ func TestDashboardAssetRoutesServeSplitAssets(t *testing.T) {
 		{
 			path:        "/assets/dashboard.js",
 			contentType: "javascript",
-			bodySnippet: `/api/v1/dashboard/token-impact?project_id=`,
+			bodySnippet: `renderAutoSkillsHero`,
 		},
 		{
 			path:        "/assets/dashboard.js",
 			contentType: "javascript",
-			bodySnippet: `renderAutoSkillsHero`,
+			bodySnippet: `const TERMINAL_ZERO_REPORT_RESEARCH_STATES = [`,
+		},
+		{
+			path:        "/assets/dashboard.js",
+			contentType: "javascript",
+			bodySnippet: `return hasTerminalZeroReportOutcome(overview)`,
+		},
+		{
+			path:        "/assets/dashboard.js",
+			contentType: "javascript",
+			bodySnippet: `"waiting_for_next_batch"`,
+		},
+		{
+			path:        "/assets/dashboard.js",
+			contentType: "javascript",
+			bodySnippet: `"missing_raw_queries"`,
 		},
 		{
 			path:        "/assets/logo.ico",

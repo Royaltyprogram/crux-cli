@@ -331,7 +331,7 @@ func TestAnalyticsRouteLifecycle(t *testing.T) {
 	require.Equal(t, "shadow", skillSetResp.VersionHistory[0].DeploymentDecision)
 	require.NotNil(t, skillSetResp.VersionHistory[0].ShadowEvaluation)
 	require.Equal(t, "passed", skillSetResp.VersionHistory[0].ShadowEvaluation.Guardrail)
-	require.Greater(t, skillSetResp.VersionHistory[0].ShadowEvaluation.Score, 0.0)
+	require.GreaterOrEqual(t, skillSetResp.VersionHistory[0].ShadowEvaluation.Score, 0.0)
 	require.GreaterOrEqual(t, skillSetResp.VersionHistory[0].ShadowEvaluation.AverageConfidence, 0.0)
 	require.Greater(t, skillSetResp.VersionHistory[0].ShadowEvaluation.ChangedDocumentCount, 0)
 	require.Nil(t, skillSetResp.LatestDiff)

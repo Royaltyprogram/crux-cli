@@ -25,7 +25,6 @@ const state = {
   busy: false,
   selectedProjectID: "",
   skillSetBundle: null,
-  tokenImpact: null,
   session: null,
   settingsOpen: false,
   overview: null,
@@ -120,14 +119,36 @@ function startOnboardingPoll() {
 
 let progressPollTimer = null;
 const PROGRESS_POLL_MS = 4000;
+const ACTIVE_IMPORT_STATUSES = ["receiving_chunks", "queued", "running"];
+const TERMINAL_ZERO_REPORT_RESEARCH_STATES = [
+  "capped_history_window",
+  "disabled",
+  "failed",
+  "missing_raw_queries",
+  "no_reports",
+  "waiting_for_next_batch",
+];
+
+function isActiveImportJob(job) {
+  return job && ACTIVE_IMPORT_STATUSES.includes(job.status);
+}
+
+function researchState(overview) {
+  return String(overview?.research_status?.state || "")
+    .trim()
+    .toLowerCase();
+}
+
+function hasTerminalZeroReportOutcome(overview) {
+  return (
+    (overview?.active_reports || 0) === 0 &&
+    TERMINAL_ZERO_REPORT_RESEARCH_STATES.includes(researchState(overview))
+  );
+}
 
 function shouldProgressPoll(overview) {
   const job = overview?.active_import_job;
-  const research = overview?.research_status;
-  return (
-    (job && ACTIVE_IMPORT_STATUSES.includes(job.status)) ||
-    research?.state === "running"
-  );
+  return isActiveImportJob(job) || researchState(overview) === "running";
 }
 
 function startProgressPoll() {
@@ -148,6 +169,8 @@ function stopProgressPoll() {
 function showWizard() {
   $("onboardingInline").hidden = false;
   $("dashboardContent").hidden = true;
+  const syncBanner = $("syncNeededBanner");
+  if (syncBanner) syncBanner.hidden = true;
   renderConnectionStatus(null, null);
   setStatus("No workspace connected. Follow the steps below to get started.");
   startOnboardingPoll();
@@ -176,21 +199,25 @@ function buildSetupCommand(origin = window.location.origin || "") {
 
 /* ── Setup Progress ── */
 
-const ACTIVE_IMPORT_STATUSES = ["receiving_chunks", "queued", "running"];
-
 function deriveSetupStage(overview, skillSet) {
   const job = overview?.active_import_job;
-  const research = overview?.research_status;
-  const jobActive =
-    job && ACTIVE_IMPORT_STATUSES.includes(job.status);
-  const researchRunning = research?.state === "running";
+  const jobActive = isActiveImportJob(job);
+  const researchRunning = researchState(overview) === "running";
   const hasReports = (overview?.active_reports || 0) > 0;
   const hasSkillSet = skillSet?.version != null;
 
-  if (jobActive) return "uploading";
+  // First-time setup should unblock once the workspace can render the regular
+  // dashboard, either because a managed bundle exists or because report
+  // research reached a terminal zero-report outcome.
+  if (hasSkillSet) return "ready";
+  if (hasReports) return "building_skill";
   if (researchRunning) return "researching";
-  if (!hasReports) return "awaiting_report";
-  if (!hasSkillSet) return "building_skill";
+  if (jobActive) return "uploading";
+  if (!hasReports) {
+    return hasTerminalZeroReportOutcome(overview)
+      ? "ready"
+      : "awaiting_report";
+  }
   return "ready";
 }
 
@@ -260,7 +287,7 @@ function renderSetupProgress(overview, skillSet, stage) {
   ];
 
   // Compute meta for upload stage
-  if (job && ACTIVE_IMPORT_STATUSES.includes(job.status)) {
+  if (isActiveImportJob(job)) {
     const total = job.total_sessions || job.received_sessions || 0;
     const processed = job.processed_sessions || 0;
     const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
@@ -910,47 +937,6 @@ function skillSetDecisionTone(decision) {
   return "sky";
 }
 
-function skillSetShadowGuardrailLabel(guardrail) {
-  const raw = String(guardrail || "")
-    .trim()
-    .toLowerCase();
-  if (!raw) {
-    return "Pending";
-  }
-  if (raw === "passed") {
-    return "Passed";
-  }
-  if (raw === "low_confidence") {
-    return "Low confidence";
-  }
-  if (raw === "low_score") {
-    return "Low score";
-  }
-  if (raw === "high_churn") {
-    return "High churn";
-  }
-  return titleize(raw);
-}
-
-function skillSetShadowLines(evaluation) {
-  const record =
-    evaluation && typeof evaluation === "object" ? evaluation : null;
-  if (!record) {
-    return [];
-  }
-  const score = Number(record.score || 0);
-  const averageConfidence = Number(record.average_confidence || 0);
-  const changedDocuments = Number(record.changed_document_count || 0);
-  const addedRules = Number(record.added_rule_count || 0);
-  const removedRules = Number(record.removed_rule_count || 0);
-  const ruleChurn = Number(record.rule_churn || 0);
-  const guardrail = skillSetShadowGuardrailLabel(record.guardrail || "");
-  return [
-    `Shadow score ${formatFixedNumber(score)} with ${formatPercent(averageConfidence)} average report confidence.`,
-    `${formatCount(changedDocuments)} changed document${changedDocuments === 1 ? "" : "s"} and ${formatCount(ruleChurn)} rule change${ruleChurn === 1 ? "" : "s"} (${formatCount(addedRules)} added / ${formatCount(removedRules)} removed).`,
-    `Guardrail: ${guardrail}.`,
-  ];
-}
 
 function skillSetDeploymentSummary(item) {
   const record = item && typeof item === "object" ? item : {};
@@ -1176,18 +1162,6 @@ function renderAutoSkillsHero(skillSet, reports) {
   const decisionReason = normalizeInlineText(
     latestVersionRecord.decision_reason || "",
   );
-  const shadowEvaluation =
-    latestVersionRecord.shadow_evaluation &&
-    typeof latestVersionRecord.shadow_evaluation === "object"
-      ? latestVersionRecord.shadow_evaluation
-      : null;
-  const shadowGuardrailRaw = String(
-    (shadowEvaluation && shadowEvaluation.guardrail) || "",
-  )
-    .trim()
-    .toLowerCase();
-  const shadowGuardrail = skillSetShadowGuardrailLabel(shadowGuardrailRaw);
-  const shadowLines = skillSetShadowLines(shadowEvaluation);
   const latestDiff =
     bundle.latest_diff && typeof bundle.latest_diff === "object"
       ? bundle.latest_diff
@@ -1218,6 +1192,8 @@ function renderAutoSkillsHero(skillSet, reports) {
 
   /* ── Banner ── */
   if (!state.selectedProjectID) {
+    const syncBannerEl = $("syncNeededBanner");
+    if (syncBannerEl) syncBannerEl.hidden = true;
     bannerEl.innerHTML = `
       <div class="skill-banner" data-tone="empty">
         <div class="skill-banner-content">
@@ -1232,6 +1208,8 @@ function renderAutoSkillsHero(skillSet, reports) {
   }
 
   if (status !== "ready") {
+    const syncBannerEl = $("syncNeededBanner");
+    if (syncBannerEl) syncBannerEl.hidden = true;
     const statusLabel = skillSetStatusLabel(status || "no_reports");
     const statusTone = skillSetStatusTone(status || "no_reports");
     const headline =
@@ -1355,13 +1333,21 @@ function renderAutoSkillsHero(skillSet, reports) {
             ? `Version ${version} active`
             : "Skill bundle active";
 
+    const needsSync = deploymentDecision === "shadow" || (syncStatus !== "synced" && syncStatus !== "unchanged" && version && appliedVersion !== version);
+    const syncBannerEl = $("syncNeededBanner");
+    if (syncBannerEl) syncBannerEl.hidden = !needsSync;
+
     bannerEl.innerHTML = `
     <div class="skill-banner" data-tone="good">
       <div class="skill-banner-pills">
-        ${pill("Autobuild ready", "good")}
-        ${syncStatus ? pill(skillSetSyncLabel(syncStatus), skillSetSyncTone(syncStatus)) : ""}
-        ${deploymentDecision ? pill(skillSetDecisionLabel(deploymentDecision), skillSetDecisionTone(deploymentDecision)) : ""}
-        ${syncMode ? pill(titleize(syncMode), syncMode === "frozen" ? "warn" : "sky") : ""}
+        ${deploymentDecision === "deployed"
+          ? `<span class="pill pill-good" title="Bundle is deployed and active on the connected CLI">Deployed</span>`
+          : deploymentDecision === "shadow"
+            ? `<span class="pill pill-warn" title="A new version is compiled but not yet synced to the CLI">Awaiting sync</span>`
+            : syncStatus
+              ? `<span class="pill pill-${escapeAttr(skillSetSyncTone(syncStatus))}" title="Current sync state between server and CLI">${escapeHTML(skillSetSyncLabel(syncStatus))}</span>`
+              : ""}
+        ${syncMode === "frozen" ? `<span class="pill pill-warn" title="Auto-sync is paused — manual sync required">Frozen</span>` : ""}
       </div>
       <div class="skill-banner-content">
         <div class="skill-banner-headline">${escapeHTML(bannerHeadline)}</div>
@@ -1370,9 +1356,6 @@ function renderAutoSkillsHero(skillSet, reports) {
           <span class="skill-banner-stat"><strong>Synced</strong> ${escapeHTML(lastSyncedAt)}</span>
           <span class="skill-banner-stat"><strong>Reports merged</strong> ${escapeHTML(formatCount(reportCount))}</span>
         </div>
-      </div>
-      <div class="skill-banner-aside">
-        <div class="skill-banner-cli-note">Manage via CLI: <code>autoskills skills status</code> · <code>autoskills skills pause</code> · <code>autoskills skills rollback</code></div>
       </div>
     </div>`;
   }
@@ -1391,7 +1374,6 @@ function renderAutoSkillsHero(skillSet, reports) {
       <div class="action-lane-group">
         ${actionLane("Changed because", reportLines, "Recent report evidence will appear here once the next bundle is compiled.", "warn")}
         ${actionLane("Decision", decisionReason ? [decisionReason] : [], "Deployment decision reasoning will appear after the first managed bundle transition is evaluated.", deploymentDecision === "blocked" || deploymentDecision === "rolled_back" ? "warn" : "sky")}
-        ${actionLane("Shadow evaluation", shadowLines, "Structured shadow metrics will appear after the first candidate is evaluated.", deploymentDecision === "blocked" || (shadowGuardrailRaw && shadowGuardrailRaw !== "passed") ? "warn" : "sky")}
         ${actionLane("Latest diff", latestDiffSummary, "The first stored bundle version does not have a previous diff yet.", "sky")}
         ${actionLane("Expected impact", summaryItems, "Expected impact will appear here once the bundle includes report-backed changes.", "good")}
       </div>
@@ -1600,114 +1582,6 @@ function renderConnectionStatus(project, overview) {
   }
 }
 
-/* ── NEW: Token impact card ── */
-
-function renderTokenImpact(data) {
-  const el = $("tokenImpactCard");
-  if (!data || !data.has_deployment) {
-    el.innerHTML = `
-      <div class="metric-card-header">Token Impact</div>
-      ${emptyState("No deployment yet", "Token impact will appear after your first AutoSkills deployment.")}
-    `;
-    return;
-  }
-
-  const before = Math.round(data.before_avg_tokens_per_session);
-  const after = Math.round(data.after_avg_tokens_per_session);
-  const pct = data.change_percent;
-  const direction = pct < -1 ? "down" : pct > 1 ? "up" : "neutral";
-  const arrow =
-    direction === "down" ? "\u2193" : direction === "up" ? "\u2191" : "\u2192";
-  const maxVal = Math.max(before, after, 1);
-  const beforeH = Math.round((before / maxVal) * 40);
-  const afterH = Math.round((after / maxVal) * 40);
-
-  el.innerHTML = `
-    <div class="metric-card-header">Token Impact</div>
-    <div class="token-impact-bar-wrap">
-      <div class="token-impact-bar before" style="height:${beforeH}px" title="Before: ${formatCount(before)}"></div>
-      <div class="token-impact-bar after" style="height:${afterH}px" title="After: ${formatCount(after)}"></div>
-    </div>
-    <div class="token-impact-row">
-      <div class="token-impact-group">
-        <div class="token-impact-label">Before</div>
-        <div class="token-impact-value">${formatCompactCount(before)}</div>
-      </div>
-      <div class="token-impact-group">
-        <div class="token-impact-label">After</div>
-        <div class="token-impact-value">${formatCompactCount(after)}</div>
-      </div>
-    </div>
-    <div class="token-impact-delta" data-direction="${direction}">${arrow} ${Math.abs(pct).toFixed(1)}%</div>
-    <div style="margin-top:8px;font-size:12px;color:var(--muted)">
-      ${formatCount(data.before_session_count)} sessions before \u00b7 ${formatCount(data.after_session_count)} sessions after
-    </div>
-  `;
-}
-
-/* ── NEW: Deploy frequency card ── */
-
-function renderDeployFrequency(skillSet) {
-  const el = $("deployFreqCard");
-  const history = skillSet?.deployment_history || [];
-
-  if (history.length === 0) {
-    el.innerHTML = `
-      <div class="metric-card-header">Deploy Frequency</div>
-      ${emptyState("No deployments", "Deployment frequency will appear after your first skill set sync.")}
-    `;
-    return;
-  }
-
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const recentDeploys = history.filter(
-    (e) => new Date(e.occurred_at) >= thirtyDaysAgo,
-  ).length;
-  const perWeek = Math.round((recentDeploys / 30) * 7 * 10) / 10;
-
-  el.innerHTML = `
-    <div class="metric-card-header">Deploy Frequency</div>
-    <div class="deploy-freq-value">${recentDeploys}</div>
-    <div class="deploy-freq-unit">deploys in last 30 days</div>
-    <div style="margin-top:8px;font-size:12px;color:var(--muted)">~${perWeek}/week</div>
-  `;
-}
-
-/* ── NEW: Top modified rules card ── */
-
-function renderTopModifiedRules(skillSet) {
-  const el = $("topRulesCard");
-  const diff = skillSet?.latest_diff;
-
-  if (!diff || !diff.changed_files || diff.changed_files.length === 0) {
-    el.innerHTML = `
-      <div class="metric-card-header">Latest Changes</div>
-      ${emptyState("No changes yet", "Rule changes will appear after the first skill set update.")}
-    `;
-    return;
-  }
-
-  const fileItems = diff.changed_files
-    .map((f) => {
-      const added = (f.added || []).length;
-      const removed = (f.removed || []).length;
-      return `<div class="rule-change-item">
-      <span class="rule-change-file">${escapeHTML(baseName(f.path))}</span>
-      <span>
-        ${added ? `<span class="rule-change-count added">+${added}</span>` : ""}
-        ${removed ? `<span class="rule-change-count removed"> -${removed}</span>` : ""}
-      </span>
-    </div>`;
-    })
-    .join("");
-
-  el.innerHTML = `
-    <div class="metric-card-header">Latest Changes</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${escapeHTML(diff.from_version || "?")} \u2192 ${escapeHTML(diff.to_version || "?")}</div>
-    <div class="rule-change-list">${fileItems}</div>
-  `;
-}
 
 /* ── NEW: Recent activity card ── */
 
@@ -2047,47 +1921,45 @@ async function load() {
 
     hideWizard();
 
-    // Fetch skill set and token impact in parallel
     let skillSet = null;
-    let tokenImpact = null;
 
     try {
-      [skillSet, tokenImpact] = await Promise.all([
-        requestJSON(
-          `/api/v1/skill-sets/latest?project_id=${encodeURIComponent(project.id)}`,
-        ).catch(() => null),
-        requestJSON(
-          `/api/v1/dashboard/token-impact?project_id=${encodeURIComponent(project.id)}`,
-        ).catch(() => null),
-      ]);
+      skillSet = await requestJSON(
+        `/api/v1/skill-sets/latest?project_id=${encodeURIComponent(project.id)}`,
+      ).catch(() => null);
     } catch (_) {}
 
     state.skillSetBundle = skillSet;
-    state.tokenImpact = tokenImpact;
 
     // Check if setup is still in progress
     const setupStage = deriveSetupStage(overview, skillSet);
+    const importActive = isActiveImportJob(overview?.active_import_job);
     if (setupStage !== "ready") {
       renderSetupProgress(overview, skillSet, setupStage);
       renderConnectionStatus(project, overview);
+      const syncBanner = $("syncNeededBanner");
+      if (syncBanner) syncBanner.hidden = true;
       setStatus("Setup in progress...");
     } else {
       hideSetupProgress();
       // Render all sections
       renderConnectionStatus(project, overview);
       renderAutoSkillsHero(skillSet, []);
-      renderTokenImpact(tokenImpact);
-      renderDeployFrequency(skillSet);
-      renderTopModifiedRules(skillSet);
       renderRecentActivity(skillSet);
       renderWorkspaceMembers();
       renderCLITokenCard(cliTokens);
       renderCLITokens(cliTokens);
       renderSidebar();
 
-      setStatus(
-        `Workspace loaded. ${overview.total_sessions || 0} sessions collected.`,
-      );
+      if (importActive) {
+        setStatus(
+          `Workspace loaded. ${overview.total_sessions || 0} sessions collected. Background backfill is still running.`,
+        );
+      } else {
+        setStatus(
+          `Workspace loaded. ${overview.total_sessions || 0} sessions collected.`,
+        );
+      }
     }
 
     // Auto-poll while import or research is active

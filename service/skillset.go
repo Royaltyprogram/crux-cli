@@ -809,7 +809,6 @@ func (s *AnalyticsService) ensureLatestSkillSetVersionLocked(project *Project, b
 }
 
 func evaluateSkillSetCandidate(previous *SkillSetVersion, currentFiles []SkillSetVersionFile, reports []*Report) skillSetCandidateEvaluation {
-	avgConfidence := averageSkillSetReportConfidence(reports)
 	changedFiles := compareSkillSetVersionFiles(nil, currentFiles)
 	addedCount := 0
 	removedCount := 0
@@ -821,13 +820,10 @@ func evaluateSkillSetCandidate(previous *SkillSetVersion, currentFiles []SkillSe
 		}
 	}
 	totalRuleChurn := addedCount + removedCount
-	score := skillSetShadowScore(avgConfidence, len(changedFiles), totalRuleChurn)
 	evaluation := skillSetCandidateEvaluation{
 		Decision: "shadow",
-		Reason:   fmt.Sprintf("Shadow evaluation passed with score %.2f and is waiting for the connected CLI to sync.", score),
+		Reason:   "Shadow evaluation passed and is waiting for the connected CLI to sync.",
 		ShadowEvaluation: &SkillSetShadowEvaluation{
-			Score:                round(score),
-			AverageConfidence:    round(avgConfidence),
 			ChangedDocumentCount: len(changedFiles),
 			AddedRuleCount:       addedCount,
 			RemovedRuleCount:     removedCount,
@@ -836,38 +832,6 @@ func evaluateSkillSetCandidate(previous *SkillSetVersion, currentFiles []SkillSe
 		},
 	}
 	return evaluation
-}
-
-func averageSkillSetReportConfidence(reports []*Report) float64 {
-	if len(reports) == 0 {
-		return 0
-	}
-	sum := 0.0
-	count := 0
-	for _, report := range reports {
-		if report == nil {
-			continue
-		}
-		sum += reportSkillConfidence(report)
-		count++
-	}
-	if count == 0 {
-		return 0
-	}
-	return sum / float64(count)
-}
-
-func skillSetShadowScore(avgConfidence float64, changedFiles, totalRuleChurn int) float64 {
-	score := avgConfidence
-	score -= minFloat64(0.20, float64(changedFiles)*0.04)
-	score -= minFloat64(0.20, float64(totalRuleChurn)*0.015)
-	if score < 0 {
-		return 0
-	}
-	if score > 1 {
-		return 1
-	}
-	return score
 }
 
 func (s *AnalyticsService) reconcileSkillSetVersionDecisionLocked(project *Project, previous, current *SkillSetClientState) bool {
@@ -1452,8 +1416,6 @@ func compileSkillCategories(reports []*Report) []compiledSkillCategory {
 		antiSeen       map[string]struct{}
 		evidenceSeen   map[string]struct{}
 		reportIDSeen   map[string]struct{}
-		confidenceSum  float64
-		confidenceHits int
 	}
 
 	accumulators := make(map[string]*categoryAccumulator, len(categoryOrder))
@@ -1504,8 +1466,6 @@ func compileSkillCategories(reports []*Report) []compiledSkillCategory {
 				acc.meta.ReportIDs = append(acc.meta.ReportIDs, report.ID)
 			}
 		}
-		acc.confidenceSum += reportSkillConfidence(report)
-		acc.confidenceHits++
 	}
 
 	compiled := make([]compiledSkillCategory, 0, len(categoryOrder))
@@ -1513,9 +1473,6 @@ func compileSkillCategories(reports []*Report) []compiledSkillCategory {
 		acc := accumulators[item.Category]
 		if acc == nil || (len(acc.meta.Rules) == 0 && len(acc.meta.AntiPatterns) == 0) {
 			continue
-		}
-		if acc.confidenceHits > 0 {
-			acc.meta.Confidence = acc.confidenceSum / float64(acc.confidenceHits)
 		}
 		sort.Strings(acc.meta.ReportIDs)
 		compiled = append(compiled, acc.meta)
@@ -1608,29 +1565,6 @@ func buildSkillEvidenceLines(report *Report) []string {
 	return lines
 }
 
-func reportSkillConfidence(report *Report) float64 {
-	if report == nil {
-		return 0
-	}
-	base := report.Score
-	if base <= 0 {
-		base = 0.7
-	}
-	switch strings.ToLower(strings.TrimSpace(report.Confidence)) {
-	case "high":
-		return maxFloat64(base, 0.9)
-	case "medium":
-		return maxFloat64(base, 0.75)
-	case "low":
-		return maxFloat64(base, 0.55)
-	default:
-		if base > 1 {
-			return 1
-		}
-		return base
-	}
-}
-
 func renderSkillEntryPoint(bundleName, version string, generatedAt time.Time, categories []compiledSkillCategory) string {
 	var builder strings.Builder
 	builder.WriteString("---\n")
@@ -1675,9 +1609,6 @@ func renderSkillOpenAIYAML() string {
 func renderSkillCategoryFile(category compiledSkillCategory) string {
 	var builder strings.Builder
 	builder.WriteString("# " + strings.TrimSpace(category.Title) + "\n\n")
-	if category.Confidence > 0 {
-		builder.WriteString(fmt.Sprintf("Confidence: `%.2f`\n\n", category.Confidence))
-	}
 	if len(category.Rules) > 0 {
 		builder.WriteString("## Rules\n\n")
 		for _, rule := range category.Rules {
@@ -1832,16 +1763,3 @@ func trimReportSlice(report *Report, getter func(*Report) []string) []string {
 	return out
 }
 
-func maxFloat64(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minFloat64(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}

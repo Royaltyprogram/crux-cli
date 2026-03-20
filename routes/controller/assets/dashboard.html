@@ -129,32 +129,23 @@
           <div class="lifecycle-stepper lifecycle-stepper--five" id="setupStepper"></div>
         </div>
 
+        <!-- Sync-needed banner (shown when CLI sync is required) -->
+        <div class="sync-needed-banner" id="syncNeededBanner" hidden>
+          <div class="sync-needed-icon">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z" stroke="currentColor" stroke-width="1.2"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </div>
+          <div class="sync-needed-body">
+            <div class="sync-needed-title">New skill bundle is ready — waiting for CLI sync</div>
+            <div class="sync-needed-desc">Run <code>autoskills skills sync</code> in your connected terminal to deploy the latest changes. Nothing will update until this command is run.</div>
+          </div>
+        </div>
+
         <!-- Dashboard Content (shown when connected) -->
         <div id="dashboardContent">
-        <!-- Row 1: Hero + Side Metrics -->
-        <div class="hero-grid">
-          <!-- AutoSkills Hero (left 2/3) -->
           <section class="hero-panel" id="autoSkillsHero">
             <div class="skill-report-banner" id="skillReportBanner"></div>
 
-            <div class="section">
-              <div class="section-header">
-                <div class="section-kicker">Latest update</div>
-                <div class="section-title">Why your skill set changed</div>
-                <div class="section-desc" id="skillChangeDesc">AutoSkills explains every automatic update to your personal skill bundle so you always know what changed and why.</div>
-              </div>
-              <div id="skillChangeReport"></div>
-            </div>
-
-            <div class="section">
-              <div class="section-header">
-                <div class="section-kicker">Generated bundle</div>
-                <div class="section-title">Current policy documents</div>
-                <div class="section-desc">The compiled skill files that make up your current personal policy layer.</div>
-              </div>
-              <div id="skillBundlePreview"></div>
-            </div>
-
+            <!-- CORE: Version history (git tracker) — always visible -->
             <div class="section">
               <div class="section-header">
                 <div class="section-kicker">Deployment timeline</div>
@@ -163,17 +154,35 @@
               </div>
               <div id="skillDeploymentTimeline"></div>
             </div>
+
+            <!-- Collapsible: Why your skill set changed -->
+            <details class="collapsible-section" open>
+              <summary class="collapsible-trigger">
+                <span class="collapsible-kicker">Latest update</span>
+                <span class="collapsible-title">Why your skill set changed</span>
+                <svg class="collapsible-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapsible-body">
+                <div class="section-desc" id="skillChangeDesc">AutoSkills explains every automatic update to your personal skill bundle so you always know what changed and why.</div>
+                <div id="skillChangeReport"></div>
+              </div>
+            </details>
+
+            <!-- Collapsible: Generated bundle -->
+            <details class="collapsible-section">
+              <summary class="collapsible-trigger">
+                <span class="collapsible-kicker">Generated bundle</span>
+                <span class="collapsible-title">Current policy documents</span>
+                <svg class="collapsible-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapsible-body">
+                <div class="section-desc">The compiled skill files that make up your current personal policy layer.</div>
+                <div id="skillBundlePreview"></div>
+              </div>
+            </details>
           </section>
 
-          <!-- Side Metrics (right 1/3) -->
-          <div class="side-metrics">
-            <div class="metric-card" id="tokenImpactCard"></div>
-            <div class="metric-card" id="deployFreqCard"></div>
-            <div class="metric-card" id="topRulesCard"></div>
-          </div>
-        </div>
-
-        <!-- Row 2: Bottom Cards -->
+        <!-- Bottom Cards -->
         <div class="bottom-grid">
           <div class="bottom-card" id="recentActivityCard"></div>
           <div class="bottom-card" id="workspaceMembersCard"></div>

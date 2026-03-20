@@ -60,7 +60,6 @@ func TestEnsureLatestSkillSetVersionLockedTracksHistoryAndDiff(t *testing.T) {
 	require.Equal(t, "passed", latest.ShadowEvaluation.Guardrail)
 	require.Equal(t, 1, latest.ShadowEvaluation.ChangedDocumentCount)
 	require.Equal(t, 0, latest.ShadowEvaluation.RuleChurn)
-	require.InDelta(t, 0.66, latest.ShadowEvaluation.Score, 0.01)
 	require.True(t, hasSkillSetFile(firstBundle.Files, "SKILL.md", func(content string) bool {
 		return strings.Contains(content, "---\nname: autoskills-personal-skillset\n") &&
 			strings.Contains(content, "description: Use as the default operating skill set for this user across coding sessions") &&
@@ -104,7 +103,6 @@ func TestEnsureLatestSkillSetVersionLockedTracksHistoryAndDiff(t *testing.T) {
 	require.Equal(t, 2, latest.ShadowEvaluation.AddedRuleCount)
 	require.Equal(t, 1, latest.ShadowEvaluation.RemovedRuleCount)
 	require.Equal(t, 3, latest.ShadowEvaluation.RuleChurn)
-	require.InDelta(t, 0.61, latest.ShadowEvaluation.Score, 0.02)
 
 	diff := buildSkillSetVersionDiffResp(previous, latest)
 	require.NotNil(t, diff)
@@ -184,7 +182,6 @@ func TestEnsureLatestSkillSetVersionLockedKeepsLowConfidenceCandidateInShadow(t 
 	require.NotNil(t, latest.ShadowEvaluation)
 	require.Equal(t, "passed", latest.ShadowEvaluation.Guardrail)
 	require.Equal(t, 1, latest.ShadowEvaluation.ChangedDocumentCount)
-	require.InDelta(t, 0.51, latest.ShadowEvaluation.Score, 0.01)
 }
 
 func TestGetLatestSkillSetBundleBackfillsWithoutCallingRefineAgent(t *testing.T) {

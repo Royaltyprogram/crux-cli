@@ -28,3 +28,4 @@ resources/bin
 node_modules/
 .claude/worktrees/
 .env
+.autoskills-localtest/

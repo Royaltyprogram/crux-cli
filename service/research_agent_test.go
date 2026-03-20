@@ -93,7 +93,7 @@ func TestCloudResearchAgentAnalyzeProjectUsesOpenAIResponses(t *testing.T) {
 	require.Contains(t, reports[0].ModelInterpretation, "re-orient on repo structure")
 	require.Contains(t, reports[0].Evidence, "repeated control-flow recap")
 	require.Contains(t, reports[0].RawSuggestion, "\"kind\": \"repo-orientation-defaults\"")
-	require.Equal(t, "high", reports[0].Confidence)
+	require.Equal(t, "", reports[0].Confidence)
 	require.Contains(t, reports[0].Frictions, "repeated control-flow recap")
 	require.Contains(t, reports[0].NextSteps, "start each task with the concrete files involved")
 	require.Contains(t, reports[0].Summary, "repo discovery")
@@ -246,7 +246,7 @@ func TestParseResearchReportsRejectsInvalidEntries(t *testing.T) {
 	require.Contains(t, reports[0].UserIntent, "stay narrow and verifiable")
 	require.Contains(t, reports[0].ModelInterpretation, "verification-first")
 	require.Equal(t, 1.0, reports[0].Score)
-	require.Equal(t, "medium", reports[0].Confidence)
+	require.Equal(t, "", reports[0].Confidence)
 	require.Contains(t, reports[0].RawSuggestion, "\"title\": \"Keep verification local\"")
 }
 
