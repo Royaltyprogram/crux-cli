@@ -54,6 +54,7 @@ func (r *AnalyticsRoute) RegisterRoute(router *echo.Group) {
 	api.GET("/audits", r.auditList)
 	api.GET("/dashboard/overview", r.dashboardOverview)
 	api.GET("/dashboard/project-insights", r.dashboardProjectInsights)
+	api.GET("/dashboard/token-impact", r.dashboardTokenImpact)
 }
 
 func (r *AnalyticsRoute) googleStart(c *echo.Context) error {
@@ -306,6 +307,14 @@ func (r *AnalyticsRoute) dashboardProjectInsights(c *echo.Context) error {
 		return err
 	}
 	return common.WrapResp(c)(r.AnalyticsService.DashboardProjectInsights(c.Request().Context(), &req))
+}
+
+func (r *AnalyticsRoute) dashboardTokenImpact(c *echo.Context) error {
+	var req request.DashboardTokenImpactReq
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	return common.WrapResp(c)(r.AnalyticsService.DashboardTokenImpact(c.Request().Context(), &req))
 }
 
 func buildSessionCookie(c *echo.Context, token string, expiresAt *time.Time) *http.Cookie {

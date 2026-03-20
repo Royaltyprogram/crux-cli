@@ -2571,6 +2571,73 @@ func (s *AnalyticsService) DashboardProjectInsights(ctx context.Context, req *re
 	}, nil
 }
 
+func (s *AnalyticsService) DashboardTokenImpact(ctx context.Context, req *request.DashboardTokenImpactReq) (*response.DashboardTokenImpactResp, error) {
+	s.AnalyticsStore.mu.RLock()
+	defer s.AnalyticsStore.mu.RUnlock()
+
+	project, err := s.resolveProjectLocked(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeProject(ctx, project); err != nil {
+		return nil, err
+	}
+
+	// Find the earliest successful deployment event.
+	var firstDeployedAt *time.Time
+	for _, evt := range s.AnalyticsStore.skillSetDeployments[req.ProjectID] {
+		if evt.EventType != "synced" && evt.EventType != "applied" {
+			continue
+		}
+		if firstDeployedAt == nil || evt.OccurredAt.Before(*firstDeployedAt) {
+			ts := evt.OccurredAt
+			firstDeployedAt = &ts
+		}
+	}
+
+	if firstDeployedAt == nil {
+		return &response.DashboardTokenImpactResp{
+			SchemaVersion: reportAPISchemaVersion,
+			ProjectID:     req.ProjectID,
+			HasDeployment: false,
+		}, nil
+	}
+
+	var (
+		beforeCount, afterCount       int
+		beforeTotalTokens, afterTotal int
+	)
+	for _, session := range s.AnalyticsStore.sessionSummaries[req.ProjectID] {
+		tokens := session.TokenIn + session.TokenOut
+		if session.Timestamp.Before(*firstDeployedAt) {
+			beforeCount++
+			beforeTotalTokens += tokens
+		} else {
+			afterCount++
+			afterTotal += tokens
+		}
+	}
+
+	beforeAvg := safeDiv(float64(beforeTotalTokens), float64(maxInt(beforeCount, 1)))
+	afterAvg := safeDiv(float64(afterTotal), float64(maxInt(afterCount, 1)))
+	changePct := 0.0
+	if beforeAvg > 0 {
+		changePct = ((afterAvg - beforeAvg) / beforeAvg) * 100
+	}
+
+	return &response.DashboardTokenImpactResp{
+		SchemaVersion:             reportAPISchemaVersion,
+		ProjectID:                 req.ProjectID,
+		HasDeployment:             true,
+		FirstDeployedAt:           firstDeployedAt,
+		BeforeSessionCount:        beforeCount,
+		BeforeAvgTokensPerSession: math.Round(beforeAvg),
+		AfterSessionCount:         afterCount,
+		AfterAvgTokensPerSession:  math.Round(afterAvg),
+		ChangePercent:             math.Round(changePct*10) / 10,
+	}, nil
+}
+
 func (s *AnalyticsService) ListProjects(ctx context.Context, req *request.ProjectListReq) (*response.ProjectListResp, error) {
 	s.AnalyticsStore.mu.RLock()
 	defer s.AnalyticsStore.mu.RUnlock()
@@ -2592,6 +2659,7 @@ func (s *AnalyticsService) ListProjects(ctx context.Context, req *request.Projec
 			DefaultTool:    workspace.DefaultTool,
 			LastProfileID:  workspace.LastProfileID,
 			LastIngestedAt: workspace.LastIngestedAt,
+			ConnectedAt:    workspace.ConnectedAt,
 			LanguageMix:    cloneFloatMap(workspace.LanguageMix),
 		})
 	}
